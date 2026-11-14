@@ -70,7 +70,7 @@ jobs:
           $setup = "dist/WuwatappoNative-$version-Setup.exe"
           $portable = "dist/WuwatappoNative-$version-portable.zip"
           $notes = Join-Path $env:RUNNER_TEMP "beta-notes.md"
-          $prev = git describe --tags --abbrev=0 "HEAD^" 2>$null
+          $prev = git describe --tags --abbrev=0 --exclude '*-beta*' HEAD 2>$null
           $range = if ($prev) { "$prev..HEAD" } else { "HEAD" }
           $commits = @(git log --no-merges --pretty=format:'- %s (%h)' $range) -join "`n"
           if (-not $commits) { $commits = '- 本次构建' }
@@ -82,7 +82,7 @@ jobs:
           - 反馈请附上测试版本号、复现步骤和相关日志；不要上传 token、账号凭据或含凭据的截图。
           - 正式版请从 Releases 中的非 Pre-release 版本下载。
 
-          ### 本次提交
+          ### 自上次正式版以来的提交
 
           $commits
           "@

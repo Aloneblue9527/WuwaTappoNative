@@ -441,22 +441,26 @@ internal static class Program
         var coolCfg = new Settings { ThemeAccentColor = "#3366CC", ThemeFontColor = "#8E5E43" };
         var warm = KeyboardTheme.Resolve(warmCfg);
         var cool = KeyboardTheme.Resolve(coolCfg);
+        AssertKeyToolbarContrast(warm, "Warm");
+        AssertKeyToolbarContrast(cool, "Cool");
         AssertPadPressedContrast(warm, "Warm");
         AssertPadPressedContrast(cool, "Cool");
 
         // 浅色主题/低饱和主题：active 不再能直接当按下态，派生色必须仍与本体、扳机槽、摇杆槽有 3:1。
         var paleCfg = new Settings { ThemeAccentColor = "#F4EBDD", ThemeFontColor = "#8E5E43" };
         var pale = KeyboardTheme.Resolve(paleCfg);
+        AssertKeyToolbarContrast(pale, "Pale standard");
         AssertPadPressedContrast(pale, "Pale standard");
         Assert(HueDistance(pale.PadPressed, pale.Active) <= 10,
             $"Pale standard pressed state must keep the theme hue, got {pale.PadPressed.GetHue():F1} vs {pale.Active.GetHue():F1}.");
         Assert(pale.PadPressed != pale.Active,
             "Pale standard PadPressed must be derived instead of reusing the too-light active color.");
-        Assert(pale.KeyPressed == pale.Active && pale.ToolbarActive == pale.Active,
-            "Keyboard and toolbar pressed states must not be altered by the gamepad pressed-state fix.");
+        Assert(pale.KeyPressed != pale.Active && pale.ToolbarActive != pale.Active,
+            "Pale standard key/toolbar pressed states must be derived instead of reusing the too-light active color.");
 
         var lowSatCfg = new Settings { ThemeAccentColor = "#B8B8B8", ThemeFontColor = "#8E5E43" };
         var lowSat = KeyboardTheme.Resolve(lowSatCfg);
+        AssertKeyToolbarContrast(lowSat, "Low-saturation standard");
         AssertPadPressedContrast(lowSat, "Low-saturation standard");
 
         var paleIndependentCfg = new Settings
@@ -469,6 +473,7 @@ internal static class Program
             ThemeBarTextColor = "#3F3A34",
         };
         var paleIndependent = KeyboardTheme.Resolve(paleIndependentCfg);
+        AssertKeyToolbarContrast(paleIndependent, "Pale independent");
         AssertPadPressedContrast(paleIndependent, "Pale independent");
 
         var darkIndependentCfg = new Settings
@@ -481,6 +486,7 @@ internal static class Program
             ThemeBarTextColor = "#F0F4F8",
         };
         var darkIndependent = KeyboardTheme.Resolve(darkIndependentCfg);
+        AssertKeyToolbarContrast(darkIndependent, "Dark independent");
         AssertPadPressedContrast(darkIndependent, "Dark independent");
         Assert(darkIndependent.PadPressed.GetBrightness() > darkIndependent.PadBody.GetBrightness(),
             "Dark independent palette must lighten the pressed state instead of blending into the body.");
@@ -524,6 +530,7 @@ internal static class Program
                             "\"border\":\"#8899AA\"}",
         };
         var dark = KeyboardTheme.Resolve(darkCfg);
+        AssertKeyToolbarContrast(dark, "Dark advanced");
         AssertPadPressedContrast(dark, "Dark advanced");
         Assert(KeyboardTheme.ContrastRatio(dark.KeyText, dark.KeyTop) >= 3.0 &&
                KeyboardTheme.ContrastRatio(dark.KeyTextPressed, dark.KeyPressed) >= 3.0 &&
@@ -541,6 +548,7 @@ internal static class Program
                             "\"active\":\"#C0D0E0\",\"border\":\"#405060\"}",
         };
         var advanced = KeyboardTheme.Resolve(advancedCfg);
+        AssertKeyToolbarContrast(advanced, "Advanced palette");
         AssertPadPressedContrast(advanced, "Advanced palette");
         Assert(advanced.Cream == ColorTranslator.FromHtml("#101820"), "Advanced cream override was ignored.");
         Assert(advanced.Cream2 == ColorTranslator.FromHtml("#202830"), "Advanced cream2 override was ignored.");
@@ -572,6 +580,7 @@ internal static class Program
             ThemeBarTextColor = "#DDEEFF",
         };
         var independent = KeyboardTheme.Resolve(customBarCfg);
+        AssertKeyToolbarContrast(independent, "Independent custom bar");
         Assert(independent.Bar == ColorTranslator.FromHtml("#3366CC") &&
                independent.Accent == ColorTranslator.FromHtml("#3366CC"),
             "All keyboard window modes must use the independent bottom-bar accent exactly.");
@@ -597,6 +606,7 @@ internal static class Program
             ThemeBarTextColor = "#DDEEFF",
         };
         var followTextPalette = KeyboardTheme.Resolve(followTextCfg);
+        AssertKeyToolbarContrast(followTextPalette, "Independent theme-text bar");
         Assert(followTextPalette.Ink == warm.Ink,
             "All modes must follow the theme font when ThemeBarTextFollowTheme is enabled.");
         Assert(KeyboardTheme.ContrastRatio(followTextPalette.PadText, followTextPalette.PadBody) >= 3.0 &&
@@ -800,6 +810,37 @@ internal static class Program
             $"Controller A button pressed state must be visible, got {warmFacePixel} and {pressedFacePixel}.");
         SetField(window, "_padButtons", (ushort)0);
 
+        // 独立浅色底栏：Letters / Wuwa / Rhythm 的按下键帽和工具栏选中态必须实际画出派生按下色。
+        window.ApplyTheme(paleIndependentCfg);
+        foreach (var (mode, key, height, rect) in new[]
+        {
+            (KeyboardWindow.Mode.Letters, "Q", 145, new Rectangle(12, 34, 14, 19)),
+            (KeyboardWindow.Mode.Wuwa, "Q", 140, new Rectangle(10, 69, 33, 30)),
+            (KeyboardWindow.Mode.Rhythm, "D", 110, new Rectangle(10, 36, 42, 42)),
+        })
+        {
+            SetField(window, "_mode", mode);
+            Invoke(window, "BuildLayout", mode);
+            down.Clear();
+            down.Add(key);
+            using var pressed = RenderKeyboard(window, height);
+            var expected = paleIndependent.KeyPressedFor(paleIndependent.KeyTop);
+            Assert(RegionContainsColor(pressed, rect, expected),
+                $"{mode} pressed key must use readable KeyPressedFor color ({expected}).");
+            Assert(KeyboardTheme.ContrastRatio(expected, paleIndependent.KeyTop) >= 3.0,
+                $"{mode} pressed key contrast is {KeyboardTheme.ContrastRatio(expected, paleIndependent.KeyTop):F2}, expected >= 3.0.");
+        }
+        down.Clear();
+        SetField(window, "_mode", KeyboardWindow.Mode.Letters);
+        Invoke(window, "BuildLayout", KeyboardWindow.Mode.Letters);
+        using (var toolbar = RenderKeyboard(window, 145))
+        {
+            Assert(RegionContainsColor(toolbar, new Rectangle(2, 2, 44, 18), paleIndependent.ToolbarActive),
+                "Toolbar selected background must use the derived ToolbarActive color.");
+            Assert(KeyboardTheme.ContrastRatio(paleIndependent.ToolbarActive, paleIndependent.ToolbarBackground) >= 3.0,
+                "Toolbar selected state must contrast with the toolbar background.");
+        }
+
         Console.WriteLine("PASS: all modes (letters/wuwa/rhythm/controller) use independent bottom-bar colors; follow-standard falls back to panel palette.");
         Console.WriteLine("PASS: preview/restore and real DrawTo pixels verified for letters/rhythm/wuwa/controller.");
     }
@@ -879,6 +920,28 @@ internal static class Program
     {
         double delta = Math.Abs(a.GetHue() - b.GetHue());
         return Math.Min(delta, 360 - delta);
+    }
+
+    static void AssertKeyToolbarContrast(KeyboardTheme theme, string label)
+    {
+        Assert(KeyboardTheme.ContrastRatio(theme.KeyPressed, theme.KeyTop) >= 3.0,
+            $"{label}: KeyPressed vs KeyTop contrast is {KeyboardTheme.ContrastRatio(theme.KeyPressed, theme.KeyTop):F2}, expected >= 3.0.");
+        var pressedKey = theme.KeyPressedFor(theme.KeyTop);
+        Assert(KeyboardTheme.ContrastRatio(pressedKey, theme.KeyTop) >= 3.0,
+            $"{label}: KeyPressedFor(KeyTop) contrast is {KeyboardTheme.ContrastRatio(pressedKey, theme.KeyTop):F2}, expected >= 3.0.");
+        Assert(KeyboardTheme.ContrastRatio(theme.KeyTextPressedFor(pressedKey), pressedKey) >= 3.0,
+            $"{label}: pressed key text must remain readable on the pressed keycap.");
+        Assert(KeyboardTheme.ContrastRatio(theme.ToolbarActive, theme.ToolbarBackground) >= 3.0,
+            $"{label}: ToolbarActive vs ToolbarBackground contrast is {KeyboardTheme.ContrastRatio(theme.ToolbarActive, theme.ToolbarBackground):F2}, expected >= 3.0.");
+        Assert(KeyboardTheme.ContrastRatio(theme.ToolbarTextFor(theme.ToolbarActive), theme.ToolbarActive) >= 3.0 &&
+               KeyboardTheme.ContrastRatio(theme.ToolbarTextFor(theme.ToolbarBackground), theme.ToolbarBackground) >= 3.0,
+            $"{label}: toolbar text must remain readable on normal and selected backgrounds.");
+        foreach (var (name, plate) in new[] { ("plate top", theme.PlateTop), ("plate bottom", theme.PlateBottom) })
+        {
+            var pressed = theme.KeyPressedFor(plate);
+            Assert(KeyboardTheme.ContrastRatio(pressed, plate) >= 3.0,
+                $"{label}: KeyPressedFor({name}) contrast is {KeyboardTheme.ContrastRatio(pressed, plate):F2}, expected >= 3.0.");
+        }
     }
 
     static void AssertPadPressedContrast(KeyboardTheme theme, string label)

@@ -86,6 +86,15 @@ public sealed class KeyboardTheme
     /// <summary>ABXY 按下后底色会变化，标签文字按实际底色重新校正。</summary>
     public Color PadFaceTextFor(Color background) => EnsureReadable(PadFaceText, 3.0, background);
 
+    /// <summary>键帽按下态按实际未按下键帽底色校正，普通/鸣潮/音游模式共用。</summary>
+    public Color KeyPressedFor(Color background) => EnsureContrast(KeyPressed, 3.0, background);
+
+    /// <summary>键帽按下态文字按实际按下底色校正。</summary>
+    public Color KeyTextPressedFor(Color background) => EnsureReadable(KeyTextPressed, 3.2, background);
+
+    /// <summary>工具栏文字按当前按钮底色校正，普通态和选中态分别取色。</summary>
+    public Color ToolbarTextFor(Color background) => EnsureReadable(ToolbarText, 3.0, background);
+
     /// <summary>
     /// 所有键盘窗口模式共用的入口：底栏跟随标准时使用面板主题；
     /// 关闭跟随时统一使用实际生效的独立底栏背景/文字色推导。
@@ -141,6 +150,11 @@ public sealed class KeyboardTheme
         var padPressed = EnsureContrast(active, 3.0, padBody);
         var padPressedTrigger = EnsureContrast(padPressed, 3.0, padTriggerTrack);
         var padText = EnsureReadable(inkStrong, 3.0, padBody, padTriggerTrack);
+        // 键帽按下态与工具栏选中态也单独校正；浅色 active 在浅色独立底栏下会几乎看不见。
+        var keyPressed = EnsureContrast(active, 3.0, keyTop);
+        var toolbarActive = EnsureContrast(active, 3.0, toolbarBackground);
+        var keyTextPressed = EnsureReadable(inkStrong, 3.2, keyPressed);
+        var toolbarText = EnsureContrast(inkStrong, 3.0, toolbarBackground, toolbarActive);
 
         return new KeyboardTheme
         {
@@ -159,9 +173,9 @@ public sealed class KeyboardTheme
             AccentSoft = accentSoft,
 
             ToolbarBackground = toolbarBackground,
-            ToolbarActive = active,
+            ToolbarActive = toolbarActive,
             ToolbarBorder = border,
-            ToolbarText = EnsureReadable(inkStrong, 3.0, toolbarBackground, active),
+            ToolbarText = toolbarText,
 
             PlateTop = plateTop,
             PlateBottom = plateBottom,
@@ -173,10 +187,10 @@ public sealed class KeyboardTheme
 
             KeyTop = keyTop,
             KeyShadow = keyShadow,
-            KeyPressed = active,
+            KeyPressed = keyPressed,
             KeyGlow = accentSoft,
             KeyText = EnsureReadable(ink, 3.2, keyTop),
-            KeyTextPressed = EnsureReadable(inkStrong, 3.2, active),
+            KeyTextPressed = keyTextPressed,
             LaneNumber = WithAlpha(EnsureReadable(inkDim, 3.0, plateTop, plateBottom), 220),
 
             PadBody = padBody,
@@ -212,12 +226,14 @@ public sealed class KeyboardTheme
         Color glow = lightText ? Blend(bar, Color.White, 0.40f) : Blend(bar, Color.White, 0.55f);
         Color triggerFill = lightText ? Blend(bar, Color.White, 0.35f) : Blend(bar, Color.Black, 0.05f);
 
-        var toolbarText = EnsureReadable(text, 3.0, bodyAlt, active);
         var keyText = EnsureReadable(text, 3.2, body);
-        var keyTextPressed = EnsureReadable(text, 3.2, active);
         var inkDim = Blend(text, body, 0.45f);
         var laneNumber = WithAlpha(EnsureReadable(inkDim, 3.0, body), 220);
         var padPressed = EnsureContrast(active, 3.0, body, bodyAlt);
+        var keyPressed = EnsureContrast(active, 3.0, body);
+        var toolbarActive = EnsureContrast(active, 3.0, bodyAlt);
+        var keyTextPressed = EnsureReadable(text, 3.2, keyPressed);
+        var toolbarText = EnsureContrast(text, 3.0, bodyAlt, toolbarActive);
 
         return new KeyboardTheme
         {
@@ -237,7 +253,7 @@ public sealed class KeyboardTheme
             AccentSoft = glow,
 
             ToolbarBackground = bodyAlt,
-            ToolbarActive = active,
+            ToolbarActive = toolbarActive,
             ToolbarBorder = outline,
             ToolbarText = toolbarText,
 
@@ -251,7 +267,7 @@ public sealed class KeyboardTheme
 
             KeyTop = body,
             KeyShadow = shadow,
-            KeyPressed = active,
+            KeyPressed = keyPressed,
             KeyGlow = glow,
             KeyText = keyText,
             KeyTextPressed = keyTextPressed,
@@ -335,27 +351,32 @@ public sealed class KeyboardTheme
         double Worst(Color candidate) => backgrounds.Min(b => ContrastRatio(candidate, b));
         if (Worst(color) >= minRatio) return color;
 
-        double towardBlack = Worst(Color.Black);
-        double towardWhite = Worst(Color.White);
-        bool darken = towardBlack >= towardWhite;
-        Color target = darken ? Color.Black : Color.White;
-        if (Math.Max(towardBlack, towardWhite) < minRatio) return target;
+        // 同时尝试变深和变浅：多背景时纯黑/纯白都可能不达标，但中间的灰阶/同色相过渡可能同时满足。
+        static Color Find(Color from, Color target, double minRatio, Func<Color, double> worst, out double amount)
+        {
+            amount = 0;
+            for (int step = 1; step <= 100; step++)
+            {
+                double t = step / 100.0;
+                var candidate = PetWindow.BlendColor(from, target, (float)t);
+                if (worst(candidate) >= minRatio)
+                {
+                    amount = t;
+                    return candidate;
+                }
+            }
+            return Color.Empty;
+        }
 
-        double low = 0, high = 1;
-        for (int i = 0; i < 24; i++)
-        {
-            double mid = (low + high) / 2;
-            var candidate = PetWindow.BlendColor(color, target, (float)mid);
-            if (Worst(candidate) >= minRatio) high = mid;
-            else low = mid;
-        }
-        var result = PetWindow.BlendColor(color, target, (float)high);
-        for (int i = 0; i < 4 && Worst(result) < minRatio; i++)
-        {
-            high = Math.Min(1, high + 0.02);
-            result = PetWindow.BlendColor(color, target, (float)high);
-        }
-        return Worst(result) >= minRatio ? result : target;
+        var darker = Find(color, Color.Black, minRatio, Worst, out double darkAmount);
+        var lighter = Find(color, Color.White, minRatio, Worst, out double lightAmount);
+        if (!darker.IsEmpty && !lighter.IsEmpty)
+            return darkAmount <= lightAmount ? darker : lighter;
+        if (!darker.IsEmpty) return darker;
+        if (!lighter.IsEmpty) return lighter;
+
+        // 极端情况下没有单一颜色能满足全部背景，返回综合最接近的黑/白端点。
+        return Worst(Color.Black) >= Worst(Color.White) ? Color.Black : Color.White;
     }
 
     static (double H, double S, double L) ToHsl(Color color)

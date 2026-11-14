@@ -640,7 +640,6 @@ public sealed class KeyboardWindow : Form
     void DrawToolbar(Graphics g, float s, KeyboardTheme theme)
     {
         using var font = new Font("Microsoft YaHei UI", 10f * s, FontStyle.Bold, GraphicsUnit.Pixel);
-        using var text = new SolidBrush(theme.ToolbarText);
         foreach (var pair in _buttons)
         {
             var r = new RectangleF(pair.Value.X * s, pair.Value.Y * s, pair.Value.Width * s, pair.Value.Height * s);
@@ -655,6 +654,7 @@ public sealed class KeyboardWindow : Form
                 g.FillPath(brush, path);
                 g.DrawPath(pen, path);
             }
+            using var text = new SolidBrush(theme.ToolbarTextFor(active ? theme.ToolbarActive : theme.ToolbarBackground));
             using var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
             g.DrawString(pair.Key, font, text, r, fmt);
         }
@@ -693,8 +693,9 @@ public sealed class KeyboardWindow : Form
         using (var path = PetComposer.Rounded(shadow, radius))
         using (var brush = new SolidBrush(theme.KeyShadow))
             g.FillPath(brush, path);
+        var keyFace = down ? theme.KeyPressedFor(theme.KeyTop) : theme.KeyTop;
         using (var path = PetComposer.Rounded(r, radius))
-        using (var brush = new SolidBrush(down ? theme.KeyPressed : theme.KeyTop))
+        using (var brush = new SolidBrush(keyFace))
             g.FillPath(brush, path);
         if (down)
         {
@@ -708,7 +709,7 @@ public sealed class KeyboardWindow : Form
             : wuwa ? 14f : (key.StartsWith("MOUSE") || key == "SPACE") ? 9f : 9f;
         fs *= s;
         using var font = new Font("Microsoft YaHei UI", fs, FontStyle.Bold, GraphicsUnit.Pixel);
-        using var text = new SolidBrush(down ? theme.KeyTextPressed : theme.KeyText);
+        using var text = new SolidBrush(down ? theme.KeyTextPressedFor(keyFace) : theme.KeyText);
         using var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
         if (rhythm && key == RhythmKeys.Space)
         {
