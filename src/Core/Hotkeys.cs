@@ -33,6 +33,7 @@ public static class Hotkeys
         ("capture", "OBS 采集窗口", ""),
         ("mainPanel", "打开主面板", ""),
         ("catLayout", "切换横纵排列", ""),
+        ("hideOtherPets", "开关隐藏其他成员桌宠", ""),
         ("keyBubbles", "开关按键气泡", ""),
         ("rhythmMode", "开关音游模式", ""),
         ("autoEmote", "开关自动表情", ""),

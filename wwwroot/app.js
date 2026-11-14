@@ -3763,6 +3763,7 @@
     const selfIsOwner = !!room.selfIsOwner || !!(room.members || []).find(m => m.self)?.owner;
     const serviceDown = !!room.serviceUnavailable;
     const auth = state.boot?.auth || {};
+    const hideOthersHotkey = String(state.boot?.settings?.hotkeys?.hideOtherPets || '').trim();
     const emotes = state.boot?.appearance?.emoteAssetIds || [];
     const blocked = onlineBlockedReason();
     const errorText = room.lastError || state.roomError?.message || '';
@@ -3809,7 +3810,7 @@
           </div>
           <div class="panel-box">
             <div class="setting-item" style="margin-bottom:0;padding:6px 4px;background:transparent">
-              <div><div class="setting-title">隐藏其他成员桌宠</div><div class="setting-sub">只影响本机显示</div></div>
+              <div><div class="setting-title">隐藏其他成员桌宠</div><div class="setting-sub">只影响本机显示<br><span class="hide-others-hotkey-note">${hideOthersHotkey ? `使用 ${esc(hideOthersHotkey)} 开关` : '当前未设置快捷键'}</span></div></div>
               <div class="switch ${state.boot?.settings?.hideOtherPets ? 'on' : ''}" id="hideOthers"></div>
             </div>
           </div>
@@ -4826,6 +4827,7 @@
     const remoteCustomOpacityPct = Math.max(20, Math.min(100, Math.round((Number(s.remoteOpacity) || 1) * 100)));
     const remoteOpacityPct = remoteFollowMainOpacity ? opacityPct : remoteCustomOpacityPct;
     const remoteNameScalePct = Math.max(50, Math.min(200, Math.round((Number(s.remoteNameScale) || 1) * 100)));
+    const hideOthersHotkey = String(s.hotkeys?.hideOtherPets || '').trim();
     const accX = Number(acc.accessoryOffsetX || 0);
     const accY = Number(acc.accessoryOffsetY || 0);
     const accScale = normalizeAccessoryScale(acc.accessoryScalePercent);
@@ -5342,7 +5344,7 @@
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">隐藏其他成员桌宠</div><div class="setting-sub">本机显示设置，不影响他人</div></div>
+            <div><div class="setting-title">隐藏其他成员桌宠</div><div class="setting-sub">本机显示设置，不影响他人<br><span class="hide-others-hotkey-note">${hideOthersHotkey ? `使用 ${esc(hideOthersHotkey)} 开关` : '当前未设置快捷键'}</span></div></div>
             <div class="switch ${s.hideOtherPets ? 'on' : ''}" data-switch="hideOtherPets"></div>
           </div>
           <div class="setting-item">
@@ -5551,6 +5553,7 @@
     { id: 'capture', label: 'OBS 采集窗口', def: '' },
     { id: 'mainPanel', label: '打开主面板', def: '' },
     { id: 'catLayout', label: '切换横纵排列', def: '' },
+    { id: 'hideOtherPets', label: '开关隐藏其他成员桌宠', def: '' },
     { id: 'keyBubbles', label: '开关按键气泡', def: '' },
     { id: 'rhythmMode', label: '开关音游模式', def: '' },
     { id: 'autoEmote', label: '开关自动表情', def: '' },
@@ -5592,6 +5595,11 @@
       }
       return table;
     };
+    const refreshHideOthersHotkeyNote = () => {
+      const key = String(state.boot?.settings?.hotkeys?.hideOtherPets || '').trim();
+      const text = key ? `使用 ${key} 开关` : '当前未设置快捷键';
+      document.querySelectorAll('.hide-others-hotkey-note').forEach(el => { el.textContent = text; });
+    };
     const save = async () => {
       clearTimeout(saveTimer);
       if (!savePending || saveBusy) return;
@@ -5604,6 +5612,7 @@
           return toast(r.error || '快捷键保存失败', 'err');
         }
         await syncBoot();
+        refreshHideOthersHotkeyNote();
         toast('快捷键已自动保存');
       } catch {
         savePending = false;

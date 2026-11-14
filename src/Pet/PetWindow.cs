@@ -1690,6 +1690,14 @@ public sealed class PetWindow : Form
         {
             ToggleCatLayout(true);
         }
+        else if (action == "hideOtherPets")
+        {
+            _cfg.HideOtherPets = !_cfg.HideOtherPets;
+            Save();
+            RefreshMembers();
+            NotifyHotkey(_cfg.HideOtherPets ? "已隐藏其他成员桌宠" : "已显示其他成员桌宠");
+            NotifySettingsChanged();
+        }
         else if (action == "keyBubbles")
         {
             _cfg.KeyBubbles = !_cfg.KeyBubbles;
