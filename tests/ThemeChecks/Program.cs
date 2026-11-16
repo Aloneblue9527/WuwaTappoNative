@@ -31,6 +31,8 @@ internal static class Program
             CheckBottomBarColors();
             CheckBarIconContrast();
             CheckBarVisibilityAndHotkeys();
+            CheckLoggedOutStrip();
+            CheckKeyboardMenuModes();
             CheckKeyboardTheme();
             CheckAccessoryTransform();
             CheckCompressionAndCache();
@@ -40,6 +42,11 @@ internal static class Program
             CheckPresetReorderAndLastDelete();
             CheckOfficialBaseline();
             CheckCompatibilityGate();
+            CheckUpdateVersionOrdering();
+            CheckAuthStateBasics();
+            CheckBusinessErrorMessages();
+            CheckAuthPauseDoesNotLeaveRoom();
+            CheckPetZOrderGuard();
             CheckCatOrderScreenSelection();
             if (args.Length > 0 && File.Exists(args[0])) CheckExternalPresetFile(args[0]);
 
@@ -433,6 +440,81 @@ internal static class Program
             "Remote pill must return after SetBarVisible(true); stale _baseFrameKey cache suspected.");
 
         Console.WriteLine("PASS: bar visibility defaults, pixels, frame-cache invalidation, persistence and single/separate hotkey filtering.");
+    }
+
+    /// <summary>
+    /// 桌面键盘右键菜单里鸣潮专属和音游模式必须常驻，点击直接切换 RhythmMode。
+    /// </summary>
+    static void CheckKeyboardMenuModes()
+    {
+        string pet = ReadRepoSource("src", "Pet", "PetWindow.cs");
+        Assert(pet.Contains("(\"wuwa\", \"鸣潮专属\"), (\"rhythm\", \"音游模式\")", StringComparison.Ordinal),
+            "Desktop keyboard context menu must keep both 鸣潮专属 and 音游模式 entries.");
+        Assert(!pet.Contains("subItem.Visible = !_cfg.RhythmMode", StringComparison.Ordinal) &&
+               !pet.Contains("subItem.Visible = _cfg.RhythmMode", StringComparison.Ordinal),
+            "Desktop keyboard menu must not hide 鸣潮专属/音游模式 based on RhythmMode.");
+        Assert(pet.Contains("if (k == \"wuwa\") _cfg.RhythmMode = false;", StringComparison.Ordinal) &&
+               pet.Contains("else if (k == \"rhythm\") _cfg.RhythmMode = true;", StringComparison.Ordinal),
+            "Selecting 鸣潮专属/音游模式 from the menu must update RhythmMode as well as KeyboardMode.");
+        Console.WriteLine("PASS: desktop keyboard menu keeps both 鸣潮专属 and 音游模式 entries.");
+    }
+
+    /// <summary>
+    /// 登录态异常时计数条必须显示“未登录”而不是点击数；FrameCache 也要把该状态计入 key。
+    /// </summary>
+    static void CheckLoggedOutStrip()
+    {
+        using var head = ArtTop(Color.FromArgb(255, 70, 130, 240));
+        using var body = ArtTop(Color.FromArgb(255, 200, 70, 50));
+        var frames = new PetFrames { Head1 = head, Head2 = head, Body1 = body, Body2 = body, Body3 = body };
+        var normal = new PetComposer.Info
+        {
+            Clicks = 42,
+            BarColor = Color.White,
+            BarTextColor = Color.Black,
+            ShowLoggedOut = false,
+        };
+        var loggedOut = new PetComposer.Info
+        {
+            Clicks = 42,
+            BarColor = Color.White,
+            BarTextColor = Color.Black,
+            ShowLoggedOut = true,
+            LoggedOutColor = Color.FromArgb(200, 30, 30),
+        };
+        using var normalBmp = new Bitmap(PetComposer.WindowW, PetComposer.WindowH, PixelFormat.Format32bppPArgb);
+        using var loggedOutBmp = new Bitmap(PetComposer.WindowW, PetComposer.WindowH, PixelFormat.Format32bppPArgb);
+        PetComposer.ComposeInto(normalBmp, frames, 1, 1, normal);
+        PetComposer.ComposeInto(loggedOutBmp, frames, 1, 1, loggedOut);
+        var textRect = new Rectangle(PetComposer.CounterX + 18, PetComposer.InfoY,
+            PetComposer.CounterW - 18, PetComposer.CounterH);
+        Assert(CountDifferentPixels(normalBmp, loggedOutBmp, textRect) > 30,
+            "Logged-out strip must visibly replace the click count with the 未登录 label.");
+
+        using var cache = new PetComposer.FrameCache();
+        using var cachedNormal = new Bitmap(PetComposer.WindowW, PetComposer.WindowH, PixelFormat.Format32bppPArgb);
+        using var cachedLoggedOut = new Bitmap(PetComposer.WindowW, PetComposer.WindowH, PixelFormat.Format32bppPArgb);
+        PetComposer.ComposeInto(cachedNormal, frames, 1, 1, normal, cache);
+        PetComposer.ComposeInto(cachedLoggedOut, frames, 1, 1, loggedOut, cache);
+        Assert(CountDifferentPixels(cachedNormal, cachedLoggedOut, textRect) > 30,
+            "FrameCache must invalidate the strip when ShowLoggedOut changes.");
+        Console.WriteLine("PASS: logged-out pet strip replaces the count and invalidates the frame cache.");
+    }
+
+    static int CountDifferentPixels(Bitmap left, Bitmap right, Rectangle area)
+    {
+        int count = 0;
+        for (int y = Math.Max(0, area.Top); y < Math.Min(left.Height, area.Bottom); y++)
+        {
+            for (int x = Math.Max(0, area.Left); x < Math.Min(left.Width, area.Right); x++)
+            {
+                Color a = left.GetPixel(x, y);
+                Color b = right.GetPixel(x, y);
+                if (a.A != b.A || Math.Abs(a.R - b.R) + Math.Abs(a.G - b.G) + Math.Abs(a.B - b.B) > 24)
+                    count++;
+            }
+        }
+        return count;
     }
 
     static void CheckKeyboardTheme()
@@ -1541,6 +1623,171 @@ internal static class Program
         ConfigStore.Save(new Settings { ForcedOnlineAcceptedVersion = " 1.0.5 " });
         Assert(ConfigStore.Load().ForcedOnlineAcceptedVersion == "1.0.5",
             "Forced-online acceptance version must trim and persist across config reload.");
+    }
+
+    /// <summary>
+    /// 测试版更新通道：同一主版本正式版高于测试版；测试版之间按 beta 序号比较；
+    /// 带 build metadata 的 InformationalVersion 也必须正确解析。
+    /// </summary>
+    static void CheckUpdateVersionOrdering()
+    {
+        Assert(UpdateVersion.TryParse("0.3.1-beta.8+1537560abc", out var beta8),
+            "InformationalVersion beta must parse.");
+        Assert(beta8.IsBeta && beta8.Text == "0.3.1-beta.8",
+            "Parsed beta text must preserve the beta ordinal.");
+        Assert(UpdateVersion.TryParse("0.3.1-beta.9", out var beta9) && beta9.CompareTo(beta8) > 0,
+            "Next beta must be newer than the current beta.");
+        Assert(UpdateVersion.TryParse("0.3.1", out var stable31) && stable31.CompareTo(beta8) > 0,
+            "Stable release must be newer than a beta with the same base version.");
+        Assert(UpdateVersion.TryParse("0.3.2-beta.1", out var nextBeta) && nextBeta.CompareTo(stable31) > 0,
+            "A beta of the next base version must be newer than the previous stable.");
+        Assert(UpdateVersion.TryParse("0.3.0", out var stable30) && stable30.CompareTo(beta8) < 0,
+            "Older stable must not supersede a current beta.");
+        Console.WriteLine("PASS: beta/stable update version ordering.");
+    }
+
+    /// <summary>
+    /// 登录态基础契约：没有 token 是未登录；有 token 但尚未确认时不能放行账号请求；
+    /// ApiClient 门禁必须在落网之前拒绝，避免运行中 401 继续刷账号接口。
+    /// </summary>
+    static void CheckAuthStateBasics()
+    {
+        var loggedOut = new AuthService(new Settings { Token = "" });
+        try
+        {
+            Assert(!loggedOut.HasToken && !loggedOut.IsLoggedIn && !loggedOut.CanUseOnline,
+                "Empty token must start logged out and offline.");
+            Assert(loggedOut.State == AuthState.LoggedOut && loggedOut.ShowLoggedOutOnPet,
+                "Empty token must show the unified 未登录 state on the pet.");
+        }
+        finally { loggedOut.Api.Dispose(); }
+
+        var checking = new AuthService(new Settings { Token = "dummy-token" });
+        try
+        {
+            Assert(checking.HasToken && checking.IsLoggedIn && !checking.CanUseOnline,
+                "A stored token starts in checking state and must not allow account requests yet.");
+            Assert(checking.State == AuthState.Checking && !checking.ShowLoggedOutOnPet,
+                "Checking state must not flash the pet into 未登录.");
+            bool gateBlocked = false;
+            try { checking.Api.GetAsync("api/frontend/rooms").GetAwaiter().GetResult(); }
+            catch (ApiException ex) { gateBlocked = ex.Message.Contains("正在确认", StringComparison.Ordinal); }
+            Assert(gateBlocked, "AuthService gate must reject account requests while checking.");
+        }
+        finally { checking.Api.Dispose(); }
+
+        using var api = new ApiClient("auth-gate-test");
+        api.Gate = path => path.StartsWith("api/frontend/", StringComparison.OrdinalIgnoreCase)
+            ? "账号功能已暂停"
+            : null;
+        bool blocked = false;
+        try { api.GetAsync("api/frontend/user/me").GetAwaiter().GetResult(); }
+        catch (ApiException ex) { blocked = ex.Message == "账号功能已暂停"; }
+        Assert(blocked, "ApiClient gate must reject account requests before hitting the network.");
+        Console.WriteLine("PASS: auth state basics and API gate reject account requests while paused.");
+    }
+
+    /// <summary>
+    /// 业务错误码必须统一成中文，不能把 room is full / room not exist 等原始英文直接展示给用户。
+    /// </summary>
+    static void CheckBusinessErrorMessages()
+    {
+        var cases = new (int Code, string Expected)[]
+        {
+            (10001, "参数无效，请确认 UID 与验证码都是数字"),
+            (10002, "登录已失效，请重新登录"),
+            (10034, "验证码已失效，请重新获取"),
+            (10035, "验证码不正确或已过期"),
+            (20017, "当前角色不能使用该表情"),
+            (50002, "收集物合成失败，请稍后再试"),
+            (50005, "收集物不存在"),
+            (50006, "尚未拥有该收集物"),
+            (60003, "兑换码已使用"),
+            (60004, "兑换码无效"),
+            (70003, "客户端点击数异常，请刷新后重试"),
+            (70004, "暂无可开启的宝箱"),
+            (70005, "可用点击数不足"),
+            (70006, "宝箱冷却中，请稍后再试"),
+            (80003, "仍在其他房间中，请先退出当前房间"),
+            (80004, "房间号不能为空"),
+            (80007, "房间不存在或已解散"),
+            (80008, "房间已满"),
+            (80010, "加入房间失败，请稍后再试"),
+            (80018, "离开房间失败，请稍后再试"),
+            (80022, "点击数据异常，请刷新后重试"),
+            (90002, "账号已在其他设备登录"),
+        };
+        foreach (var (code, expected) in cases)
+        {
+            string actual = ApiClient.DescribeCode(code, "room is full");
+            Assert(actual == expected, $"Code {code} should map to Chinese '{expected}', got '{actual}'.");
+            Assert(ApiClient.HasChinese(actual), $"Code {code} message must contain Chinese.");
+        }
+        Assert(ApiClient.DescribeCode(99999, "unknown server error") == "请求失败（99999）",
+            "Unknown English server messages must not leak to the UI.");
+        Assert(ApiClient.DescribeCode(99999, "服务器忙") == "服务器忙",
+            "Unknown Chinese server messages should be preserved.");
+        Assert(ApiClient.DescribeHttpStatus(401) == "登录已失效，请重新登录",
+            "HTTP 401 must be mapped to Chinese.");
+        Assert(ApiClient.DescribeHttpStatus(503) == "服务器暂时不可用，请稍后再试",
+            "HTTP 503 must be mapped to Chinese.");
+        Console.WriteLine("PASS: business error codes and HTTP statuses are mapped to user-facing Chinese.");
+    }
+
+    /// <summary>
+    /// 登录态暂停不能主动退房：OnAuthStateChanged 只能关闭 socket/停止自动重连，
+    /// 不能调用 LeaveAsync/EmitLeaveAsync，尤其不能给房主房间发 rl。
+    /// </summary>
+    static void CheckAuthPauseDoesNotLeaveRoom()
+    {
+        string roomManager = ReadRepoSource("src", "Net", "RoomManager.cs");
+        int start = roomManager.IndexOf("void OnAuthStateChanged()", StringComparison.Ordinal);
+        int end = roomManager.IndexOf("void EnsureNetworkAllowed()", StringComparison.Ordinal);
+        Assert(start >= 0 && end > start, "RoomManager.OnAuthStateChanged must exist.");
+        string block = roomManager.Substring(start, end - start);
+        Assert(!block.Contains("LeaveAsync", StringComparison.Ordinal) &&
+               !block.Contains("EmitLeaveAsync", StringComparison.Ordinal),
+            "Auth pause must not call LeaveAsync or send rl.");
+        Assert(block.Contains("AuthState.Checking", StringComparison.Ordinal) &&
+               block.Contains("AuthState.NetworkUnknown", StringComparison.Ordinal),
+            "Checking/network states must not proactively close an existing room socket.");
+        Console.WriteLine("PASS: auth pause never sends an explicit room leave; host room remains reconnectable.");
+    }
+
+    /// <summary>
+    /// 窗口层级兜底：主桌宠必须在所有联机桌宠上方，桌宠窗口必须全部置顶且连续。
+    /// </summary>
+    static void CheckPetZOrderGuard()
+    {
+        var main = new IntPtr(1);
+        var r1 = new IntPtr(2);
+        var r2 = new IntPtr(3);
+        var other = new IntPtr(9);
+        var pets = new[] { main, r1, r2 };
+        bool topmost(IntPtr _) => true;
+
+        var healthy = new[] { other, main, r1, r2 };
+        Assert(PetZOrderGuard.Check(pets, healthy, topmost, requireContiguous: true) == PetZOrderProblem.None,
+            "Healthy topmost group below an unrelated topmost window must pass.");
+
+        var remoteAboveMain = new[] { r1, main, r2 };
+        Assert(PetZOrderGuard.Check(pets, remoteAboveMain, topmost, requireContiguous: true) == PetZOrderProblem.MainNotAboveRemotes,
+            "Main pet above remotes must be enforced.");
+
+        var split = new[] { main, other, r1, r2 };
+        Assert(PetZOrderGuard.Check(pets, split, topmost, requireContiguous: true) == PetZOrderProblem.NotContiguous,
+            "A third-party window between pet windows must trigger a restack.");
+
+        Assert(PetZOrderGuard.Check(pets, healthy, _ => false, requireContiguous: true) == PetZOrderProblem.NotTopMost,
+            "A pet that lost WS_EX_TOPMOST must trigger a restack.");
+
+        var missing = new[] { main, r1 };
+        Assert(PetZOrderGuard.Check(pets, missing, topmost, requireContiguous: true) == PetZOrderProblem.MissingWindow,
+            "A missing pet window must trigger a restack.");
+
+        Assert(PetZOrderGuard.Check(pets, new[] { main, other, r1, r2 }, topmost, requireContiguous: false) == PetZOrderProblem.None,
+            "When topmost is disabled, only main-above-remotes ordering is required.");
+        Console.WriteLine("PASS: pet z-order guard catches non-topmost, split and main-behind-remote states.");
     }
 
     /// <summary>

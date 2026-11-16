@@ -1,21 +1,69 @@
 using System;
 using System.Linq;
 using System.Text.Json.Nodes;
+using System.Threading;
 using System.Threading.Tasks;
 using WuwatappoNative.Core;
 
 namespace WuwatappoNative.Net;
+
+public enum AuthState
+{
+    LoggedOut,
+    Checking,
+    Valid,
+    Conflict,
+    Invalid,
+    NetworkUnknown,
+}
 
 /// <summary>登录编排：UID 验证码、国服手机号通行证、token 存档、48 小时内自动续期、user/me 同步。</summary>
 public sealed class AuthService
 {
     readonly Settings _cfg;
     readonly object _sessionGate = new();
+    readonly object _stateGate = new();
+    readonly SemaphoreSlim _probeGate = new(1, 1);
+    int _recoveryDepth;
+    AuthState _state;
+    string _stateMessage = "";
+    long _lastCheckedAtMs;
+    bool? _lastProbeCredentialValid;
     public ApiClient Api { get; private set; }
     public event Action Changed;
+    /// <summary>登录态（凭据是否有效、是否被其他客户端占用）变化。高频的用户资料刷新不会触发。</summary>
+    public event Action StateChanged;
 
     public string Token => _cfg.Token;
-    public bool IsLoggedIn => !string.IsNullOrEmpty(_cfg.Token);
+    public bool HasToken => !string.IsNullOrEmpty(_cfg.Token);
+    /// <summary>面板意义上的“已登录”：凭据失效后为 false；被其他客户端占用时仍为 true。</summary>
+    public bool IsLoggedIn => HasToken && _state != AuthState.Invalid && _state != AuthState.LoggedOut;
+    /// <summary>账号相关 HTTP 与联机 socket 是否可用。只有确认有效时才允许。</summary>
+    public bool CanUseOnline => HasToken && _state == AuthState.Valid;
+    /// <summary>桌宠计数条是否切换为“未登录”。冲突与凭据失效都显示统一短文案。</summary>
+    public bool ShowLoggedOutOnPet => !HasToken || _state == AuthState.Invalid || _state == AuthState.Conflict;
+    public AuthState State { get { lock (_stateGate) return _state; } }
+    public string StateMessage { get { lock (_stateGate) return _stateMessage; } }
+    public long LastCheckedAtMs { get { lock (_stateGate) return _lastCheckedAtMs; } }
+    public bool? LastProbeCredentialValid { get { lock (_stateGate) return _lastProbeCredentialValid; } }
+    public string StateName => State switch
+    {
+        AuthState.LoggedOut => "loggedOut",
+        AuthState.Checking => "checking",
+        AuthState.Valid => "valid",
+        AuthState.Conflict => "conflict",
+        AuthState.Invalid => "invalid",
+        _ => "network",
+    };
+    public string PauseMessage => State switch
+    {
+        AuthState.LoggedOut => "未登录：请先登录账号。",
+        AuthState.Checking => "正在确认登录状态，请稍候。",
+        AuthState.Conflict => "账号功能已暂停：登录态正在其他客户端使用。",
+        AuthState.Invalid => "账号功能已暂停：当前登录凭据已失效。",
+        AuthState.NetworkUnknown => "网络不可用：暂时无法确认登录状态。",
+        _ => "账号功能已暂停。",
+    };
     public long UserId => _cfg.UserId;
     public long PlayerId => _cfg.PlayerId > 0 ? _cfg.PlayerId : _cfg.UserId;
     public string Cuid => _cfg.Cuid;
@@ -34,6 +82,8 @@ public sealed class AuthService
     public AuthService(Settings cfg)
     {
         _cfg = cfg;
+        _state = string.IsNullOrEmpty(cfg.Token) ? AuthState.LoggedOut : AuthState.Checking;
+        _stateMessage = string.IsNullOrEmpty(cfg.Token) ? "未登录：请先登录账号。" : "正在确认登录状态…";
         Api = CreateApi(Guid.NewGuid().ToString("N"), ApiClient.ResolveBaseUrl(cfg.ServerRegion), cfg.Token);
     }
 
@@ -41,24 +91,73 @@ public sealed class AuthService
     {
         var api = new ApiClient(cid, baseUrl);
         api.SetToken(token);
+        api.Gate = AccountRequestBlockedReason;
         api.TokenRefreshed += refreshed => TryUseSession(api, () =>
         {
             _cfg.Token = refreshed;
             ConfigStore.Save(_cfg);
         });
+        api.RequestFailed += (path, failure) => OnApiRequestFailed(api, path, failure);
         return api;
+    }
+
+    string AccountRequestBlockedReason(string path)
+    {
+        if (Volatile.Read(ref _recoveryDepth) > 0) return null;
+        string p = (path ?? "").TrimStart('/');
+        // 公共数据、登录接口、探针、显式退出与续期始终放行；它们不建立新的实时会话。
+        if (p.StartsWith("api/common/", StringComparison.OrdinalIgnoreCase)) return null;
+        if (p.StartsWith("api/auth/", StringComparison.OrdinalIgnoreCase)) return null;
+        if (string.Equals(p, "api/frontend/user/me", StringComparison.OrdinalIgnoreCase)) return null;
+        if (string.Equals(p, "api/frontend/user/logout", StringComparison.OrdinalIgnoreCase)) return null;
+        if (string.Equals(p, "api/frontend/user/renew-token", StringComparison.OrdinalIgnoreCase)) return null;
+        if (State == AuthState.Valid) return null;
+        return PauseMessage;
+    }
+
+    void OnApiRequestFailed(ApiClient api, string path, ApiException failure)
+    {
+        if (!ReferenceEquals(api, Api)) return;
+        string p = (path ?? "").TrimStart('/');
+        if (!p.StartsWith("api/frontend/", StringComparison.OrdinalIgnoreCase)) return;
+        if (string.Equals(p, "api/frontend/user/me", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(p, "api/frontend/user/logout", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(p, "api/frontend/user/renew-token", StringComparison.OrdinalIgnoreCase)) return;
+        if (failure.Code == 90002)
+            _ = ReportSessionTakenOverAsync(p + " 90002");
+        else if (failure.Code == 401 || failure.Code == 403 || failure.Code == 10002 || failure.Code == 10003)
+            _ = ReportUnauthorizedAsync(p + " " + failure.Code);
+    }
+
+    /// <summary>用户主动重新连接时临时放行账号请求；只由显式恢复流程使用。</summary>
+    public IDisposable BeginRecovery()
+    {
+        Interlocked.Increment(ref _recoveryDepth);
+        return new RecoveryScope(this);
+    }
+
+    sealed class RecoveryScope : IDisposable
+    {
+        readonly AuthService _owner;
+        int _disposed;
+        public RecoveryScope(AuthService owner) { _owner = owner; }
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                Interlocked.Decrement(ref _owner._recoveryDepth);
+        }
     }
 
     internal ApiClient CaptureSession()
     {
-        lock (_sessionGate) return IsLoggedIn ? Api : null;
+        lock (_sessionGate) return HasToken ? Api : null;
     }
 
     internal bool TryUseSession(ApiClient session, Action action)
     {
         lock (_sessionGate)
         {
-            if (session == null || !ReferenceEquals(Api, session) || !IsLoggedIn) return false;
+            if (session == null || !ReferenceEquals(Api, session) || !HasToken) return false;
             action();
             return true;
         }
@@ -80,30 +179,278 @@ public sealed class AuthService
     public void UpdateBaseUrl(string newBaseUrl)
     {
         lock (_sessionGate) ReplaceSession(_cfg.Token, _cfg.TokenExpireMs, newBaseUrl);
+        SetState(string.IsNullOrEmpty(_cfg.Token) ? AuthState.LoggedOut : AuthState.Checking,
+            string.IsNullOrEmpty(_cfg.Token) ? "未登录：请先登录账号。" : "正在确认登录状态…");
+    }
+
+    void SetState(AuthState state, string message, bool credentialValid = false)
+    {
+        bool changed;
+        lock (_stateGate)
+        {
+            message ??= "";
+            changed = _state != state || _stateMessage != message;
+            _state = state;
+            _stateMessage = message;
+            _lastCheckedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            if (state == AuthState.Valid) _lastProbeCredentialValid = true;
+            else if (state == AuthState.Invalid) _lastProbeCredentialValid = false;
+            else if (credentialValid) _lastProbeCredentialValid = true;
+        }
+        if (!changed) return;
+        Log.Write("登录态：" + state + (string.IsNullOrEmpty(message) ? "" : " " + message));
+        try { StateChanged?.Invoke(); } catch { }
+        try { Changed?.Invoke(); } catch { }
+    }
+
+    enum ProbeResult { Valid, Invalid, Conflict, Network }
+
+    /// <summary>安全探针：user/me 不会踢掉其他设备，只用于判断当前 token 是否仍有效。</summary>
+    async Task<ProbeResult> ProbeCoreAsync(ApiClient session, bool applyUserInfo)
+    {
+        try
+        {
+            var data = await session.GetAsync("api/frontend/user/me", bypassGate: true).ConfigureAwait(false);
+            if (data is not JsonObject me) return ProbeResult.Network;
+            if (applyUserInfo)
+            {
+                if (!TryUseSession(session, () => ApplyUserInfo(me))) return ProbeResult.Network;
+            }
+            return ProbeResult.Valid;
+        }
+        catch (ApiException ex) when (ex.Code == 90002)
+        {
+            return ProbeResult.Conflict;
+        }
+        catch (ApiException ex) when (ex.Code == 401 || ex.Code == 403 || ex.Code == 10002 || ex.Code == 10003)
+        {
+            return ProbeResult.Invalid;
+        }
+        catch (OperationCanceledException) when (CaptureSession() != session)
+        {
+            return ProbeResult.Network;
+        }
+        catch (Exception ex)
+        {
+            Log.Write("登录态探针失败：" + ex.Message);
+            return ProbeResult.Network;
+        }
+    }
+
+    /// <summary>
+    /// 判定一次运行中的登录异常。sessionTakenOver 表示已经收到明确的顶号信号（90002/服务端踢号），
+    /// 此时即使探针网络失败也保持“被占用”，不能误判成普通断网。
+    /// </summary>
+    async Task ReportAuthFailureAsync(bool sessionTakenOver, string detail)
+    {
+        var session = CaptureSession();
+        if (session == null) { SetState(AuthState.LoggedOut, "未登录：请先登录账号。"); return; }
+        if (State == AuthState.Invalid || State == AuthState.Conflict) return;
+        if (!await _probeGate.WaitAsync(0).ConfigureAwait(false)) return;
+        try
+        {
+            // 顶号信号已经足够明确：立即暂停并提示，不先让用户等 25 秒探针超时。
+            SetState(sessionTakenOver ? AuthState.Conflict : AuthState.Checking,
+                sessionTakenOver ? "登录态正在其他客户端使用；正在确认登录凭据…" : "正在确认登录状态…");
+            Log.Write("检测到登录异常：" + (detail ?? "") + "，开始 user/me 探针");
+            var result = await ProbeCoreAsync(session, applyUserInfo: false).ConfigureAwait(false);
+            if (CaptureSession() != session) return;
+            if (result == ProbeResult.Invalid)
+            {
+                SetState(AuthState.Invalid, "当前登录凭据已失效；请重新登录或重新继承官方登录。");
+                return;
+            }
+            if (result == ProbeResult.Conflict || sessionTakenOver)
+            {
+                SetState(AuthState.Conflict, result == ProbeResult.Network
+                    ? "登录态正在其他客户端使用；网络暂时不可用，无法确认登录凭据。"
+                    : "登录态正在其他客户端使用；账号功能已暂停，不会自动重新登录或重连。");
+                return;
+            }
+            if (result == ProbeResult.Valid)
+                SetState(AuthState.Valid, "");
+            else
+                SetState(AuthState.NetworkUnknown, "网络不可用，暂时无法确认登录状态。");
+        }
+        finally
+        {
+            _probeGate.Release();
+        }
+    }
+
+    public Task ReportSessionTakenOverAsync(string detail = null)
+        => ReportAuthFailureAsync(true, detail);
+
+    public Task ReportUnauthorizedAsync(string detail = null)
+        => ReportAuthFailureAsync(false, detail);
+
+    /// <summary>用户主动“重新检测”：只更新凭据是否有效，不自动恢复 HTTP 或联机。</summary>
+    public async Task<bool> RecheckAsync()
+    {
+        var session = CaptureSession();
+        if (session == null)
+        {
+            SetState(AuthState.LoggedOut, "未登录：请先登录账号。");
+            return false;
+        }
+        if (!await _probeGate.WaitAsync(0).ConfigureAwait(false)) return LastProbeCredentialValid == true;
+        try
+        {
+            var previous = State;
+            var result = await ProbeCoreAsync(session, applyUserInfo: false).ConfigureAwait(false);
+            if (CaptureSession() != session) return false;
+            if (result == ProbeResult.Invalid)
+            {
+                SetState(AuthState.Invalid, "当前登录凭据已失效；请重新登录或重新继承官方登录。");
+                return false;
+            }
+            if (result == ProbeResult.Conflict)
+            {
+                SetState(AuthState.Conflict, "登录态正在其他客户端使用；账号功能已暂停，不会自动重新登录或重连。");
+                return false;
+            }
+            if (result == ProbeResult.Network)
+            {
+                if (previous == AuthState.Conflict)
+                    SetState(AuthState.Conflict, "登录态正在其他客户端使用；网络暂时不可用，无法确认登录凭据。", credentialValid: LastProbeCredentialValid == true);
+                else
+                    SetState(AuthState.NetworkUnknown, "网络不可用，暂时无法确认登录状态。");
+                return false;
+            }
+            if (previous == AuthState.Conflict)
+            {
+                SetState(AuthState.Conflict, "登录凭据有效；账号功能仍暂停，点击“重新连接”恢复。", credentialValid: true);
+                return true;
+            }
+            if (previous == AuthState.Invalid)
+            {
+                SetState(AuthState.Invalid, "登录凭据已恢复有效；账号功能仍暂停，点击“重新连接”恢复。", credentialValid: true);
+                return true;
+            }
+            SetState(AuthState.Valid, "", credentialValid: true);
+            return true;
+        }
+        finally
+        {
+            _probeGate.Release();
+        }
+    }
+
+    /// <summary>用户显式点击“重新连接”：确认凭据有效后放行账号请求，由 App 再恢复房间。</summary>
+    public async Task<bool> ProbeAndResumeAsync()
+    {
+        var session = CaptureSession();
+        if (session == null)
+        {
+            SetState(AuthState.LoggedOut, "未登录：请先登录账号。");
+            return false;
+        }
+        await _probeGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            SetState(AuthState.Checking, "正在确认登录状态…");
+            var result = await ProbeCoreAsync(session, applyUserInfo: true).ConfigureAwait(false);
+            if (CaptureSession() != session) return false;
+            if (result == ProbeResult.Valid)
+            {
+                SetState(AuthState.Valid, "");
+                return true;
+            }
+            if (result == ProbeResult.Invalid)
+            {
+                SetState(AuthState.Invalid, "当前登录凭据已失效；请重新登录或重新继承官方登录。");
+                return false;
+            }
+            if (result == ProbeResult.Conflict)
+            {
+                SetState(AuthState.Conflict, "登录态正在其他客户端使用；账号功能已暂停，不会自动重新登录或重连。");
+                return false;
+            }
+            SetState(AuthState.NetworkUnknown, "网络不可用，暂时无法确认登录状态。");
+            return false;
+        }
+        finally
+        {
+            _probeGate.Release();
+        }
+    }
+
+    /// <summary>网络恢复后的自动重试；只在 NetworkUnknown 状态使用，不用于顶号后的自动抢登。</summary>
+    public async Task<bool> RetryNetworkAsync()
+    {
+        if (State != AuthState.NetworkUnknown) return CanUseOnline;
+        var session = CaptureSession();
+        if (session == null) return false;
+        if (!await _probeGate.WaitAsync(0).ConfigureAwait(false)) return false;
+        try
+        {
+            var result = await ProbeCoreAsync(session, applyUserInfo: true).ConfigureAwait(false);
+            if (CaptureSession() != session) return false;
+            if (result == ProbeResult.Valid)
+            {
+                SetState(AuthState.Valid, "");
+                return true;
+            }
+            if (result == ProbeResult.Invalid)
+                SetState(AuthState.Invalid, "当前登录凭据已失效；请重新登录或重新继承官方登录。");
+            else if (result == ProbeResult.Conflict)
+                SetState(AuthState.Conflict, "登录态正在其他客户端使用；账号功能已暂停，不会自动重新登录或重连。");
+            else
+                SetState(AuthState.NetworkUnknown, "网络不可用，暂时无法确认登录状态。");
+            return false;
+        }
+        finally
+        {
+            _probeGate.Release();
+        }
     }
 
     public async Task<bool> TryRestoreAsync()
     {
         var session = CaptureSession();
-        if (session == null) return false;
+        if (session == null)
+        {
+            SetState(AuthState.LoggedOut, "未登录：请先登录账号。");
+            return false;
+        }
+        SetState(AuthState.Checking, "正在确认登录状态…");
         try
         {
             if (_cfg.TokenExpireMs > 0 && _cfg.TokenExpireMs - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() < 48L * 3600 * 1000)
                 await RenewAsync(session);
-            await ReadUserAsync(session, ApplyUserInfo);
-            return CaptureSession() == session;
         }
-        catch (ApiException ex) when (ex.Code == 10002 || ex.Code == 10003 || ex.Code == 401 || ex.Code == 403)
+        catch (ApiException ex)
         {
-            Log.Write("token 失效：" + ex.Code);
-            TryUseSession(session, ClearLocal);
-            return false;
+            // 续期失败不等于凭据失效：最终以不会踢其他设备的 user/me 探针为准。
+            Log.Write("token 续期失败，继续用 user/me 确认：" + ex.Code + " " + ex.Message);
         }
         catch (Exception ex)
         {
-            Log.Write("恢复登录失败：" + ex.Message);
-            return CaptureSession() == session;
+            Log.Write("token 续期异常，继续用 user/me 确认：" + ex.Message);
         }
+
+        var result = await ProbeCoreAsync(session, applyUserInfo: true);
+        if (CaptureSession() != session) return false;
+        if (result == ProbeResult.Valid)
+        {
+            SetState(AuthState.Valid, "");
+            return true;
+        }
+        if (result == ProbeResult.Invalid)
+        {
+            Log.Write("token 失效：user/me 返回未授权");
+            SetState(AuthState.Invalid, "当前登录凭据已失效；请重新登录或重新继承官方登录。");
+            return false;
+        }
+        if (result == ProbeResult.Conflict)
+        {
+            Log.Write("恢复登录失败：user/me 返回顶号信号");
+            SetState(AuthState.Conflict, "登录态正在其他客户端使用；账号功能已暂停，不会自动重新登录或重连。");
+            return false;
+        }
+        Log.Write("恢复登录失败：无法连接 user/me");
+        SetState(AuthState.NetworkUnknown, "网络不可用，暂时无法确认登录状态。");
+        return false;
     }
 
     /// <summary>
@@ -132,6 +479,7 @@ public sealed class AuthService
         var data = await Api.PostAsync("api/auth/uid-login", new { playerId = uid, code = codeNum });
         ApplyAuthToken(data);
         await WhoAmIAsync();
+        SetState(AuthState.Valid, "");
     }
 
     /// <summary>发送库洛通行证手机号验证码（国服 H5 SDK 通道）。</summary>
@@ -208,6 +556,7 @@ public sealed class AuthService
         });
         ApplyAuthToken(loginData);
         await WhoAmIAsync();
+        SetState(AuthState.Valid, "");
     }
 
     static string NormalizePhone(string phone)
@@ -298,6 +647,7 @@ public sealed class AuthService
         {
             Log.Write("无角色国际服账号登录成功，但 user/me 同步失败：" + ex.Message);
         }
+        SetState(AuthState.Valid, "");
     }
 
     public Task RenewAsync() => RenewAsync(CaptureSession());
@@ -338,16 +688,21 @@ public sealed class AuthService
         Changed?.Invoke();
     });
 
-    async Task<bool> ReadUserAsync(ApiClient session, Action<JsonObject> apply)
+    async Task<bool> ReadUserAsync(ApiClient session, Action<JsonObject> apply, bool probe = false)
     {
         Task<JsonNode> request = null;
-        if (!TryUseSession(session, () => request = session.GetAsync("api/frontend/user/me"))) return false;
+        if (!TryUseSession(session, () => request = session.GetAsync("api/frontend/user/me", bypassGate: probe))) return false;
         try
         {
             var data = await request;
             return data is JsonObject me && TryUseSession(session, () => apply(me));
         }
         catch (OperationCanceledException) when (CaptureSession() != session) { return false; }
+        catch (ApiException ex) when (!probe && (ex.Code == 401 || ex.Code == 403 || ex.Code == 10002 || ex.Code == 10003))
+        {
+            _ = ReportUnauthorizedAsync("user/me " + ex.Code);
+            throw;
+        }
     }
 
     public Task WhoAmIAsync() => WhoAmIAsync(CaptureSession());
@@ -430,8 +785,8 @@ public sealed class AuthService
             _cfg.CloudAccessoryAssetId = 0;
             _cfg.CloudEmoteAssetIds = new long[5];
             ConfigStore.Save(_cfg);
-            Changed?.Invoke();
         }
+        SetState(AuthState.LoggedOut, "未登录：请先登录账号。");
     }
 
     public void SetTokenManually(string token)
@@ -453,8 +808,9 @@ public sealed class AuthService
         {
             ReplaceSession(token, expires);
             ConfigStore.Save(_cfg);
-            Changed?.Invoke();
         }
+        SetState(string.IsNullOrEmpty(token) ? AuthState.LoggedOut : AuthState.Checking,
+            string.IsNullOrEmpty(token) ? "未登录：请先登录账号。" : "正在确认登录状态…");
     }
 
     static long ParseExpire(JsonNode node)

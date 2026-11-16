@@ -245,6 +245,10 @@ public static class PetComposer
         public bool Selected;
         /// <summary>是否绘制计数条/工具栏/手部压条；关闭时角色本体、宝箱、气泡和轮盘仍照常显示。</summary>
         public bool ShowBar = true;
+        /// <summary>登录态异常时计数条统一显示“未登录”，不再显示点击数。</summary>
+        public bool ShowLoggedOut;
+        /// <summary>“未登录”文字颜色；冲突用琥珀、失效/未登录用红色，均需在底栏上可读。</summary>
+        public Color LoggedOutColor;
         public Image ChestButton, ChestCountdown;
         public bool Loading;
         public double LoadingPhase;
@@ -371,7 +375,7 @@ public static class PetComposer
     {
         Bitmap _character, _strip;
         (Size Size, Image Head, Image Body, Image Accessory, double X, double Y, int ScalePercent, int RotationDegrees) _characterKey;
-        (Size Size, bool ShowBar, Image Body, long Clicks, bool KeyboardOn, Color BarColor, Color BarTextColor, Color BarAccentColor, Color BarAccentMutedColor) _stripKey;
+        (Size Size, bool ShowBar, bool ShowLoggedOut, Image Body, long Clicks, bool KeyboardOn, Color BarColor, Color BarTextColor, Color BarAccentColor, Color BarAccentMutedColor, Color LoggedOutColor) _stripKey;
 
         internal void DrawCharacter(Graphics target, Size size, float scale, Image head, Image body, Image accessory,
             double offsetX, double offsetY, int accessoryScalePercent, int accessoryRotationDegrees, Rectangle cat)
@@ -391,7 +395,7 @@ public static class PetComposer
 
         internal void DrawStrip(Graphics target, Size size, float scale, Info info, Image body, Rectangle cat)
         {
-            var key = (size, info.ShowBar, body, info.Clicks, info.KeyboardOn, info.BarColor, info.BarTextColor, info.BarAccentColor, info.BarAccentMutedColor);
+            var key = (size, info.ShowBar, info.ShowLoggedOut, body, info.Clicks, info.KeyboardOn, info.BarColor, info.BarTextColor, info.BarAccentColor, info.BarAccentMutedColor, info.LoggedOutColor);
             if (_strip == null || _stripKey != key)
             {
                 Prepare(ref _strip, size);
@@ -460,11 +464,13 @@ public static class PetComposer
             g.FillPath(brush, path);
 
         using (var font = new Font("Microsoft YaHei UI", 18f * s, FontStyle.Bold, GraphicsUnit.Pixel))
-        using (var brush = new SolidBrush(info.BarTextColor.IsEmpty ? InkStrong : info.BarTextColor))
+        using (var brush = new SolidBrush(info.ShowLoggedOut
+            ? (info.LoggedOutColor.IsEmpty ? Color.FromArgb(179, 74, 63) : info.LoggedOutColor)
+            : (info.BarTextColor.IsEmpty ? InkStrong : info.BarTextColor)))
         using (var fmt = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center })
         {
             var textRect = new RectangleF(counter.X + 18 * s, bar.Y, counter.Width - 18 * s, bar.Height);
-            DrawClickCount(g, FormatClicks(info.Clicks), font, brush.Color, textRect, fmt);
+            DrawClickCount(g, info.ShowLoggedOut ? "未登录" : FormatClicks(info.Clicks), font, brush.Color, textRect, fmt);
         }
 
         // 键盘图标：描边粗细、可见高度和中心线与右侧菜单图标保持一致。

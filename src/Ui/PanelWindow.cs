@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -375,11 +376,23 @@ public sealed class PanelWindow : Form
     {
         if (_updateChecked) return;
         _updateChecked = true;
-        var current = typeof(PanelWindow).Assembly.GetName().Version ?? new Version(0, 0, 0);
+        string current = CurrentDisplayVersion();
         var info = await UpdateChecker.CheckAsync(current, false, _app.Cfg.UpdateUseProxy ? _app.Cfg.UpdateHttpProxy : null);
         if (info == null) return;
         _updateInfo = info;
         Push("update", info);
+    }
+
+    /// <summary>
+    /// 更新检查必须使用带 beta 标记的 InformationalVersion；AssemblyVersion 只有 0.3.1.8，
+    /// 无法区分测试版与同号正式版。
+    /// </summary>
+    static string CurrentDisplayVersion()
+    {
+        var assembly = typeof(PanelWindow).Assembly;
+        string informational = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (!string.IsNullOrWhiteSpace(informational)) return informational;
+        return assembly.GetName().Version?.ToString() ?? "0.0.0";
     }
 
     async Task DownloadUpdateAsync(ReleaseAsset installer, string tag, string source, string proxy, CancellationToken token)
@@ -512,6 +525,12 @@ public sealed class PanelWindow : Form
         auth = new
         {
             loggedIn = _app.Auth.IsLoggedIn,
+            hasToken = _app.Auth.HasToken,
+            onlineAvailable = _app.Auth.CanUseOnline,
+            state = _app.Auth.StateName,
+            stateMessage = _app.Auth.StateMessage,
+            lastCheckedAt = _app.Auth.LastCheckedAtMs,
+            credentialValid = _app.Auth.LastProbeCredentialValid,
             nickname = _app.Auth.Nickname,
             cuid = _app.Auth.Cuid,
             uid = _app.Auth.PlayerId > 0 ? _app.Auth.PlayerId : _app.Auth.UserId,
@@ -644,6 +663,7 @@ public sealed class PanelWindow : Form
         themeRotation = MapThemeRotation(_app.ThemePresets.Rotation),
         panelMaximized = _maximized,
         version = typeof(PanelWindow).Assembly.GetName().Version?.ToString(3) ?? "0.0.1",
+        displayVersion = CurrentDisplayVersion(),
     };
     }
 
@@ -736,6 +756,7 @@ public sealed class PanelWindow : Form
         {
             string blocked = _app.OnlineBlockedReason;
             if (!string.IsNullOrEmpty(blocked)) throw new ApiException(-1, "联网操作已暂停：" + blocked);
+            if (!_app.Auth.CanUseOnline) throw new ApiException(-1, _app.Auth.PauseMessage);
         }
         switch (cmd)
         {
@@ -824,6 +845,14 @@ public sealed class PanelWindow : Form
             case "boot":
                 return BootPayload();
 
+            case "auth.recheck":
+                await _app.RecheckAuthAsync();
+                return BootPayload();
+
+            case "auth.reconnect":
+                await _app.ReconnectAfterAuthAsync();
+                return BootPayload();
+
             case "login.sendCode":
                 await auth.SendUidCodeAsync(ApiClient.ReadString(data["uid"]));
                 return new { sent = true };
@@ -858,7 +887,7 @@ public sealed class PanelWindow : Form
                     _app.CheckAutoChestNow();
                     return new { loggedIn = true, nickname = auth.Nickname };
                 }
-                throw new ApiException(-1, "token 无效或已过期");
+                throw new ApiException(-1, auth.State == AuthState.Invalid ? "token 无效或已过期" : auth.StateMessage);
 
             case "token.inherit":
             {
@@ -935,6 +964,7 @@ public sealed class PanelWindow : Form
                 return new { loggedIn = false };
 
             case "user.refresh":
+                if (!auth.CanUseOnline) throw new ApiException(-1, auth.PauseMessage);
                 await auth.WhoAmIAsync();
                 return BootPayload();
 
@@ -1659,11 +1689,11 @@ public sealed class PanelWindow : Form
 
             case "update.check":
             {
-                var current = typeof(PanelWindow).Assembly.GetName().Version ?? new Version(0, 0, 0);
+                string current = CurrentDisplayVersion();
                 var info = await UpdateChecker.CheckAsync(current, true, _app.Cfg.UpdateUseProxy ? _app.Cfg.UpdateHttpProxy : null);
                 _updateInfo = info;
                 Push("update", info);
-                return new { available = info != null, update = info, currentVersion = current.ToString(3) };
+                return new { available = info != null, update = info, currentVersion = current };
             }
 
             case "update.download":

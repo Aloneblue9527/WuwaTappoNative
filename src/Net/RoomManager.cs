@@ -113,16 +113,45 @@ public sealed class RoomManager : IDisposable
         _auth = auth;
         _cfg = cfg;
         _blockedReason = blockedReason;
+        _auth.StateChanged += OnAuthStateChanged;
         // 与原版一致：点击上报周期 30 秒。首次也等 30 秒，避免启动时撞上服务端频率窗口。
         _reportTimer = new System.Threading.Timer(_ => _ = FlushClicksAsync(), null, 30000, 30000);
         // Socket 断开或首次连接失败后，不能只等一次重试；后台每 5 秒检查并恢复房间连接。
         _reconnectTimer = new System.Threading.Timer(_ => _ = AutoReconnectTickAsync(), null, 3000, 5000);
     }
 
+    void OnAuthStateChanged()
+    {
+        if (_auth.CanUseOnline)
+        {
+            _reconnectSuppressed = false;
+            return;
+        }
+        _reconnectSuppressed = true;
+        // 确认中/网络未知只是暂时不能发账号请求：不要主动断开已有房间 socket。
+        // 否则一次普通的 401 探测就可能让房主短暂掉线，进而增加房主房间被服务端判定解散的风险。
+        // 真正的顶号/失效会在探针结束后进入 Conflict/Invalid，再走下面的关闭流程。
+        if (_auth.State == AuthState.Checking || _auth.State == AuthState.NetworkUnknown)
+            return;
+
+        // 登录态被占用或凭据失效：停掉 socket 和自动重连。
+        if (State == "joined")
+        {
+            State = "idle";
+            _roomReady = false;
+            _awaitingSnapshot = false;
+            Members.Clear();
+            StateChanged?.Invoke();
+        }
+        _ = CloseSocketAsync();
+    }
+
     void EnsureNetworkAllowed()
     {
         string reason = _blockedReason?.Invoke();
         if (!string.IsNullOrEmpty(reason)) throw new ApiException(-1, reason);
+        if (!_auth.CanUseOnline)
+            throw new ApiException(-1, _auth.PauseMessage);
     }
 
     void SetLastError(string message)
@@ -276,7 +305,8 @@ public sealed class RoomManager : IDisposable
     public async Task EnsureLobbyAsync()
     {
         if (!string.IsNullOrEmpty(_blockedReason?.Invoke())) return;
-        if (State == "joined" || string.IsNullOrEmpty(_auth.Token)) return;
+        if (!_auth.CanUseOnline || string.IsNullOrEmpty(_auth.Token)) return;
+        if (State == "joined") return;
         if (_socket?.Connected == true) return;
         await ConnectSocketAsync("");
     }
@@ -287,7 +317,7 @@ public sealed class RoomManager : IDisposable
         try
         {
             if (!string.IsNullOrEmpty(_blockedReason?.Invoke())) return;
-            if (_reconnectSuppressed || string.IsNullOrEmpty(_auth.Token)) return;
+            if (!_auth.CanUseOnline || _reconnectSuppressed || string.IsNullOrEmpty(_auth.Token)) return;
             // 只重连服务器确认过的当前房间；本地 OwnerRoomNo 不能覆盖服务器状态。
             string desiredRoom = _cfg.RoomNo;
             if (!string.IsNullOrEmpty(desiredRoom))
@@ -476,6 +506,8 @@ public sealed class RoomManager : IDisposable
 
     async Task ConnectSocketAsync(string roomNo)
     {
+        if (!_auth.CanUseOnline)
+            throw new ApiException(-1, _auth.PauseMessage);
         await CloseSocketAsync();
         int gen = ++_generation;
         _socket = new SocketClient();
@@ -495,6 +527,8 @@ public sealed class RoomManager : IDisposable
                     SetLastError("连接断开：" + (string.IsNullOrWhiteSpace(reason) ? "网络异常" : reason));
                 StateChanged?.Invoke();
             }
+            if (!_leavingIntentionally && LooksLikeSessionTakenOver(reason))
+                _ = _auth.ReportSessionTakenOverAsync("socket: " + reason);
             MarkConnectionFailure(reason);
             SocketClosed?.Invoke(reason);
         };
@@ -704,10 +738,15 @@ public sealed class RoomManager : IDisposable
                     int code = ApiClient.ReadInt(payload?["c"]);
                     _reconnectSuppressed = true;
                     State = "idle";
+                    _roomReady = false;
+                    _awaitingSnapshot = false;
                     Members.Clear();
                     SetLastError(code == 90002 ? "账号已在其他设备登录，房间已断开" : $"房间已关闭（{code}）");
+                    if (code == 90002)
+                        _ = _auth.ReportSessionTakenOverAsync("房间 fd 90002");
                     ForcedDisconnect?.Invoke(code);
                     StateChanged?.Invoke();
+                    _ = CloseSocketAsync();
                     break;
                 }
             }
@@ -832,21 +871,21 @@ public sealed class RoomManager : IDisposable
     /// <summary>本地每次按键/点击都发一次无载荷 rc，和官方客户端保持同样频率，不做丢包节流。</summary>
     public void NotifyLocalAction()
     {
-        if (!string.IsNullOrEmpty(_blockedReason?.Invoke())) return;
+        if (!string.IsNullOrEmpty(_blockedReason?.Invoke()) || !_auth.CanUseOnline) return;
         if (_socket?.Connected != true) return;
         _ = _socket.EmitNoAckAsync("rc");
     }
 
     public async Task SendEmoteAsync(long emoteId)
     {
-        if (!string.IsNullOrEmpty(_blockedReason?.Invoke())) return;
+        if (!string.IsNullOrEmpty(_blockedReason?.Invoke()) || !_auth.CanUseOnline) return;
         if (_socket?.Connected == true)
             await _socket.EmitNoAckAsync("re", new JsonObject { ["e"] = emoteId });
     }
 
     public async Task AnnounceAppearanceAsync()
     {
-        if (!string.IsNullOrEmpty(_blockedReason?.Invoke())) return;
+        if (!string.IsNullOrEmpty(_blockedReason?.Invoke()) || !_auth.CanUseOnline) return;
         if (_socket?.Connected != true) return;
         // 原版换装广播会带 {b,c}（数字 id），其他成员用它立即换皮；
         // 不带载荷的 rc 只用于“按键动作”。
@@ -992,7 +1031,7 @@ public sealed class RoomManager : IDisposable
 
     async Task FlushClicksAsync()
     {
-        if (!string.IsNullOrEmpty(_blockedReason?.Invoke())) return;
+        if (!string.IsNullOrEmpty(_blockedReason?.Invoke()) || !_auth.CanUseOnline) return;
         if (!await _clickUploadGate.WaitAsync(0)) return;
         long sent = 0, gross = 0;
         try
@@ -1057,6 +1096,15 @@ public sealed class RoomManager : IDisposable
         }
     }
 
+    static bool LooksLikeSessionTakenOver(string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason)) return false;
+        string value = reason.ToLowerInvariant();
+        return value.Contains("其他设备") || value.Contains("另一台设备")
+            || value.Contains("another device") || value.Contains("other device")
+            || value.Contains("kicked") || value.Contains("session replaced");
+    }
+
     static long ParseId(JsonNode node)
     {
         long id = ApiClient.ReadLong(node);
@@ -1078,6 +1126,7 @@ public sealed class RoomManager : IDisposable
 
     public void Dispose()
     {
+        try { _auth.StateChanged -= OnAuthStateChanged; } catch { }
         _reportTimer?.Dispose();
         _reconnectTimer?.Dispose();
         _ = CloseSocketAsync();

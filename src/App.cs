@@ -118,6 +118,7 @@ public sealed class App : ApplicationContext
         Room.LocalClick += OnLocalClick;
         Room.ServiceUnavailableChanged += down =>
         {
+            if (!Auth.CanUseOnline) return;
             try
             {
                 Panel?.Push("toast", new
@@ -196,12 +197,16 @@ public sealed class App : ApplicationContext
         {
             await Catalog.LoadAsync(Auth.Api, msg => Log.Write("目录：" + msg));
             Pet.BeginInvoke(new Action(() => { Pet.ReloadAppearance(); Pet.RefreshMembers(); }));
-            if (Auth.IsLoggedIn)
+            if (Auth.CanUseOnline)
             {
                 await Auth.WhoAmIAsync();
                 Room.SyncServerClicks(Auth.TotalClickCount, Auth.TotalClickConsume);
                 Pet.BeginInvoke(new Action(Pet.RefreshHud));
                 if (Panel != null && Panel.IsHandleCreated) Panel.BeginInvoke(new Action(PushAuth));
+            }
+            else if (Auth.State == AuthState.NetworkUnknown)
+            {
+                await Auth.RetryNetworkAsync();
             }
             PushRoom();
         }
@@ -311,6 +316,42 @@ public sealed class App : ApplicationContext
         try { Panel?.PushBoot(); } catch { }
     }
 
+    /// <summary>用户主动重新检测登录态；不会恢复 HTTP 或联机，只有“重新连接”才放行。</summary>
+    public async Task<bool> RecheckAuthAsync()
+    {
+        bool credentialValid = await Auth.RecheckAsync();
+        PushAuth();
+        try { Pet.BeginInvoke(new Action(Pet.RefreshHud)); } catch { }
+        PushRoom();
+        return credentialValid;
+    }
+
+    /// <summary>
+    /// 用户显式确认“重新连接”：先用 user/me 确认凭据，再恢复大厅/上次房间。
+    /// 这是唯一会重新建立联机会话的入口；可能使另一客户端下线，调用前 UI 必须二次确认。
+    /// </summary>
+    public async Task ReconnectAfterAuthAsync()
+    {
+        if (!await Auth.ProbeAndResumeAsync())
+            throw new ApiException(-1, Auth.StateMessage);
+        try
+        {
+            using var recovery = Auth.BeginRecovery();
+            if (!string.IsNullOrEmpty(Cfg.RoomNo))
+                await Room.JoinAsync(Cfg.RoomNo);
+            else
+                await Room.EnsureLobbyAsync();
+        }
+        catch (ApiException ex) when (ex.Code == 90002)
+        {
+            await Auth.ReportSessionTakenOverAsync("重新连接时账号已在其他设备登录");
+            throw;
+        }
+        PushAuth();
+        try { Pet.BeginInvoke(new Action(Pet.RefreshHud)); } catch { }
+        PushRoom();
+    }
+
     /// <summary>拉取公告并把未读队列推给面板；请求失败时保留上次结果。</summary>
     public async Task RefreshAnnouncementsAsync(bool force = false)
     {
@@ -326,7 +367,12 @@ public sealed class App : ApplicationContext
     {
         try
         {
-            if (!Auth.IsLoggedIn) return;
+            if (!Auth.HasToken) return;
+            if (Auth.State == AuthState.NetworkUnknown)
+            {
+                if (!await Auth.RetryNetworkAsync()) return;
+            }
+            if (!Auth.CanUseOnline) return;
             if (!await Auth.RefreshClicksAsync(Auth.CaptureSession())) return;
             Pet.BeginInvoke(new Action(() => { Pet.RefreshHud(); }));
             try { if (Panel != null && Panel.IsHandleCreated) Panel.BeginInvoke(new Action(PushAuth)); } catch { }
@@ -510,7 +556,7 @@ public sealed class App : ApplicationContext
     {
         try
         {
-            if (!Cfg.AutoClickEnabled || !Auth.IsLoggedIn || !Room.IsConnected) return;
+            if (!Cfg.AutoClickEnabled || !Auth.CanUseOnline || !Room.IsConnected) return;
             Room.AddClicks(1);
             Room.NotifyLocalAction();
             if (Cfg.AutoClickAnimate)
@@ -527,7 +573,7 @@ public sealed class App : ApplicationContext
     {
         try
         {
-            if (!Cfg.AutoEmoteEnabled || !Auth.IsLoggedIn || !Room.IsConnected) return;
+            if (!Cfg.AutoEmoteEnabled || !Auth.CanUseOnline || !Room.IsConnected) return;
             int max = Math.Clamp(Cfg.AutoEmoteMaxPerSecond, 1, 20);
             long now = Environment.TickCount64;
             lock (_autoEmoteGate)
@@ -566,6 +612,7 @@ public sealed class App : ApplicationContext
         if (Interlocked.Exchange(ref _autoChestTickBusy, 1) == 1) return;
         try
         {
+            if (!Auth.CanUseOnline) return;
             var session = Auth.CaptureSession();
             if (session == null || !Cfg.AutoChest || Auth.UserInfo is not System.Text.Json.Nodes.JsonObject me) return;
             long now = session.ServerNowMs;
@@ -632,6 +679,7 @@ public sealed class App : ApplicationContext
     /// <summary>开宝箱：手动点击桌宠锚点或自动领取都走这里。返回原始响应供面板弹奖励。</summary>
     public Task<System.Text.Json.Nodes.JsonNode> OpenChestAsync(string place, bool auto)
     {
+        if (!Auth.CanUseOnline) throw new ApiException(-1, Auth.PauseMessage);
         var session = Auth.CaptureSession() ?? throw new ApiException(-1, "请先登录");
         return OpenChestAsync(place, auto, session);
     }
@@ -640,6 +688,7 @@ public sealed class App : ApplicationContext
     {
         string blocked = OnlineBlockedReason;
         if (!string.IsNullOrEmpty(blocked)) throw new ApiException(-1, blocked);
+        if (!Auth.CanUseOnline) throw new ApiException(-1, Auth.PauseMessage);
         if (Interlocked.Exchange(ref _chestBusy, 1) == 1) throw new ApiException(-1, "正在领取宝箱，请稍候");
         try
         {
@@ -763,7 +812,9 @@ public sealed class App : ApplicationContext
             }
             else
             {
-                Log.Write("尚未登录");
+                Log.Write("尚未登录：" + Auth.StateName + " " + Auth.StateMessage);
+                Pet.BeginInvoke(new Action(() => Pet.ApplySettings()));
+                PushAuth();
             }
         }
         catch (Exception ex) { Log.Write("启动登录失败 " + ex); }
@@ -771,7 +822,7 @@ public sealed class App : ApplicationContext
 
     void TryAutoBoostClicks()
     {
-        if (!Cfg.AutoClickBoost || !Auth.IsLoggedIn || Auth.UserInfo == null) return;
+        if (!Cfg.AutoClickBoost || !Auth.CanUseOnline || Auth.UserInfo == null) return;
         if (Room.AvailableClicks >= 1000) return;
         if (Interlocked.Exchange(ref _autoBoostBusy, 1) == 1) return;
         try
@@ -895,6 +946,12 @@ public sealed class App : ApplicationContext
         Panel?.Push("auth", new
         {
             loggedIn = Auth.IsLoggedIn,
+            hasToken = Auth.HasToken,
+            onlineAvailable = Auth.CanUseOnline,
+            state = Auth.StateName,
+            stateMessage = Auth.StateMessage,
+            lastCheckedAt = Auth.LastCheckedAtMs,
+            credentialValid = Auth.LastProbeCredentialValid,
             nickname = Auth.Nickname,
             cuid = Auth.Cuid,
             uid = Auth.PlayerId > 0 ? Auth.PlayerId : Auth.UserId,
@@ -924,6 +981,9 @@ public sealed class App : ApplicationContext
         {
             state = Room.State,
             roomNo = Room.RoomNo,
+            authPaused = !Auth.CanUseOnline,
+            authState = Auth.StateName,
+            authMessage = Auth.StateMessage,
             ownerRoomNo = ownerRoomMatches ? Cfg.OwnerRoomNo : "",
             selfIsOwner = Room.SelfIsOwner || ownerRoomMatches,
             connected = Room.IsConnected,

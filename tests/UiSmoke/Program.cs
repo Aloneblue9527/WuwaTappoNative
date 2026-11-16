@@ -106,6 +106,28 @@ internal static class Program
                     core.PostWebMessageAsJson(JsonSerializer.Serialize(new { evt = "boot", data = boot }));
                     await Task.Delay(800);
 
+                    // 关于按钮必须位于底部更新区，而不是“其他/程序”设置项里；统计说明要出现在弹窗中。
+                    string aboutUi = await core.ExecuteScriptAsync(@"
+                      (() => {
+                        const btn = document.getElementById('aboutBtn');
+                        const inFooter = !!document.querySelector('.settings-footer #aboutBtn');
+                        const inSetting = !!document.querySelector('.setting-item #aboutBtn');
+                        btn?.click();
+                        const text = document.getElementById('modalHost')?.textContent || '';
+                        return JSON.stringify({
+                          inFooter,
+                          inSetting,
+                          hasStats: text.includes('数据统计说明'),
+                          hasIp: text.includes('原始 IP 不持久化存储')
+                        });
+                      })()");
+                    var aboutState = JsonNode.Parse(JsonSerializer.Deserialize<string>(aboutUi)!)!.AsObject();
+                    if (!aboutState["inFooter"]!.GetValue<bool>() || aboutState["inSetting"]!.GetValue<bool>()
+                        || !aboutState["hasStats"]!.GetValue<bool>() || !aboutState["hasIp"]!.GetValue<bool>())
+                        throw new InvalidOperationException("About button must sit beside update controls and include the data-statistics notice.");
+                    await core.ExecuteScriptAsync("document.getElementById('mCloseAbout')?.click()");
+                    await Task.Delay(200);
+
                     // 底栏开关 + 快捷键单/双模式：只隐藏输入行，切回时原绑定仍在。
                     boot["settings"]!["hideMainBar"] = false;
                     boot["settings"]!["hideRemoteBars"] = false;
@@ -499,6 +521,98 @@ internal static class Program
                     await core.ExecuteScriptAsync("document.getElementById('synthUnlockCancel')?.click()");
                     await Task.Delay(200);
 
+                    // 登录态异常：顶部常驻条、桌宠统一“未登录”、暂停页和重新连接入口。
+                    synthBoot["auth"]!["state"] = "conflict";
+                    synthBoot["auth"]!["loggedIn"] = true;
+                    synthBoot["auth"]!["onlineAvailable"] = false;
+                    synthBoot["auth"]!["stateMessage"] = "登录态正在其他客户端使用；账号功能已暂停。";
+                    core.PostWebMessageAsJson(JsonSerializer.Serialize(new { evt = "boot", data = synthBoot }));
+                    await Task.Delay(700);
+                    string conflictUi = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        notice: document.querySelector('.auth-notice .official-notice-title')?.textContent || '',
+                        chip: document.getElementById('userChip')?.textContent || '',
+                        paused: !!document.querySelector('.auth-paused-card'),
+                        reconnect: !!document.querySelector('[data-auth-reconnect]')
+                      }))()");
+                    var conflictState = JsonNode.Parse(JsonSerializer.Deserialize<string>(conflictUi))!.AsObject();
+                    if (!conflictState["notice"]!.GetValue<string>().Contains("其他客户端", StringComparison.Ordinal)
+                        || conflictState["chip"]!.GetValue<string>() != "未登录"
+                        || !conflictState["paused"]!.GetValue<bool>()
+                        || !conflictState["reconnect"]!.GetValue<bool>())
+                        throw new InvalidOperationException("Auth conflict UI did not render the persistent notice/paused page/reconnect action.");
+
+                    synthBoot["auth"]!["state"] = "invalid";
+                    synthBoot["auth"]!["loggedIn"] = false;
+                    synthBoot["auth"]!["onlineAvailable"] = false;
+                    synthBoot["auth"]!["stateMessage"] = "当前登录凭据已失效；请重新登录。";
+                    core.PostWebMessageAsJson(JsonSerializer.Serialize(new { evt = "boot", data = synthBoot }));
+                    await Task.Delay(700);
+                    string invalidUi = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        notice: document.querySelector('.auth-notice .official-notice-title')?.textContent || '',
+                        chip: document.getElementById('userChip')?.textContent || '',
+                        login: !!document.getElementById('loginUid')
+                      }))()");
+                    var invalidState = JsonNode.Parse(JsonSerializer.Deserialize<string>(invalidUi))!.AsObject();
+                    if (!invalidState["notice"]!.GetValue<string>().Contains("失效", StringComparison.Ordinal)
+                        || invalidState["chip"]!.GetValue<string>() != "未登录"
+                        || !invalidState["login"]!.GetValue<bool>())
+                        throw new InvalidOperationException("Auth invalid UI did not switch to login with the credential-expired notice.");
+
+                    synthBoot["auth"]!["state"] = "valid";
+                    synthBoot["auth"]!["loggedIn"] = true;
+                    synthBoot["auth"]!["onlineAvailable"] = true;
+                    synthBoot["auth"]!["stateMessage"] = "";
+                    core.PostWebMessageAsJson(JsonSerializer.Serialize(new { evt = "boot", data = synthBoot }));
+                    await Task.Delay(700);
+                    string validUi = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        notice: !!document.querySelector('.auth-notice'),
+                        chip: document.getElementById('userChip')?.textContent || '',
+                        paused: !!document.querySelector('.auth-paused-card')
+                      }))()");
+                    var validState = JsonNode.Parse(JsonSerializer.Deserialize<string>(validUi))!.AsObject();
+                    if (validState["notice"]!.GetValue<bool>() || validState["paused"]!.GetValue<bool>()
+                        || validState["chip"]!.GetValue<string>() != "Daniel兔兔")
+                        throw new InvalidOperationException("Auth recovery did not clear the pause UI and restore the nickname chip.");
+
+                    // 背包收藏置顶：角色/配件/表情分类里，收藏物品应进入最上方的“收藏”组。
+                    var bagLoaded = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    core.NavigationCompleted += (_, ev) => bagLoaded.TrySetResult(ev.IsSuccess);
+                    core.Navigate("https://wuwatappo.local/index.html?preview=bag-emote#page=bag");
+                    if (!await bagLoaded.Task) throw new InvalidOperationException("bag preview navigation failed.");
+                    await Task.Delay(900);
+                    string bagBootJson = JsonSerializer.Deserialize<string>(
+                        await core.ExecuteScriptAsync("JSON.stringify(window.__previewBoot(window.__previewMode))"));
+                    var bagBoot = JsonNode.Parse(bagBootJson) as JsonObject
+                        ?? throw new InvalidOperationException("bag preview boot missing");
+                    boot = bagBoot;
+                    core.PostWebMessageAsJson(JsonSerializer.Serialize(new { evt = "boot", data = bagBoot }));
+                    await Task.Delay(900);
+                    string beforeFav = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        groups: [...document.querySelectorAll('.bag-group-head')].map(x => (x.textContent || '').replace(/\s+/g, ' ').trim()),
+                        cards: [...document.querySelectorAll('.card')].map(x => x.dataset.id)
+                      }))()");
+                    await core.ExecuteScriptAsync("document.querySelector('[data-id=\"201\"] .fav')?.click()");
+                    await Task.Delay(500);
+                    string afterFav = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        groups: [...document.querySelectorAll('.bag-group-head')].map(x => (x.textContent || '').replace(/\s+/g, ' ').trim()),
+                        cards: [...document.querySelectorAll('.card')].map(x => x.dataset.id),
+                        star: document.querySelector('[data-id=""201""] .fav')?.textContent || ''
+                      }))()");
+                    var beforeBagState = JsonNode.Parse(JsonSerializer.Deserialize<string>(beforeFav)!)!.AsObject();
+                    var afterBagState = JsonNode.Parse(JsonSerializer.Deserialize<string>(afterFav)!)!.AsObject();
+                    var beforeGroups = beforeBagState["groups"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+                    var afterGroups = afterBagState["groups"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+                    if (beforeGroups.Length == 0 || afterGroups.Length == 0 || !afterGroups[0].StartsWith("收藏", StringComparison.Ordinal)
+                        || !afterBagState["cards"]!.AsArray().Any(x => x!.GetValue<string>() == "201")
+                        || afterBagState["star"]!.GetValue<string>() != "★")
+                        throw new InvalidOperationException("Bag favorite must move the item into the top 收藏 group.");
+                    Console.WriteLine("PASS: bag favorite moves the item into the top 收藏 group for character/accessory/emote lists.");
+
                     Directory.CreateDirectory(Path.GetDirectoryName(output) ?? ".");
                     using (var stream = File.Create(output))
                         await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, stream);
@@ -507,6 +621,8 @@ internal static class Program
                     Console.WriteLine("PASS: WebView2 accessory scale/rotation, nudge and reset keep native boot and sliders in sync.");
                     Console.WriteLine("PASS: WebView2 forced-update risk opt-in notice, modal and accepted state render correctly.");
                     Console.WriteLine("PASS: WebView2 advanced-synth command warns on every activation.");
+                    Console.WriteLine("PASS: About button sits in the settings footer and the data-statistics notice is present.");
+                    Console.WriteLine("PASS: WebView2 auth conflict/invalid states render persistent notices, paused view and login view.");
                     Console.WriteLine("screenshot=" + output);
                     form.Close();
                 }
@@ -534,6 +650,18 @@ internal static class Program
         var settings = boot["settings"] as JsonObject ?? new JsonObject();
         switch (cmd)
         {
+            case "bag.list":
+                return new JsonObject
+                {
+                    ["items"] = new JsonArray
+                    {
+                        new JsonObject { ["id"] = 201, ["type"] = "emote", ["name"] = "收藏测试·普通", ["rarity"] = "common", ["quantity"] = 1, ["isCollect"] = false, ["thumb"] = "" },
+                        new JsonObject { ["id"] = 202, ["type"] = "emote", ["name"] = "收藏测试·史诗", ["rarity"] = "epic", ["quantity"] = 1, ["isCollect"] = false, ["thumb"] = "" },
+                        new JsonObject { ["id"] = 203, ["type"] = "emote", ["name"] = "收藏测试·稀有", ["rarity"] = "rare", ["quantity"] = 1, ["isCollect"] = false, ["thumb"] = "" },
+                    }
+                };
+            case "favorite":
+                return new JsonObject { ["favorite"] = data["on"]?.GetValue<bool>() ?? false };
             case "settings.set":
                 foreach (var kv in data)
                     settings[kv.Key] = kv.Value?.DeepClone();

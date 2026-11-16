@@ -170,7 +170,7 @@ public static class KuroSdkClient
         using var resp = await Http.SendAsync(req).ConfigureAwait(false);
         string text = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
         if (!resp.IsSuccessStatusCode)
-            throw new ApiException((int)resp.StatusCode, $"手机号登录服务 HTTP {resp.StatusCode}");
+            throw new ApiException((int)resp.StatusCode, $"手机号登录服务暂时不可用（HTTP {(int)resp.StatusCode}）");
 
         JsonNode root;
         try { root = JsonNode.Parse(text); }
@@ -179,9 +179,14 @@ public static class KuroSdkClient
         string message = ApiClient.ReadString(root?["msg"]);
         if (code != 0)
         {
+            Log.Write($"手机号登录业务错误 code={code} msg={message}");
             if (code == 41000)
                 throw new ApiException(41000, "手机号登录需要人机验证，请稍后重试或使用其他登录方式");
-            throw new ApiException(code, string.IsNullOrEmpty(message) ? "手机号登录失败" : message);
+            if (code == 1)
+                throw new ApiException(code, "手机号无效，请检查后重试");
+            if (ApiClient.HasChinese(message))
+                throw new ApiException(code, message);
+            throw new ApiException(code, $"手机号登录失败（{code}）");
         }
         return root?["data"] as JsonObject ?? new JsonObject();
     }

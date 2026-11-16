@@ -174,7 +174,33 @@
   // 预览页没有该参数，保持原来的 18px 外观。
   if (PARAMS.has('dwm')) document.documentElement.classList.add('dwm-rounded');
 
-  function isLogged() { return DEMO || !!(state.boot && state.boot.auth && state.boot.auth.loggedIn); }
+  function isLogged() {
+    if (state.boot?.auth?.loggedIn === false) return false;
+    return DEMO || !!(state.boot && state.boot.auth && state.boot.auth.loggedIn);
+  }
+  function authInfo() { return state.boot?.auth || {}; }
+  function authState() {
+    return authInfo().state || (isLogged() ? 'valid' : 'loggedOut');
+  }
+  function authOnlineAvailable() {
+    const a = authInfo();
+    if (a.onlineAvailable != null) return !!a.onlineAvailable;
+    return DEMO;
+  }
+  function authPaused() {
+    return isLogged() && !authOnlineAvailable();
+  }
+  function authStatusText(a = authInfo()) {
+    const stateName = a.state || (a.loggedIn ? 'valid' : 'loggedOut');
+    switch (stateName) {
+      case 'checking': return '正在确认登录状态…';
+      case 'conflict': return a.credentialValid ? '凭据有效 · 账号功能仍暂停' : '未登录 · 登录态正在其他客户端使用';
+      case 'invalid': return a.credentialValid ? '凭据已恢复有效 · 账号功能仍暂停' : '未登录 · 当前登录凭据已失效';
+      case 'network': return '网络不可用，暂时无法确认登录状态';
+      case 'valid': return '正常';
+      default: return '未登录';
+    }
+  }
 
   /* ---------------- 隐藏高级合成入口 ---------------- */
   const KONAMI_CODE = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a', 'b', 'a'];
@@ -1158,7 +1184,7 @@
         state.renderedIdentity = identity;
         renderPage();
       }
-      if (isLogged()) ensureBag().catch(() => { });
+      if (isLogged() && authOnlineAvailable()) ensureBag().catch(() => { });
       maybeShowDisclaimer();
       maybeShowUacPrompt();
       maybeOpenEmoteEditor();
@@ -1253,7 +1279,7 @@
   }
 
   function showAbout() {
-    const version = state.boot?.version || '0.0.1';
+    const version = state.boot?.displayVersion || state.boot?.version || '0.0.1';
     const link = (href, text) => `<a class="about-link" href="${esc(href)}" target="_blank" rel="noreferrer">${esc(text)}</a>`;
     modal(`
       <div class="about">
@@ -1285,6 +1311,10 @@
           <div class="about-sec-title">项目地址</div>
           <p>GitHub：${link('https://github.com/DanielToyama/WuwaTappoNative', 'DanielToyama/WuwaTappoNative')}</p>
           <p>希望收到你的 Star！⭐</p>
+        </div>
+        <div class="about-sec">
+          <div class="about-sec-title">数据统计说明</div>
+          <p>本工具第三方服务器（用于更新和读取公告）会接收请求来源的 IP 地址，仅用于聚合统计用户规模、在线情况及省级地区分布，用于改善与分析用户体验。原始 IP 不持久化存储，不与任何身份关联，不用于追踪或广告。地区信息仅精确到省级。</p>
         </div>
         <button class="btn ghost" id="mCloseAbout" style="align-self:center;min-width:120px">关闭</button>
       </div>`, host => {
@@ -1338,6 +1368,8 @@
     if (evt === 'boot') {
       const prev = state.boot;
       const prevAuthKey = authIdentityKey(prev);
+      const prevAuthState = prev?.auth?.state || '';
+      const prevOnline = !!prev?.auth?.onlineAvailable;
       const prevSettingsSig = bootSettingsSignature(prev);
       const prevBagSig = bootBagSignature(prev);
       const prevSynthSig = bootSynthSignature(prev);
@@ -1361,9 +1393,14 @@
         resetAccountScopedState(regionChanged);
         state.renderedIdentity = nextAuthKey;
         renderPage();
-        if (isLogged()) ensureBag().catch(() => { });
+        if (isLogged() && authOnlineAvailable()) ensureBag().catch(() => { });
       } else if (identityChanged) {
         // 同一身份已经由 boot() 渲染过，不再整页重建。
+      } else if (prevAuthState !== (data?.auth?.state || '') || prevOnline !== !!data?.auth?.onlineAvailable) {
+        // 登录态变化但账号身份没变：更新顶部条、设置状态行和当前页面的暂停态。
+        if (state.page === 'settings') renderSettings();
+        else if (state.page === 'room') renderRoom();
+        else renderPage();
       } else if (state.page === 'settings') {
         // 只更新真正变化的设置；点击/宝箱倒计时等 auth 字段不会触发整页重建。
         if (prevSettingsSig !== bootSettingsSignature(data)) renderSettings();
@@ -1430,6 +1467,8 @@
       if (!state.boot) return;
       const prevKey = authIdentityKey(state.boot);
       const wasLogged = isLogged();
+      const prevState = authState();
+      const prevOnline = authOnlineAvailable();
       const nextAuth = { ...(state.boot.auth || {}), ...(data || {}) };
       state.boot.auth = nextAuth;
       const changed = prevKey !== authIdentityKey(state.boot) || wasLogged !== isLogged();
@@ -1442,8 +1481,12 @@
           migrateLegacyAssetStorage();
           state.renderedIdentity = identity;
           renderPage();
-          if (isLogged()) ensureBag().catch(() => { });
+          if (isLogged() && authOnlineAvailable()) ensureBag().catch(() => { });
         }
+      } else if (prevState !== authState() || prevOnline !== authOnlineAvailable()) {
+        if (state.page === 'settings') renderSettings();
+        else if (state.page === 'room') renderRoom();
+        else renderPage();
       }
       return;
     }
@@ -1461,7 +1504,8 @@
     if (evt === 'room.error') {
       state.roomError = data || null;
       if (state.page === 'room') renderRoom();
-      if (data?.message) toast(data.message, 'err');
+      // 登录态异常已经在顶部条说明，不再叠一条“连接断开”的 toast。
+      if (data?.message && !(isLogged() && !authOnlineAvailable())) toast(data.message, 'err');
       return;
     }
     if (evt === 'toast') { toast(data.text, data.kind); return; }
@@ -1522,10 +1566,11 @@
 
   function renderChrome() {
     const auth = state.boot?.auth;
-    // 左下角只显示昵称，不再暴露 UID。
-    document.getElementById('userChip').textContent = auth?.loggedIn
-      ? (auth.nickname || '漂泊者')
-      : '未登录';
+    // 左下角只显示昵称，不再暴露 UID；冲突/失效时统一显示未登录。
+    const showLoggedOut = !auth?.loggedIn || auth?.state === 'conflict' || auth?.state === 'invalid';
+    document.getElementById('userChip').textContent = showLoggedOut
+      ? '未登录'
+      : (auth.nickname || '漂泊者');
     document.querySelectorAll('.tab').forEach(btn => btn.classList.toggle('active', btn.dataset.page === state.page));
     const page = PAGES.find(p => p.key === state.page);
     document.getElementById('pageTitle').textContent = page ? page.title : '';
@@ -1557,12 +1602,113 @@
       bindLogin();
       return;
     }
+    // 账号 HTTP 已暂停时不要触发背包/图鉴/合成等页面自动请求。
+    // 房间页仍渲染，让用户看到“联机已暂停”和上次房间号；设置页始终可进。
+    if (authPaused() && state.page !== 'settings' && state.page !== 'room') {
+      renderAuthPaused();
+      return;
+    }
     if (state.page === 'bag') renderBag();
     else if (state.page === 'atlas') renderAtlas();
     else if (state.page === 'synth') renderSynth();
     else if (state.page === 'preset') renderPreset();
     else if (state.page === 'room') renderRoom();
     else renderSettings();
+  }
+
+  // 异步页面渲染可能在登录态变化后才完成；这里统一兜底，防止旧页面覆盖登录/暂停页。
+  function pageAuthBlocked(pageKey) {
+    if (state.page !== pageKey) return true;
+    if (!isLogged() && state.page !== 'settings') {
+      const host = document.getElementById('pageHost');
+      if (host) { host.innerHTML = renderLogin(); bindLogin(); }
+      return true;
+    }
+    if (authPaused()) { renderAuthPaused(); return true; }
+    return false;
+  }
+
+  function authPausedTitle() {
+    const s = authState();
+    if (s === 'checking') return '正在确认登录状态';
+    if (s === 'conflict') return '登录态正在其他客户端使用';
+    if (s === 'network') return '网络不可用';
+    return '账号功能已暂停';
+  }
+
+  function renderAuthPaused() {
+    const a = authInfo();
+    const s = authState();
+    const canReconnect = s === 'conflict';
+    const actions = `
+      ${s !== 'checking' ? '<button class="btn ghost" data-auth-recheck>重新检测</button>' : ''}
+      ${canReconnect ? '<button class="btn" data-auth-reconnect>重新连接</button>' : ''}
+      <button class="btn ghost" data-auth-account>查看账号</button>`;
+    document.getElementById('pageHost').innerHTML = `<div class="login-wrap"><div class="login-card auth-paused-card">
+      <h2>${esc(authPausedTitle())}</h2>
+      <div class="hint">${esc(a.message || a.stateMessage || '为避免影响其他客户端，账号相关功能已暂停。')}</div>
+      <div class="hint muted">桌宠、键盘、主题和本地设置不受影响。本程序不会自动重新登录或自动重连。</div>
+      <div class="auth-paused-actions">${actions}</div>
+    </div></div>`;
+    bindAuthActions(document.getElementById('pageHost'));
+  }
+
+  async function runAuthRecheck(button) {
+    if (button?.disabled) return;
+    const old = button?.textContent;
+    if (button) { button.disabled = true; button.textContent = '检测中…'; }
+    try {
+      const boot = await call('auth.recheck');
+      if (boot) handleEvent('boot', boot);
+      toast(authInfo().credentialValid === true ? '登录凭据有效，账号功能仍暂停' : '登录态检测完成');
+    } catch (e) {
+      toast(e.message || '登录态检测失败', 'err');
+    } finally {
+      if (button && document.body.contains(button)) { button.disabled = false; button.textContent = old; }
+    }
+  }
+
+  function openAuthReconnectConfirm() {
+    modal(`<div class="about">
+      <div class="about-title">重新连接联机</div>
+      <div class="about-note about-note--warn"><p>重新连接会重新建立联机会话，可能使正在使用同一登录态的其他客户端下线。</p></div>
+      <div class="about-note"><p>只有确认要由本程序接管联机会话时才继续。桌宠和本地功能不会受影响。</p></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
+        <button class="btn ghost" id="authReconnectCancel">取消</button>
+        <button class="btn danger" id="authReconnectGo">仍要重新连接</button>
+      </div>
+    </div>`, host => {
+      host.querySelector('#authReconnectCancel').onclick = closeModal;
+      const go = host.querySelector('#authReconnectGo');
+      go.onclick = async () => {
+        go.disabled = true;
+        go.textContent = '正在连接…';
+        try {
+          const boot = await call('auth.reconnect');
+          closeModal();
+          if (boot) handleEvent('boot', boot);
+          toast('已重新连接联机');
+        } catch (e) {
+          closeModal();
+          toast(e.message || '重新连接失败', 'err');
+        }
+      };
+    });
+  }
+
+  function bindAuthActions(root) {
+    root?.querySelectorAll('[data-auth-recheck]').forEach(el => {
+      el.onclick = () => void runAuthRecheck(el);
+    });
+    root?.querySelectorAll('[data-auth-reconnect]').forEach(el => {
+      el.onclick = () => openAuthReconnectConfirm();
+    });
+    root?.querySelectorAll('[data-auth-account]').forEach(el => {
+      el.onclick = () => navigate('settings');
+    });
+    root?.querySelectorAll('[data-auth-login]').forEach(el => {
+      el.onclick = () => navigate('bag');
+    });
   }
 
   function setPage(html) { document.getElementById('pageHost').innerHTML = `<div class="page">${html}</div>`; }
@@ -1978,6 +2124,7 @@
   }
 
   async function renderBag() {
+    if (pageAuthBlocked('bag')) return;
     setPage(`<div class="loading">正在读取背包…</div>`);
     try { await ensureBag(); } catch { setPage(`<div class="empty-state">背包读取失败</div>`); return; }
     if (!state.bagNewReady) { refreshNewAssets(); state.bagNewReady = true; }
@@ -2095,7 +2242,10 @@
     if (state.bagRole) items = items.filter(x => assetMeta(x).role === state.bagRole);
     if (state.bagRarity) items = items.filter(x => effRarity(x.rarity) === state.bagRarity);
     if (q) items = items.filter(x => (x.name || '').toLowerCase().includes(q) || (x.series || '').toLowerCase().includes(q));
-    return items.sort((a, b) => (RARITY_ORDER[effRarity(b.rarity)] || 0) - (RARITY_ORDER[effRarity(a.rarity)] || 0)
+    // 角色/配件/表情分类：收藏物品优先；其余排序键保持不变，同组内原有相对顺序不变。
+    const favRank = x => state.favors.has(Number(x.id)) ? 0 : 1;
+    return items.sort((a, b) => favRank(a) - favRank(b)
+      || (RARITY_ORDER[effRarity(b.rarity)] || 0) - (RARITY_ORDER[effRarity(a.rarity)] || 0)
       || String(a.series).localeCompare(String(b.series), 'zh')
       || String(a.name).localeCompare(String(b.name), 'zh'));
   }
@@ -2113,18 +2263,22 @@
       bindBagCards(host);
       return;
     }
+    const favoriteItems = items.filter(x => state.favors.has(Number(x.id)));
+    const normalItems = items.filter(x => !state.favors.has(Number(x.id)));
     const groups = new Map();
-    for (const it of items) {
+    if (favoriteItems.length) groups.set('favorites', favoriteItems);
+    for (const it of normalItems) {
       const r = effRarity(it.rarity);
       if (!groups.has(r)) groups.set(r, []);
       groups.get(r).push(it);
     }
-    const order = ['epic', 'rare', 'uncommon', 'common'];
+    const order = ['favorites', 'epic', 'rare', 'uncommon', 'common'];
     host.innerHTML = order.filter(r => groups.has(r)).map(r => {
       const list = groups.get(r);
       const hidden = state.bagHidden.has(r);
+      const title = r === 'favorites' ? '收藏' : (RARITY_TEXT[r] || r);
       return `<section class="bag-group">
-        <div class="bag-group-head" data-bgroup="${r}"><span>${RARITY_TEXT[r]}</span><span class="count">${list.length}</span><span class="chev">${hidden ? '▸' : '▾'}</span></div>
+        <div class="bag-group-head" data-bgroup="${r}"><span>${title}</span><span class="count">${list.length}</span><span class="chev">${hidden ? '▸' : '▾'}</span></div>
         ${hidden ? '' : `<div class="bag-grid">${list.map(x => cardHtml(x, state.bagSelected?.id === x.id, true)).join('')}</div>`}
       </section>`;
     }).join('');
@@ -2175,7 +2329,11 @@
           on ? state.favors.add(id) : state.favors.delete(id);
           const item = (state.bag || []).find(x => Number(x.id) === id);
           if (item) item.isCollect = on;
+          // 只局部重排列表，保留当前滚动位置，不重建整个背包页。
+          const host = document.getElementById('bagGroups');
+          const scroll = host?.scrollTop || 0;
           renderBagList();
+          if (host) host.scrollTop = scroll;
         }
         catch { }
       };
@@ -2447,6 +2605,7 @@
   const ATLAS_PAGE_SIZE = 120;
 
   async function renderAtlas(preserveScroll = false) {
+    if (pageAuthBlocked('atlas')) return;
     const prevScroll = preserveScroll ? (document.getElementById('atlasGroups')?.scrollTop || 0) : 0;
     const type = state.atlasType;
     setPage(`<div class="loading">正在读取图鉴…</div>`);
@@ -2764,6 +2923,7 @@
   }
 
   async function renderSynth(preserveScroll = false) {
+    if (pageAuthBlocked('synth')) return;
     // 点击材料卡片会重建整个合成页；这里保留网格滚动位置，避免选择下方物品时弹回顶部。
     const prevScroll = preserveScroll ? (document.getElementById('synthGrid')?.scrollTop || 0) : 0;
     setPage(`<div class="loading">正在读取背包…</div>`);
@@ -3668,6 +3828,7 @@
   }
 
   async function renderPreset() {
+    if (pageAuthBlocked('preset')) return;
     setPage('<div class="loading">正在读取预设…</div>');
     try {
       await Promise.all([
@@ -3752,6 +3913,12 @@
   }
 
   function renderRoom() {
+    if (state.page !== 'room') return;
+    if (!isLogged()) {
+      const host = document.getElementById('pageHost');
+      if (host) { host.innerHTML = renderLogin(); bindLogin(); }
+      return;
+    }
     const roomScroll = {
       page: document.getElementById('pageHost')?.scrollTop || 0,
       left: document.querySelector('.room-left')?.scrollTop || 0,
@@ -3763,13 +3930,24 @@
     const selfIsOwner = !!room.selfIsOwner || !!(room.members || []).find(m => m.self)?.owner;
     const serviceDown = !!room.serviceUnavailable;
     const auth = state.boot?.auth || {};
+    const authPaused = !authOnlineAvailable();
+    const authMessage = auth.message || auth.stateMessage || '账号功能已暂停。';
     const hideOthersHotkey = String(state.boot?.settings?.hotkeys?.hideOtherPets || '').trim();
     const emotes = state.boot?.appearance?.emoteAssetIds || [];
     const blocked = onlineBlockedReason();
-    const errorText = room.lastError || state.roomError?.message || '';
+    const errorText = authPaused ? '' : (room.lastError || state.roomError?.message || '');
     setPage(`
       <div class="room-layout">
         <div class="room-left">
+          ${authPaused ? `
+          <div class="panel-box room-error auth-room-paused" style="background:#fff8e8;border:1px solid #e8c98c;color:#7a5a1f;font-size:13px;line-height:1.6">
+            <div class="setting-title" style="color:inherit">联机已暂停</div>
+            <div class="setting-sub" style="color:inherit">${esc(authMessage)} 本程序不会自动重新连接。</div>
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <button class="btn ghost" data-auth-recheck>重新检测</button>
+              ${authState() === 'conflict' ? '<button class="btn" data-auth-reconnect>重新连接</button>' : ''}
+            </div>
+          </div>` : ''}
           ${blocked ? `
           <div class="panel-box room-error" style="background:#fff8e8;border:1px solid #e8c98c;color:#7a5a1f;font-size:13px;line-height:1.6">
             联网功能已暂停：${esc(blocked)}恢复安全状态后才能加入房间、开宝箱、合成或兑换。
@@ -3790,15 +3968,15 @@
             <div class="detail-row" style="margin-top:8px"><span>可用点击数</span><span data-click-avail>${auth.clicks ?? 0}</span></div>
             <div class="detail-row"><span>累计点击数</span><span data-click-total>${auth.clickTotal ?? auth.clicks ?? 0}</span></div>
             <div style="display:flex;gap:10px;margin-top:14px">
-              <button class="btn" id="roomCreate" ${joined ? 'disabled' : ''}>创建房间</button>
-              <button class="btn danger" id="roomLeave" ${joined ? '' : 'disabled'}>离开房间</button>
+              <button class="btn" id="roomCreate" ${joined || authPaused ? 'disabled' : ''}>创建房间</button>
+              <button class="btn danger" id="roomLeave" ${!joined || authPaused ? 'disabled' : ''}>离开房间</button>
             </div>
           </div>
           <div class="panel-box">
             <div class="section-title" style="margin-left:0">${joined ? '切换房间' : '加入房间'}</div>
             <div style="display:flex;gap:10px">
-              <input class="input" id="joinNo" placeholder="输入房间号" style="flex:1" value="${esc(joined ? '' : (state.boot?.settings?.lastRoom || ''))}" />
-              <button class="btn" id="roomJoin">${joined ? '切换' : '加入'}</button>
+              <input class="input" id="joinNo" placeholder="输入房间号" style="flex:1" value="${esc(joined ? '' : (state.boot?.settings?.lastRoom || ''))}" ${authPaused ? 'disabled' : ''} />
+              <button class="btn" id="roomJoin" ${authPaused ? 'disabled' : ''}>${joined ? '切换' : '加入'}</button>
             </div>
             ${joined ? '<div class="hint muted" style="font-size:12px;margin-top:8px">切换会先退出当前房间，再从历史或输入框进入新房间。</div>' : ''}
           </div>
@@ -3861,6 +4039,7 @@
       navigator.clipboard?.writeText(room.roomNo).then(() => toast('房间号已复制')).catch(() => toast(room.roomNo));
     });
     document.getElementById('roomCreate').onclick = async () => {
+      if (authPaused) return toast(authMessage, 'err');
       try {
         const r = await tryCall('room.create');
         state.boot.room = r;
@@ -3870,6 +4049,7 @@
       } catch (e) { state.roomError = { message: e?.message || '创建房间失败' }; renderRoom(); }
     };
     const leaveRoom = async (ownerConfirmed = false) => {
+      if (authPaused) return toast(authMessage, 'err');
       try {
         const r = await tryCall('room.leave', { ownerConfirmed });
         state.boot.room = r;
@@ -3879,6 +4059,7 @@
       } catch { }
     };
     const joinRoom = async (roomNo, ownerConfirmed = false) => {
+      if (authPaused) return toast(authMessage, 'err');
       try {
         const r = await tryCall('room.join', { roomNo, ownerConfirmed });
         state.boot.room = r;
@@ -3949,11 +4130,13 @@
       openEmoteEditor().catch(e => toast('打开编辑器失败：' + e.message, 'err'));
     };
     document.querySelectorAll('[data-emote]').forEach(el => el.onclick = async () => {
+      if (authPaused) return toast(authMessage, 'err');
       const id = Number(el.dataset.emote);
       if (!id) return toast('该槽位未装备表情', 'err');
       try { await tryCall('emote.send', { id }); toast('已发送表情'); } catch { }
     });
-    if (!state.emoteCatalog)
+    bindAuthActions(document.getElementById('pageHost'));
+    if (!authPaused && !state.emoteCatalog)
       ensureEmotes().then(() => { if (state.page === 'room') renderRoom(); }).catch(() => { });
     const pageHost = document.getElementById('pageHost');
     if (pageHost && roomScroll.page > 0) pageHost.scrollTop = roomScroll.page;
@@ -4268,6 +4451,43 @@
     });
   }
 
+  /** 登录态异常固定在内容区顶部；桌宠计数器同时显示“未登录”。 */
+  function authNoticeHtml() {
+    const a = authInfo();
+    const s = a.state || (a.loggedIn ? 'valid' : 'loggedOut');
+    if (s === 'valid' || s === 'loggedOut') return '';
+    const map = {
+      checking: { cls: 'warning', title: '正在确认登录状态', text: '账号功能暂时暂停，确认完成后会自动恢复。' },
+      conflict: { cls: 'warning', title: '登录态正在其他客户端使用', text: '为避免影响其他客户端，账号相关功能已暂停；本程序不会自动重新登录或重连。桌宠与本地功能仍可用。' },
+      invalid: { cls: 'danger', title: '当前登录凭据已失效', text: '账号相关功能已暂停。请重新登录或重新继承官方登录。' },
+      network: { cls: 'warning', title: '网络不可用，暂时无法确认登录状态', text: '账号功能已暂停，网络恢复后可重新检测。' },
+    };
+    const meta = map[s];
+    if (!meta) return '';
+    const noticeTitle = s === 'invalid' && a.credentialValid ? '登录凭据已恢复有效' : meta.title;
+    const noticeText = s === 'invalid' && a.credentialValid
+      ? '账号功能仍暂停；点击“重新连接”后再恢复联机。'
+      : meta.text;
+    const actions = [];
+    if (s !== 'checking') actions.push('<button class="btn ghost" data-auth-recheck>重新检测</button>');
+    if (s === 'conflict') actions.push('<button class="btn danger" data-auth-reconnect>重新连接</button>');
+    if (s === 'invalid') actions.push(a.credentialValid
+      ? '<button class="btn" data-auth-reconnect>重新连接</button>'
+      : '<button class="btn" data-auth-login>重新登录</button>');
+    actions.push('<button class="btn ghost" data-auth-account>查看账号</button>');
+    return `<section class="official-notice ${meta.cls} auth-notice">
+      <div class="official-notice-main">
+        <div class="official-notice-icon">!</div>
+        <div class="official-notice-copy">
+          <div class="official-notice-title">${esc(noticeTitle)}</div>
+          <div class="official-notice-text">${esc(noticeText)}</div>
+          <div class="official-notice-meta">登录状态：${esc(authStatusText(a))}${a.lastCheckedAt ? ' · 检测于 ' + new Date(Number(a.lastCheckedAt)).toLocaleTimeString('zh-CN', { hour12: false }) : ''}</div>
+        </div>
+      </div>
+      <div class="official-notice-actions">${actions.join('')}</div>
+    </section>`;
+  }
+
   /// 官方版本提醒固定在内容区顶部；公告只在设置页显示，避免打扰其他功能。
   function renderNotices() {
     const host = document.getElementById('noticeHost');
@@ -4328,7 +4548,8 @@
     }
 
     const announcementHtml = state.page === 'settings' ? announcementCardHtml() : '';
-    host.innerHTML = officialHtml + announcementHtml;
+    const authHtml = authNoticeHtml();
+    host.innerHTML = authHtml + officialHtml + announcementHtml;
     if (officialHtml) {
       host.querySelectorAll('[data-official-dismiss]').forEach(el => {
         el.onclick = () => {
@@ -4339,6 +4560,7 @@
       const allow = host.querySelector('[data-official-allow]');
       if (allow) allow.onclick = () => openForcedOnlineConfirm(oc);
     }
+    bindAuthActions(host);
     bindAnnouncement(host);
   }
 
@@ -4532,6 +4754,7 @@
     if (!u || state.updateDismissed) return '';
     // 兼容旧序列化：0.0.25 曾把 ReleaseInfo 的 PascalCase 属性直接推给前端，导致标题/内容为空。
     const tag = u.tag || u.Tag || u.name || u.Name || '新版本';
+    const displayVersion = u.displayVersion || u.DisplayVersion || tag;
     const body = u.body || u.Body || '';
     const dateValue = u.publishedAt || u.PublishedAt;
     const date = dateValue ? new Date(dateValue).toLocaleDateString('zh-CN') : '';
@@ -4546,10 +4769,11 @@
     const notes = multi
       ? entries.map(e => {
           const etag = e.tag || e.Tag || '';
+          const edisplay = e.displayVersion || e.DisplayVersion || etag;
           const edate = e.publishedAt || e.PublishedAt;
           const edateText = edate ? new Date(edate).toLocaleDateString('zh-CN') : '';
           return `<section class="update-entry">
-            <div class="update-entry-head"><span>${esc(etag)}</span>${edateText ? `<span class="update-entry-date">${esc(edateText)}</span>` : ''}</div>
+            <div class="update-entry-head"><span>${esc(edisplay)}</span>${edateText ? `<span class="update-entry-date">${esc(edateText)}</span>` : ''}</div>
             ${releaseNotesHtml(e.body || e.Body || '')}
           </section>`;
         }).join('')
@@ -4569,8 +4793,8 @@
     return `<section class="update-banner">
       <div class="update-banner-head">
         <div>
-          <div class="update-banner-title">发现新版本 ${esc(tag)}</div>
-          <div class="update-banner-sub">当前版本 ${esc(state.boot?.version || '')}${date ? ' · ' + esc(date) : ''}${multi ? ` · 包含 ${entries.length} 个版本更新` : ''}</div>
+          <div class="update-banner-title">发现新版本 ${esc(displayVersion)}</div>
+          <div class="update-banner-sub">当前版本 ${esc(state.boot?.displayVersion || state.boot?.version || '')}${date ? ' · ' + esc(date) : ''}${multi ? ` · 包含 ${entries.length} 个版本更新` : ''}</div>
         </div>
         ${running || canInstall ? '' : '<button class="update-dismiss" id="updateDismiss" title="本次启动不再显示">×</button>'}
       </div>
@@ -4770,7 +4994,7 @@
       makeGroup('obs', 'OBS 采集', '采集窗口、背景与兼容模式', ['OBS 采集']),
       makeGroup('theme', '主题与外观', '主题色、背景图与主题预设', ['主题与外观']),
       makeGroup('interaction', '联机与互动', '联机桌宠、宝箱、自动化与通知', ['联机与宝箱', '自动化', '通知']),
-      makeGroup('maintenance', '程序与更新', '启动、权限、规则、更新、日志与关于', ['其他', '更新'])
+      makeGroup('maintenance', '程序与更新', '启动、权限、规则、更新与日志', ['其他', '更新'])
     );
 
     const anchor = scroller.querySelector('.compat-banner') || scroller.querySelector('.settings-footer');
@@ -4810,6 +5034,8 @@
     const s = state.boot?.settings || {};
     applyTheme(s);
     const auth = state.boot?.auth || {};
+    const currentAuthState = auth.state || (auth.loggedIn ? 'valid' : 'loggedOut');
+    const authStatus = authStatusText(auth);
     const acc = state.boot?.appearance || {};
     const accId = Number(acc.accessoryAssetId || 0);
     const rhythmCount = Math.max(4, Math.min(6, Number(s.rhythmKeyCount) || 4));
@@ -4914,18 +5140,28 @@
                 </select>
               </div>
             </div>
+            <div class="setting-item auth-status-row">
+              <div>
+                <div class="setting-title">登录态</div>
+                <div class="setting-sub">${esc(authStatus)}${auth.lastCheckedAt ? ' · 上次检测 ' + new Date(Number(auth.lastCheckedAt)).toLocaleTimeString('zh-CN', { hour12: false }) : ''}</div>
+              </div>
+              <div class="setting-content">
+                ${['conflict', 'invalid', 'network'].includes(currentAuthState) ? '<button class="btn ghost" data-auth-recheck>重新检测</button>' : ''}
+                ${currentAuthState === 'conflict' || (currentAuthState === 'invalid' && auth.credentialValid) ? '<button class="btn" data-auth-reconnect>重新连接</button>' : ''}
+              </div>
+            </div>
             ${isLogged() ? `
               <div class="detail-row"><span>昵称</span><span data-auth-nickname>${esc(auth.nickname || '—')}</span></div>
               <div class="detail-row"><span>UID</span><span data-auth-uid>${auth.uid || '—'}</span></div>
               <div class="detail-row"><span>可用点击</span><span data-click-avail>${auth.clicks || 0}</span></div>
-              <div class="detail-row"><span>累计点击</span><span class="click-total"><span data-click-total>${auth.clickTotal ?? auth.clicks ?? 0}</span><button class="btn ghost click-boost" id="boostClicks" title="本地增加 10000 次点击并立即上报；连续操作间隔至少 0.5 秒">+10000</button></span></div>
+              <div class="detail-row"><span>累计点击</span><span class="click-total"><span data-click-total>${auth.clickTotal ?? auth.clicks ?? 0}</span>${authOnlineAvailable() ? '<button class="btn ghost click-boost" id="boostClicks" title="本地增加 10000 次点击并立即上报；连续操作间隔至少 0.5 秒">+10000</button>' : ''}</span></div>
               <div class="detail-row"><span>已消耗</span><span data-click-consume>${auth.clickConsume || 0}</span></div>
               <div class="setting-item" style="padding:8px 0;border-top:1px solid var(--border,#eee);border-bottom:1px solid var(--border,#eee);background:transparent">
                 <div><div class="setting-title">自动补贴点击</div><div class="setting-sub">可用点击低于 1000 时自动补充 10000</div></div>
                 <div class="switch ${s.autoClickBoost ? 'on' : ''}" data-switch="autoClickBoost"></div>
               </div>
               <div style="display:flex;gap:10px">
-                <button class="btn ghost" id="userRefresh">刷新账号信息</button>
+                ${authOnlineAvailable() ? '<button class="btn ghost" id="userRefresh">刷新账号信息</button>' : ''}
                 <button class="btn danger" id="logoutBtn">退出登录</button>
               </div>` : ((s.serverRegion || 'cn') === 'global' ? `
               <div class="detail-row"><span>登录</span><span class="muted">国际服请使用下方继承官方登录状态，或导入 Token</span></div>
@@ -5459,10 +5695,6 @@
             <div><div class="setting-title">日志与数据</div><div class="setting-sub">%LOCALAPPDATA%\\WuwatappoNative</div></div>
             <div class="setting-content"><button class="btn ghost" id="openLog">打开日志目录</button></div>
           </div>
-          <div class="setting-item">
-            <div><div class="setting-title">关于</div><div class="setting-sub">版本 ${esc(state.boot?.version || '0.0.1')} · 免责声明与鸣谢</div></div>
-            <div class="setting-content"><button class="btn ghost" id="aboutBtn">关于本程序</button></div>
-          </div>
         </div>
 
         <div class="section">
@@ -5492,6 +5724,7 @@
         <div class="settings-footer">
           <button class="btn ghost" id="checkUpdateBtn">检查更新</button>
           <button class="btn ghost" id="compatRefreshBtn">刷新版本状态</button>
+          <button class="btn ghost" id="aboutBtn">关于</button>
           <span class="muted" id="updateCheckStatus"></span>
         </div>
       </div>`);
@@ -6697,6 +6930,7 @@
       }
     });
     bindHotkeys();
+    bindAuthActions(document.getElementById('pageHost'));
     document.getElementById('redeemBtn')?.addEventListener('click', async () => {
       const input = document.getElementById('redeemCode');
       const code = input.value.trim();

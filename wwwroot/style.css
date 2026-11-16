@@ -537,6 +537,9 @@ body.panel-maximized #maxBtn .icon-restore { display: block; }
 .login-card { width: 420px; max-width: calc(100vw - 32px); background: var(--cream-2); border: 2px solid var(--border); border-radius: 20px; padding: 26px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 10px 30px var(--theme-shadow); }
 .login-card h2 { margin: 0; font-size: 24px; color: var(--ink-strong); }
 .login-card .hint { font-size: 13px; color: var(--ink-dim); line-height: 1.7; }
+.auth-paused-card { width: 470px; }
+.auth-paused-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.auth-status-row { padding: 8px 0; border-top: 1px solid var(--border, #eee); border-bottom: 1px solid var(--border, #eee); background: transparent; }
 
 /* toast / modal */
 .toast-host { position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 50; pointer-events: none; }
@@ -685,6 +688,11 @@ body.panel-maximized #maxBtn .icon-restore { display: block; }
   border-color: #d99a90;
   background: linear-gradient(135deg, #fff5f2, #ffe6df);
 }
+.official-notice.warning {
+  border-color: #e2bc7c;
+  background: linear-gradient(135deg, #fffaf0, #fff0d2);
+}
+.official-notice + .official-notice { margin-top: 10px; }
 .official-notice-main { display: flex; align-items: flex-start; gap: 10px; }
 .official-notice-icon {
   flex: 0 0 34px; width: 34px; height: 34px; border-radius: 50%;

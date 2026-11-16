@@ -53,10 +53,11 @@ Wuwatappo Native 是 WuwaTappo 1.0.2 的 Windows 原生实现，使用 C# / .NET
 
 每次向 `main` 推送提交都会触发 GitHub Actions 的 `Beta build`，自动生成一个带测试版本号的测试版，并发布到 GitHub Releases 的 Pre-release。
 
-- 测试版版本号格式：`<下个补丁版本>-beta.<run_number>`，例如 `0.3.1-beta.123`。
-- 下载方式一：打开 [GitHub Releases](https://github.com/DanielToyama/WuwaTappoNative/releases)，找到标记为 **Pre-release** 的 `v<下个补丁版本>-beta`（例如 `v0.3.1-beta`），下载对应测试版本号的 `WuwatappoNative-<测试版本号>-Setup.exe` 或 `WuwatappoNative-<测试版本号>-portable.zip`。
+- 测试版版本号格式：`<下个补丁版本>-beta.<run_number>`，例如 `0.3.2-beta.123`。
+- 下载方式一：打开 [GitHub Releases](https://github.com/DanielToyama/WuwaTappoNative/releases)，找到标记为 **Pre-release** 的 `v<下个补丁版本>-beta`（例如 `v0.3.2-beta`），下载对应测试版本号的 `WuwatappoNative-<测试版本号>-Setup.exe` 或 `WuwatappoNative-<测试版本号>-portable.zip`。
 - 下载方式二：打开 [Beta build Actions](https://github.com/DanielToyama/WuwaTappoNative/actions/workflows/beta.yml) 的最近一次运行，在页面底部 **Artifacts** 中下载 `WuwatappoNative-beta-<run_number>`，压缩包内包含 Setup 和便携版。
 - 测试版同时提供安装包和便携版；安装包与正式版一样支持选择“为所有用户安装”或“仅当前用户安装”，便携版解压后运行 `WuwatappoNative.exe`。测试版不提供自动更新，也不承诺稳定性和兼容性。
+- 测试版的“检查更新”会同时检查正式版和后续测试版；正式版只检查正式版。发现更新后仍需手动下载安装，不会静默升级。
 - 测试版与正式版共用 `%LOCALAPPDATA%\WuwatappoNative` 配置目录；测试前建议先退出正在运行的旧实例，如担心配置被改动，可先备份该目录。
 - 反馈时请附上测试版本号、复现步骤和相关日志，提交到 [GitHub Issues](https://github.com/DanielToyama/WuwaTappoNative/issues)。**不要上传 token、账号凭据或包含凭据的截图。**
 - 日常使用请下载 Releases 中非 Pre-release 的正式版；测试版不会影响正式版的更新检查。
@@ -211,14 +212,14 @@ dotnet run --project tests/SqliteChecks/SqliteChecks.csproj -c Release
 需要 PowerShell 7 和 Inno Setup 6.7 或更高版本。
 
 ```powershell
-pwsh -File .\installer\build.ps1 -Version 0.3.0
+pwsh -File .\installer\build.ps1 -Version 0.3.1
 ```
 
 输出：
 
 ```text
-dist/WuwatappoNative-0.3.0-Setup.exe
-dist/WuwatappoNative-0.3.0-portable.zip
+dist/WuwatappoNative-0.3.1-Setup.exe
+dist/WuwatappoNative-0.3.1-portable.zip
 dist/WuwatappoTokenExtractor-1.1.2-x64.zip
 ```
 

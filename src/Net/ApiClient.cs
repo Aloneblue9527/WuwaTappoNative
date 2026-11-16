@@ -53,6 +53,13 @@ public sealed class ApiClient : IDisposable
     /// <summary>当前服务器时间（毫秒）；未收到服务器 Date 头时退回本机时间。</summary>
     public long ServerNowMs => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + ServerTimeOffsetMs;
     public event Action<string> TokenRefreshed;
+    /// <summary>
+    /// 账号请求门禁：返回非空字符串时直接拒绝该请求，不落到网络层。
+    /// 探针、显式登录/退出/恢复流程通过 bypassGate 绕过。
+    /// </summary>
+    public Func<string, string> Gate { get; set; }
+    /// <summary>账号相关请求返回 401/403/10002/10003/90002 时触发，用于统一登录态判定。</summary>
+    public event Action<string, ApiException> RequestFailed;
 
     public ApiClient(string cid, string baseUrl = null)
     {
@@ -75,13 +82,20 @@ public sealed class ApiClient : IDisposable
     public void SetToken(string token) => _token = token ?? "";
     public string Cid => LastCid;
 
-    public Task<JsonNode> GetAsync(string path) => SendAsync(HttpMethod.Get, path, null);
-    public Task<JsonNode> PostAsync(string path, object body = null) => SendAsync(HttpMethod.Post, path, body);
-    public Task<JsonNode> PutAsync(string path, object body = null) => SendAsync(HttpMethod.Put, path, body);
-    public Task<JsonNode> DeleteAsync(string path, object body = null) => SendAsync(HttpMethod.Delete, path, body);
+    public Task<JsonNode> GetAsync(string path, bool bypassGate = false) => SendAsync(HttpMethod.Get, path, null, bypassGate);
+    public Task<JsonNode> PostAsync(string path, object body = null, bool bypassGate = false) => SendAsync(HttpMethod.Post, path, body, bypassGate);
+    public Task<JsonNode> PutAsync(string path, object body = null, bool bypassGate = false) => SendAsync(HttpMethod.Put, path, body, bypassGate);
+    public Task<JsonNode> DeleteAsync(string path, object body = null, bool bypassGate = false) => SendAsync(HttpMethod.Delete, path, body, bypassGate);
 
-    async Task<JsonNode> SendAsync(HttpMethod method, string path, object body)
+    async Task<JsonNode> SendAsync(HttpMethod method, string path, object body, bool bypassGate = false)
     {
+        if (!bypassGate && Gate != null)
+        {
+            string blocked = Gate(path);
+            if (!string.IsNullOrEmpty(blocked))
+                throw new ApiException(-1, blocked);
+        }
+
         using var req = new HttpRequestMessage(method, path.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? path : path.TrimStart('/'));
         req.Headers.TryAddWithoutValidation("X-BLM-CID", LastCid);
         req.Headers.TryAddWithoutValidation("X-BLM-FRID", Guid.NewGuid().ToString("N"));
@@ -106,7 +120,14 @@ public sealed class ApiClient : IDisposable
         if ((int)resp.StatusCode == 601)
             throw new ApiException(601, "当前服务正在维护中，请稍后再试。", null);
         if (!resp.IsSuccessStatusCode)
-            throw new ApiException((int)resp.StatusCode, $"HTTP {resp.StatusCode}", null);
+        {
+            int status = (int)resp.StatusCode;
+            Log.Write($"API HTTP 错误 status={status} path={path}");
+            var failure = new ApiException(status, DescribeHttpStatus(status), null);
+            if (!bypassGate && IsAuthFailureCode(failure.Code))
+                RequestFailed?.Invoke(path, failure);
+            throw failure;
+        }
 
         JsonNode root;
         try { root = JsonNode.Parse(text); }
@@ -118,33 +139,95 @@ public sealed class ApiClient : IDisposable
         string message = obj["message"]?.GetValue<string>();
         string requestId = obj["request_id"]?.GetValue<string>();
         if (code != 0 && code != 200)
-            throw new ApiException(code, DescribeCode(code, message), requestId);
+        {
+            Log.Write($"API 业务错误 code={code} message={message} request_id={requestId} path={path}");
+            var failure = new ApiException(code, DescribeCode(code, message), requestId);
+            if (!bypassGate && IsAuthFailureCode(code))
+                RequestFailed?.Invoke(path, failure);
+            throw failure;
+        }
 
         ReadTokenCookie();
         return obj["data"];
     }
 
-    /// <summary>把常见的英文业务错误换成用户能看懂的中文，保留原始信息便于排查。</summary>
-    static string DescribeCode(int code, string message)
+    static bool IsAuthFailureCode(int code)
+        => code == 401 || code == 403 || code == 10002 || code == 10003 || code == 90002;
+
+    /// <summary>
+    /// 把服务器业务码统一映射成面向用户的中文。原始 message 仍会写入日志便于排查，
+    /// 但不再直接出现在弹窗/房间错误里，避免 room is full / room not exist 之类的英文。
+    /// </summary>
+    internal static string DescribeCode(int code, string message)
     {
-        string m = message ?? "";
         string zh = code switch
         {
-            10001 => "参数无效（请确认 UID 与验证码都是数字）",
+            10001 => "参数无效，请确认 UID 与验证码都是数字",
             10002 or 10003 => "登录已失效，请重新登录",
             10023 => "验证通道暂不可用，请改用游戏 UID 或继承官方客户端登录",
-            10025 => "查询不到该 UID 对应的游戏角色（请确认当前区服与 UID 正确）",
+            10024 => "游戏登录失败，请检查账号或区服后重试",
+            10025 => "查询不到该 UID 对应的游戏角色，请确认当前区服与 UID 正确",
             10031 => "验证码发送过于频繁，请稍后再试",
             10032 => "验证码发送失败，请稍后再试，或改用继承官方登录",
+            10034 => "验证码已失效，请重新获取",
             10035 => "验证码不正确或已过期",
-            601 => "当前服务正在维护中，请稍后再试",
+            20017 => "当前角色不能使用该表情",
+            41000 => "需要完成人机验证后重试",
+            50002 => "收集物合成失败，请稍后再试",
+            50003 => "收藏失败，请稍后再试",
+            50004 => "取消收藏失败，请稍后再试",
+            50005 => "收集物不存在",
+            50006 => "尚未拥有该收集物",
+            60002 => "兑换失败，请检查兑换码后重试",
+            60003 => "兑换码已使用",
+            60004 => "兑换码无效",
+            70003 => "客户端点击数异常，请刷新后重试",
+            70004 => "暂无可开启的宝箱",
             70005 => "可用点击数不足",
-            80003 => "仍在其他房间中，请先退出",
+            70006 => "宝箱冷却中，请稍后再试",
+            70008 => "活动未开始",
+            80003 => "仍在其他房间中，请先退出当前房间",
+            80004 => "房间号不能为空",
+            80007 => "房间不存在或已解散",
+            80008 => "房间已满",
+            80010 => "加入房间失败，请稍后再试",
+            80013 => "操作过于频繁，请稍后再试",
+            80018 => "离开房间失败，请稍后再试",
+            80021 or 80023 => "房间操作失败，请稍后再试",
+            80022 => "点击数据异常，请刷新后重试",
             90002 => "账号已在其他设备登录",
+            601 => "当前服务正在维护中，请稍后再试",
             _ => null
         };
-        if (zh == null) return string.IsNullOrEmpty(m) ? $"请求失败（{code}）" : m;
-        return string.IsNullOrEmpty(m) || m == zh ? zh : $"{zh}（{m}）";
+        if (zh != null) return zh;
+
+        string raw = (message ?? "").Trim();
+        // 未知码如果是服务端返回的中文文案，保留它；英文一律不再直接展示。
+        return HasChinese(raw) ? raw : $"请求失败（{code}）";
+    }
+
+    internal static string DescribeHttpStatus(int status)
+    {
+        return status switch
+        {
+            400 => "请求参数有误，请稍后再试",
+            401 or 403 => "登录已失效，请重新登录",
+            404 => "请求的服务不存在",
+            408 => "请求超时，请检查网络后重试",
+            429 => "请求过于频繁，请稍后再试",
+            500 or 502 or 503 or 504 => "服务器暂时不可用，请稍后再试",
+            _ => $"请求失败（HTTP {status}）"
+        };
+    }
+
+    internal static bool HasChinese(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return false;
+        foreach (char c in value)
+        {
+            if (c >= '\u4e00' && c <= '\u9fff') return true;
+        }
+        return false;
     }
 
     void ReadTokenCookie()

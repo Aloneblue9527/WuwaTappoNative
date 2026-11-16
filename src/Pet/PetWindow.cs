@@ -55,6 +55,10 @@ public sealed class PetWindow : Form
     readonly KeyBubbleLayer _keyBubbles = new(10);
     readonly EmoteWheelLayer _wheel = new();
     System.Windows.Forms.Timer _blink, _blinkOff, _moveReset, _handReset, _countdownTimer, _wheelCloseTimer, _wheelShowTimer, _hoverFadeTimer, _loadingTimer, _hoverFadeAnimTimer, _hoverPollTimer;
+    System.Windows.Forms.Timer _zOrderWatchdog;
+    bool _zOrderRepairing;
+    bool _zOrderRestackQueued;
+    long _lastZOrderRepairLogMs;
     long _lastSkin = -1, _lastAcc = -1;
     Image _chestBtnArt, _chestBgArt;
     ContextMenuStrip _menu;
@@ -116,7 +120,11 @@ public sealed class PetWindow : Form
         _room.MemberEmote += (id, name) => Safe(() => { if (_cats.TryGetValue(id, out var c)) c.ShowEmote(name); });
         _room.StateChanged += () => Safe(RefreshCats);
         _room.ForcedDisconnect += code => Safe(() => Notify(code == 90002 ? "账号已在其他设备登录" : "房间已关闭"));
-        _room.SocketClosed += reason => Safe(() => { if (_room.State == "joined") Notify("连接断开：" + reason); });
+        _room.SocketClosed += reason => Safe(() =>
+        {
+            // 登录态异常由顶部条/未登录态统一提示，不再用气泡重复“连接断开”。
+            if (_auth.CanUseOnline && _room.State == "joined") Notify("连接断开：" + reason);
+        });
         _room.JoinRejected += message => Safe(() => Notify(message));
         _room.ServiceUnavailableChanged += down => Safe(() =>
             Notify(down ? "联机服务暂不可用，正在自动重试…" : "联机服务已恢复"));
@@ -129,8 +137,11 @@ public sealed class PetWindow : Form
         Location = cfg.PetX >= 0 ? new Point(cfg.PetX, cfg.PetY) : DefaultLocation();
         _hook.KeyDown += vk => Safe(() =>
         {
-            _room.AddClicks(1);
-            _room.NotifyLocalAction();
+            if (_auth.CanUseOnline)
+            {
+                _room.AddClicks(1);
+                _room.NotifyLocalAction();
+            }
             if (!_dragging) HandDown();
         });
         _hook.KeyUp += vk => Safe(() => { if (!_dragging) HandUp(); });
@@ -256,9 +267,18 @@ public sealed class PetWindow : Form
         var accTransform = AccessoryTransformFor(_cfg.AccessoryAssetId);
         var theme = _themePreview.HasValue ? _themePreview.Value : ThemeBarColors();
         var (barColor, barTextColor, _, barIconColor, barIconMutedColor) = theme;
+        bool showLoggedOut = _auth.ShowLoggedOutOnPet;
+        bool online = _auth.CanUseOnline;
+        Color loggedOutColor = EnsureBarIconReadable(
+            _auth.State == AuthState.Conflict
+                ? Color.FromArgb(183, 121, 47)
+                : Color.FromArgb(179, 74, 63),
+            barColor);
         return new PetComposer.Info
         {
             Clicks = _room.AvailableClicks,
+            ShowLoggedOut = showLoggedOut,
+            LoggedOutColor = loggedOutColor,
             KeyboardOn = _cfg.KeyboardMode != "hidden",
             Nickname = _auth.Nickname,
             Bubbles = _bubbles,
@@ -274,8 +294,8 @@ public sealed class PetWindow : Form
             AccScalePercent = accTransform.ScalePercent,
             AccRotationDegrees = accTransform.RotationDegrees,
             // 关闭"总是显示宝箱"时：可领取按钮常显；鼠标悬停桌宠时像表情 UI 一样露出倒计时
-            ShowChestLeft = leftTs > 0 && (_cfg.AlwaysShowChest || _hovering || leftTs <= now),
-            ShowChestRight = rightTs > 0 && (_cfg.AlwaysShowChest || _hovering || rightTs <= now),
+            ShowChestLeft = online && leftTs > 0 && (_cfg.AlwaysShowChest || _hovering || leftTs <= now),
+            ShowChestRight = online && rightTs > 0 && (_cfg.AlwaysShowChest || _hovering || rightTs <= now),
             ChestButton = _chestBtnArt,
             ChestCountdown = _chestBgArt,
             BarColor = barColor,
@@ -754,7 +774,7 @@ public sealed class PetWindow : Form
         _countdownTimer = new System.Windows.Forms.Timer { Interval = 1000 };
         _countdownTimer.Tick += (s, e) =>
         {
-            if (!_auth.IsLoggedIn) return;
+            if (!_auth.CanUseOnline) return;
             long now = _auth.ServerNowMs;
             long left = ApiClient.ReadLong(_auth.UserInfo?["left_treasure_chest"]);
             long right = ApiClient.ReadLong(_auth.UserInfo?["right_treasure_chest"]);
@@ -806,6 +826,11 @@ public sealed class PetWindow : Form
         _hoverPollTimer = new System.Windows.Forms.Timer { Interval = 150 };
         _hoverPollTimer.Tick += (s, e) => PollHover();
         _hoverPollTimer.Start();
+        // 兜底检测：Windows/DWM 或其它置顶窗口偶尔会把桌宠层级拆开；
+        // 每秒检查一次主桌宠 + 全部可见联机桌宠是否仍在顶层且主桌宠在最上方。
+        _zOrderWatchdog = new System.Windows.Forms.Timer { Interval = 1000 };
+        _zOrderWatchdog.Tick += (s, e) => EnsurePetZOrder();
+        _zOrderWatchdog.Start();
         _loadingTimer = new System.Windows.Forms.Timer { Interval = 80 };
         _loadingTimer.Tick += (s, e) =>
         {
@@ -859,8 +884,11 @@ public sealed class PetWindow : Form
     public void GamepadTap()
     {
         if (_hiddenByHotkey) return;
-        _room.AddClicks(1);
-        _room.NotifyLocalAction();
+        if (_auth.CanUseOnline)
+        {
+            _room.AddClicks(1);
+            _room.NotifyLocalAction();
+        }
         if (!_dragging) HandDown();
         Compose();
     }
@@ -889,11 +917,12 @@ public sealed class PetWindow : Form
         long now = _auth.ServerNowMs;
         long leftTs = ApiClient.ReadLong(_auth.UserInfo?["left_treasure_chest"]);
         long rightTs = ApiClient.ReadLong(_auth.UserInfo?["right_treasure_chest"]);
+        bool online = _auth.CanUseOnline;
         string chest = null;
         bool chestReady = false;
-        if (leftTs > 0 && (_cfg.AlwaysShowChest || _hovering || leftTs <= now) && PetComposer.ChestLeftRect.Contains(x, y))
+        if (online && leftTs > 0 && (_cfg.AlwaysShowChest || _hovering || leftTs <= now) && PetComposer.ChestLeftRect.Contains(x, y))
         { chest = "left"; chestReady = leftTs <= now; }
-        else if (rightTs > 0 && (_cfg.AlwaysShowChest || _hovering || rightTs <= now) && PetComposer.ChestRightRect.Contains(x, y))
+        else if (online && rightTs > 0 && (_cfg.AlwaysShowChest || _hovering || rightTs <= now) && PetComposer.ChestRightRect.Contains(x, y))
         { chest = "right"; chestReady = rightTs <= now; }
         return new HitZone(cat, counter, kb, menu, chest, chestReady);
     }
@@ -926,7 +955,7 @@ public sealed class PetWindow : Form
         if (zone.Keyboard) { CycleKeyboard(); return; }
         if (zone.Menu || zone.Counter)
         {
-            _room.AddClicks(1);
+            if (_auth.CanUseOnline) _room.AddClicks(1);
             Compose();
             OpenPanelRequested?.Invoke();
             return;
@@ -953,8 +982,11 @@ public sealed class PetWindow : Form
 
         _multiSelectClickPending = false;
         ClearSelection();
-        _room.AddClicks(1);
-        _room.NotifyLocalAction();
+        if (_auth.CanUseOnline)
+        {
+            _room.AddClicks(1);
+            _room.NotifyLocalAction();
+        }
         HandDown();
         Compose();
         _dragging = true;
@@ -1229,6 +1261,7 @@ public sealed class PetWindow : Form
         else if (!_hiddenByHotkey && !Visible)
         {
             Show();
+            QueueRestackPetWindows();
         }
     }
 
@@ -1307,13 +1340,104 @@ public sealed class PetWindow : Form
         long ex = GetWindowLongPtr(Handle, -20).ToInt64();
         if (_cfg.ClickThrough) ex |= 0x00000020L;
         else ex &= ~0x00000020L;
+        if (_cfg.Topmost) ex |= 0x00000008L;
+        else ex &= ~0x00000008L;
         SetWindowLongPtr(Handle, -20, new IntPtr(ex));
         SetWindowPos(Handle, _cfg.Topmost ? HwndTopMost : HwndNoTopMost, 0, 0, 0, 0,
             0x0001 | 0x0002 | 0x0010); // NOSIZE | NOMOVE | NOACTIVATE
+        RestackPetWindows(force: true);
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        ApplyWindowStyles();
+    }
+
+    /// <summary>
+    /// 兜底层级检测。正常时只做一次很轻量的 z-order/ex-style 检查；
+    /// 发现主桌宠/联机桌宠被普通窗口拆开、丢失置顶或主桌宠被联机桌宠压住时才重排。
+    /// </summary>
+    void EnsurePetZOrder()
+    {
+        if (!IsHandleCreated || IsDisposed || !Visible || _hiddenByHotkey) return;
+        RestackPetWindows(force: false);
+    }
+
+    void QueueRestackPetWindows()
+    {
+        if (_zOrderRestackQueued) return;
+        _zOrderRestackQueued = true;
+        try
+        {
+            if (IsHandleCreated && !IsDisposed)
+                BeginInvoke(new Action(() => { _zOrderRestackQueued = false; RestackPetWindows(force: true); }));
+            else _zOrderRestackQueued = false;
+        }
+        catch { _zOrderRestackQueued = false; }
+    }
+
+    void RestackPetWindows(bool force)
+    {
+        if (!IsHandleCreated || IsDisposed || !Visible || _hiddenByHotkey || _zOrderRepairing) return;
+
+        var remotes = _cats.Values
+            .Where(c => c != null && !c.IsDisposed && c.Visible && c.IsHandleCreated && IsWindowVisible(c.Handle))
+            .OrderBy(c => c.MemberId)
+            .ToList();
+        var pets = new List<IntPtr>(remotes.Count + 1) { Handle };
+        foreach (var cat in remotes) pets.Add(cat.Handle);
+
+        bool topmost = _cfg.Topmost;
+        var topLevel = VisibleTopLevelZOrder();
+        if (topLevel.Count == 0) return; // 枚举失败时不要每秒盲目重排。
+        var problem = PetZOrderGuard.Check(
+            pets,
+            topLevel,
+            topmost ? HasTopMostStyle : null,
+            requireContiguous: topmost);
+        if (!force && problem == PetZOrderProblem.None) return;
+
+        _zOrderRepairing = true;
+        try
+        {
+            uint flags = 0x0001 | 0x0002 | 0x0010; // NOSIZE | NOMOVE | NOACTIVATE
+            if (topmost)
+            {
+                // 先把所有联机桌宠放回顶层，再把主角放到顶层最前，最后按成员顺序把联机桌宠插到主角下方。
+                foreach (var cat in remotes)
+                    SetWindowPos(cat.Handle, HwndTopMost, 0, 0, 0, 0, flags);
+                SetWindowPos(Handle, HwndTopMost, 0, 0, 0, 0, flags);
+            }
+            for (int i = remotes.Count - 1; i >= 0; i--)
+                SetWindowPos(remotes[i].Handle, Handle, 0, 0, 0, 0, flags);
+        }
+        finally { _zOrderRepairing = false; }
+
+        long now = Environment.TickCount64;
+        if (problem != PetZOrderProblem.None && now - Interlocked.Read(ref _lastZOrderRepairLogMs) >= 30_000)
+        {
+            Interlocked.Exchange(ref _lastZOrderRepairLogMs, now);
+            Log.Write($"窗口层级兜底：{problem}，已重排主桌宠与 {remotes.Count} 个联机桌宠");
+        }
+    }
+
+    static bool HasTopMostStyle(IntPtr hwnd)
+        => (GetWindowLongPtr(hwnd, -20).ToInt64() & 0x00000008L) != 0;
+
+    static List<IntPtr> VisibleTopLevelZOrder()
+    {
+        var result = new List<IntPtr>(64);
+        for (IntPtr h = GetTopWindow(IntPtr.Zero); h != IntPtr.Zero; h = GetWindow(h, GwHwndNext))
+        {
+            if (IsWindowVisible(h)) result.Add(h);
+        }
+        return result;
     }
 
     static readonly IntPtr HwndTopMost = new(-1);
     static readonly IntPtr HwndNoTopMost = new(-2);
+    const uint GwHwndNext = 2;
 
     public bool IsDragging => _dragging;
 
@@ -1649,7 +1773,11 @@ public sealed class PetWindow : Form
             _hiddenByHotkey = !_hiddenByHotkey;
             Visible = !_hiddenByHotkey && !(_cfg.CaptureMode && _cfg.CaptureStopRenderingMain);
             foreach (var c in _cats.Values) c.Visible = !_hiddenByHotkey;
-            if (!_hiddenByHotkey) Compose();
+            if (!_hiddenByHotkey)
+            {
+                Compose();
+                QueueRestackPetWindows();
+            }
             PetVisibilityChanged?.Invoke(!_hiddenByHotkey);
         }
         else if (action == "barToggle")
@@ -1755,6 +1883,9 @@ public sealed class PetWindow : Form
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
     [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+    [DllImport("user32.dll")] static extern IntPtr GetTopWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
 
     // ---------- 菜单 / 托盘 ----------
 
@@ -1820,7 +1951,19 @@ public sealed class PetWindow : Form
         {
             string k = key;
             var item = new ToolStripMenuItem(label) { Checked = _cfg.KeyboardMode == key };
-            item.Click += (s, e) => { _cfg.KeyboardMode = k; Save(); KeyboardModeChanged?.Invoke(); Compose(); RefreshMenu(); };
+            item.Click += (s, e) =>
+            {
+                _cfg.KeyboardMode = k;
+                // 鸣潮和音游在右键菜单里始终并列显示；选择哪个就直接切换对应模式，
+                // 不能只改 KeyboardMode 而让 RhythmMode 把它又强制改回去。
+                if (k == "wuwa") _cfg.RhythmMode = false;
+                else if (k == "rhythm") _cfg.RhythmMode = true;
+                Save();
+                KeyboardModeChanged?.Invoke();
+                Compose();
+                NotifySettingsChanged();
+                RefreshMenu();
+            };
             kb.DropDownItems.Add(item);
         }
         _menu.Items.Add(kb);
@@ -1876,8 +2019,8 @@ public sealed class PetWindow : Form
             foreach (ToolStripItem sub in mi.DropDownItems)
             {
                 var subItem = (ToolStripMenuItem)sub;
-                if (subItem.Text == "鸣潮专属") subItem.Visible = !_cfg.RhythmMode;
-                else if (subItem.Text == "音游模式") subItem.Visible = _cfg.RhythmMode;
+                // 鸣潮专属和音游模式常驻，不再根据 RhythmMode 隐藏其中一个。
+                subItem.Visible = true;
                 subItem.Checked = subItem.Text == active;
             }
         }
@@ -1974,6 +2117,7 @@ public sealed class PetWindow : Form
                 var theme = ThemeBarColors();
                 existing.SetTheme(theme.bar, theme.text);
                 existing.RefreshMember();
+                QueueRestackPetWindows();
             }
             else
             {
@@ -2001,7 +2145,11 @@ public sealed class PetWindow : Form
                 _cats[id] = cat;
                 // 主桌宠被 F9 隐藏时，新上线/新创建的远程成员也不能直接冒出来；
                 // 取消隐藏时由 ApplyMainPetVisibility 的统一循环恢复显示。
-                if (!_hiddenByHotkey) cat.Show();
+                if (!_hiddenByHotkey)
+                {
+                    cat.Show();
+                    QueueRestackPetWindows();
+                }
             }
         }
     }
@@ -2408,6 +2556,7 @@ public sealed class PetWindow : Form
             // 缩放后窗口从左上角变大，贴边排列的成员会被顶出屏幕；按可见猫体修正回工作区。
             if (c.Width != oldWidth) ClampCatToScreen(pair.Key, c);
         }
+        QueueRestackPetWindows();
     }
 
     void ClampCatToScreen(long id, RemoteCatWindow cat)
@@ -2464,6 +2613,7 @@ public sealed class PetWindow : Form
             _groupDragOrigins.Remove(id);
             cat.Close();
             cat.Dispose();
+            QueueRestackPetWindows();
         }
     }
 
@@ -2508,7 +2658,7 @@ public sealed class PetWindow : Form
         _captureFrame?.Dispose();
         _captureFrame = null;
         _capture = null;
-        foreach (var t in new[] { _blink, _blinkOff, _moveReset, _handReset, _countdownTimer, _wheelCloseTimer, _wheelShowTimer, _hoverFadeTimer, _hoverFadeAnimTimer, _hoverPollTimer, _loadingTimer }) { try { t?.Stop(); t?.Dispose(); } catch { } }
+        foreach (var t in new[] { _blink, _blinkOff, _moveReset, _handReset, _countdownTimer, _wheelCloseTimer, _wheelShowTimer, _hoverFadeTimer, _hoverFadeAnimTimer, _hoverPollTimer, _loadingTimer, _zOrderWatchdog }) { try { t?.Stop(); t?.Dispose(); } catch { } }
         foreach (var c in _cats.Values.ToList()) { try { c.Close(); c.Dispose(); } catch { } }
         _cats.Clear();
         _composeTimer.Dispose();
