@@ -128,6 +128,39 @@ internal static class Program
                     await core.ExecuteScriptAsync("document.getElementById('mCloseAbout')?.click()");
                     await Task.Delay(200);
 
+                    // 公告历史：按钮必须位于刷新版本状态与关于之间；后端历史未接入时回退到当前公告。
+                    string historyFallbackUi = await core.ExecuteScriptAsync(@"
+                      (() => {
+                        const footer = document.querySelector('.settings-footer');
+                        const ids = [...footer.querySelectorAll('button')].map(b => b.id);
+                        document.getElementById('announcementHistoryBtn')?.click();
+                        const items = [...document.querySelectorAll('.announcement-history-item')];
+                        return JSON.stringify({
+                          ids,
+                          inFooter: !!footer.querySelector('#announcementHistoryBtn'),
+                          modal: !!document.querySelector('.announcement-history-modal'),
+                          count: items.length,
+                          title: document.querySelector('.announcement-history .about-title')?.textContent || '',
+                          close: !!document.getElementById('mCloseAnnouncementHistory'),
+                          action: !!document.querySelector('.announcement-history-actions .btn')
+                        });
+                      })()");
+                    var historyFallbackState = JsonNode.Parse(JsonSerializer.Deserialize<string>(historyFallbackUi)!)!.AsObject();
+                    var footerIds = historyFallbackState["ids"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+                    if (!footerIds.SequenceEqual(new[] { "checkUpdateBtn", "compatRefreshBtn", "announcementHistoryBtn", "aboutBtn" }))
+                        throw new InvalidOperationException("Settings footer order is wrong: " + string.Join(",", footerIds));
+                    if (!historyFallbackState["inFooter"]!.GetValue<bool>()
+                        || !historyFallbackState["modal"]!.GetValue<bool>()
+                        || historyFallbackState["title"]!.GetValue<string>() != "公告历史"
+                        || !historyFallbackState["close"]!.GetValue<bool>()
+                        || !historyFallbackState["action"]!.GetValue<bool>())
+                        throw new InvalidOperationException("Announcement history modal did not render from fallback announcements.");
+                    int fallbackCount = historyFallbackState["count"]!.GetValue<int>();
+                    if (fallbackCount < 1)
+                        throw new InvalidOperationException("Announcement history fallback rendered no entries.");
+                    await core.ExecuteScriptAsync("document.getElementById('mCloseAnnouncementHistory')?.click()");
+                    await Task.Delay(200);
+
                     // 底栏开关 + 快捷键单/双模式：只隐藏输入行，切回时原绑定仍在。
                     boot["settings"]!["hideMainBar"] = false;
                     boot["settings"]!["hideRemoteBars"] = false;
@@ -616,6 +649,162 @@ internal static class Program
                     Directory.CreateDirectory(Path.GetDirectoryName(output) ?? ".");
                     using (var stream = File.Create(output))
                         await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, stream);
+
+                    // 公告历史预览：演示数据齐全、自动弹窗、日期倒序，并验证空状态/无效日期排序。
+                    var historyLoaded = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    core.NavigationCompleted += (_, ev) => historyLoaded.TrySetResult(ev.IsSuccess);
+                    core.Navigate("https://wuwatappo.local/index.html?preview=announcement-history#page=settings");
+                    if (!await historyLoaded.Task) throw new InvalidOperationException("announcement-history preview navigation failed.");
+                    await Task.Delay(1200);
+                    string historyUi = await core.ExecuteScriptAsync(@"
+                      (() => {
+                        const modal = document.querySelector('.announcement-history-modal');
+                        const items = [...document.querySelectorAll('.announcement-history-item')];
+                        const dates = [...document.querySelectorAll('.announcement-history-date')].map(x => x.textContent.trim());
+                        const severities = items.map(x => ['info', 'warning', 'critical'].find(c => x.classList.contains(c)) || '');
+                        const actions = [...document.querySelectorAll('.announcement-history-actions .btn')];
+                        const firstBody = document.querySelector('.announcement-history-body');
+                        return JSON.stringify({
+                          modal: !!modal,
+                          count: items.length,
+                          dates,
+                          severities,
+                          actionCount: actions.length,
+                          actionTargets: actions.map(a => a.getAttribute('target') || ''),
+                          actionRels: actions.map(a => a.getAttribute('rel') || ''),
+                          close: !!document.getElementById('mCloseAnnouncementHistory'),
+                          footerIds: [...document.querySelectorAll('.settings-footer button')].map(b => b.id),
+                          footerVisible: !!document.querySelector('.settings-footer #announcementHistoryBtn'),
+                          unread: !!document.querySelector('.announcement-history-unread'),
+                          whiteSpace: firstBody ? getComputedStyle(firstBody).whiteSpace : '',
+                          longBody: firstBody ? firstBody.textContent.length : 0,
+                          newestTitle: document.querySelector('.announcement-history-title')?.textContent || ''
+                        });
+                      })()");
+                    var historyState = JsonNode.Parse(JsonSerializer.Deserialize<string>(historyUi)!)!.AsObject();
+                    if (!historyState["modal"]!.GetValue<bool>())
+                        throw new InvalidOperationException("Announcement-history preview did not auto-open the modal.");
+                    if (historyState["count"]!.GetValue<int>() < 5)
+                        throw new InvalidOperationException("Announcement-history preview must show at least 5 demo entries.");
+                    var historyDates = historyState["dates"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+                    if (historyDates.Any(d => !System.Text.RegularExpressions.Regex.IsMatch(d, @"^\d{4}-\d{2}-\d{2}$")))
+                        throw new InvalidOperationException("Announcement history contains an unformatted date: " + string.Join(",", historyDates));
+                    for (int i = 1; i < historyDates.Length; i++)
+                        if (string.CompareOrdinal(historyDates[i - 1], historyDates[i]) <= 0)
+                            throw new InvalidOperationException("Announcement history is not sorted newest first: " + string.Join(",", historyDates));
+                    var historySeverities = historyState["severities"]!.AsArray().Select(x => x!.GetValue<string>()).ToHashSet();
+                    if (!historySeverities.Contains("info") || !historySeverities.Contains("warning") || !historySeverities.Contains("critical"))
+                        throw new InvalidOperationException("Announcement-history demo must cover info/warning/critical.");
+                    if (historyState["actionCount"]!.GetValue<int>() < 1)
+                        throw new InvalidOperationException("Announcement-history demo is missing an action button.");
+                    var actionTargets = historyState["actionTargets"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+                    var actionRels = historyState["actionRels"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+                    if (actionTargets.Any(t => t != "_blank") || actionRels.Any(r => !r.Contains("noreferrer", StringComparison.Ordinal)))
+                        throw new InvalidOperationException("Announcement-history action buttons must open in a new window with noreferrer.");
+                    if (!historyState["close"]!.GetValue<bool>())
+                        throw new InvalidOperationException("Announcement-history modal is missing the bottom close button.");
+                    var historyFooterIds = historyState["footerIds"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+                    if (!historyFooterIds.SequenceEqual(new[] { "checkUpdateBtn", "compatRefreshBtn", "announcementHistoryBtn", "aboutBtn" })
+                        || !historyState["footerVisible"]!.GetValue<bool>())
+                        throw new InvalidOperationException("Settings footer disappeared behind the announcement-history modal.");
+                    if (!historyState["unread"]!.GetValue<bool>())
+                        throw new InvalidOperationException("Current announcement should be marked as unread in history.");
+                    if (historyState["whiteSpace"]!.GetValue<string>() != "pre-wrap")
+                        throw new InvalidOperationException("Announcement body must preserve line breaks with white-space: pre-wrap.");
+                    if (historyState["longBody"]!.GetValue<int>() < 100)
+                        throw new InvalidOperationException("Announcement-history demo should include a long body.");
+                    if (!historyState["newestTitle"]!.GetValue<string>().Contains("0.1.8", StringComparison.Ordinal))
+                        throw new InvalidOperationException("Newest announcement is not shown first: " + historyState["newestTitle"]);
+                    Console.WriteLine("PASS: announcement-history preview auto-opens with " + historyState["count"]!.GetValue<int>() + " sorted entries, actions and close button.");
+
+                    // 空状态：清空历史与当前公告后，入口仍可点击并显示“暂无公告历史”。
+                    await core.ExecuteScriptAsync("document.getElementById('mCloseAnnouncementHistory')?.click()");
+                    await Task.Delay(200);
+                    string historyBootJson = JsonSerializer.Deserialize<string>(
+                        await core.ExecuteScriptAsync("JSON.stringify(window.__previewBoot(window.__previewMode))"));
+                    var historyBoot = JsonNode.Parse(historyBootJson) as JsonObject
+                        ?? throw new InvalidOperationException("announcement-history preview boot missing");
+                    historyBoot["announcements"] = new JsonArray();
+                    historyBoot["announcementHistory"] = new JsonArray();
+                    core.PostWebMessageAsJson(JsonSerializer.Serialize(new { evt = "boot", data = historyBoot }));
+                    await Task.Delay(600);
+                    await core.ExecuteScriptAsync("document.getElementById('announcementHistoryBtn')?.click()");
+                    await Task.Delay(150);
+                    string emptyHistoryUi = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        items: document.querySelectorAll('.announcement-history-item').length,
+                        text: document.querySelector('.announcement-history-empty-title')?.textContent || '',
+                        close: !!document.getElementById('mCloseAnnouncementHistory')
+                      }))()");
+                    var emptyHistoryState = JsonNode.Parse(JsonSerializer.Deserialize<string>(emptyHistoryUi)!)!.AsObject();
+                    if (emptyHistoryState["items"]!.GetValue<int>() != 0
+                        || emptyHistoryState["text"]!.GetValue<string>() != "暂无公告历史"
+                        || !emptyHistoryState["close"]!.GetValue<bool>())
+                        throw new InvalidOperationException("Announcement-history empty state was not rendered correctly.");
+                    Console.WriteLine("PASS: announcement-history empty state renders 暂无公告历史 with a close button.");
+                    await core.ExecuteScriptAsync("document.getElementById('mCloseAnnouncementHistory')?.click()");
+                    await Task.Delay(200);
+
+                    // 实时推送：C# 刷新公告后会单独发 announcementHistory 事件，不等下一次 boot。
+                    core.PostWebMessageAsJson(JsonSerializer.Serialize(new
+                    {
+                        evt = "announcementHistory",
+                        data = new[]
+                        {
+                            new
+                            {
+                                id = "push-1",
+                                title = "实时推送公告",
+                                body = "来自 announcementHistory 事件",
+                                severity = "warning",
+                                publishedAt = "2026-11-16T12:00:00+08:00",
+                                action = new { label = "查看详情", url = "https://github.com/DanielToyama/WuwaTappoNative" },
+                            },
+                        },
+                    }));
+                    await Task.Delay(400);
+                    await core.ExecuteScriptAsync("document.getElementById('announcementHistoryBtn')?.click()");
+                    await Task.Delay(150);
+                    string pushedHistoryUi = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        count: document.querySelectorAll('.announcement-history-item').length,
+                        title: document.querySelector('.announcement-history-title')?.textContent || '',
+                        body: document.querySelector('.announcement-history-body')?.textContent || ''
+                      }))()");
+                    var pushedHistoryState = JsonNode.Parse(JsonSerializer.Deserialize<string>(pushedHistoryUi)!)!.AsObject();
+                    if (pushedHistoryState["count"]!.GetValue<int>() != 1
+                        || pushedHistoryState["title"]!.GetValue<string>() != "实时推送公告")
+                        throw new InvalidOperationException("announcementHistory event did not refresh the board modal.");
+                    Console.WriteLine("PASS: announcementHistory event updates the board without a new boot.");
+                    await core.ExecuteScriptAsync("document.getElementById('mCloseAnnouncementHistory')?.click()");
+                    await Task.Delay(200);
+
+                    // 容错排序：publishedAt 无效的条目必须排在最后，且不能抛异常。
+                    historyBoot["announcementHistory"] = new JsonArray
+                    {
+                        new JsonObject { ["id"] = "valid-old", ["severity"] = "info", ["publishedAt"] = "2026-01-05T12:00:00+08:00", ["title"] = "旧公告", ["body"] = "旧公告正文" },
+                        new JsonObject { ["id"] = "invalid-date", ["severity"] = "warning", ["publishedAt"] = "not-a-date", ["title"] = "日期缺失", ["body"] = "日期缺失正文" },
+                        new JsonObject { ["id"] = "valid-new", ["severity"] = "critical", ["publishedAt"] = "2026-12-01T12:00:00+08:00", ["title"] = "新公告", ["body"] = "新公告正文" },
+                    };
+                    core.PostWebMessageAsJson(JsonSerializer.Serialize(new { evt = "boot", data = historyBoot }));
+                    await Task.Delay(600);
+                    await core.ExecuteScriptAsync("document.getElementById('announcementHistoryBtn')?.click()");
+                    await Task.Delay(150);
+                    string invalidHistoryUi = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        ids: [...document.querySelectorAll('.announcement-history-item')].map(x => x.dataset.annId),
+                        dates: [...document.querySelectorAll('.announcement-history-date')].map(x => x.textContent.trim()),
+                        error: window.__historySortError || ''
+                      }))()");
+                    var invalidHistoryState = JsonNode.Parse(JsonSerializer.Deserialize<string>(invalidHistoryUi)!)!.AsObject();
+                    var invalidIds = invalidHistoryState["ids"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+                    var invalidDates = invalidHistoryState["dates"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+                    if (!invalidIds.SequenceEqual(new[] { "valid-new", "valid-old", "invalid-date" })
+                        || invalidDates[2] != "时间未知")
+                        throw new InvalidOperationException("Invalid publishedAt entries must sort last: " + string.Join(",", invalidIds));
+                    Console.WriteLine("PASS: announcement-history sorts invalid publishedAt entries last.");
+                    await core.ExecuteScriptAsync("document.getElementById('mCloseAnnouncementHistory')?.click()");
+                    await Task.Delay(200);
                     Console.WriteLine("PASS: WebView2 bar switches render and single/separate hotkey rows filter without losing bindings.");
                     Console.WriteLine("PASS: WebView2 theme preset list/apply/rename/delete uses real C# data and persists deletes.");
                     Console.WriteLine("PASS: WebView2 accessory scale/rotation, nudge and reset keep native boot and sliders in sync.");

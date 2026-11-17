@@ -45,6 +45,7 @@
     updateDismissed: false,
     compatibility: null,
     announcements: [],
+    announcementHistory: [],
     settingsOpenGroups: new Set(),
     settingsSearch: '',
     loginMode: 'uid',
@@ -93,7 +94,8 @@
     });
   }
 
-  window.chrome.webview.addEventListener('message', ev => {
+  // 纯浏览器预览不一定注入 WebView2 桥；真实 WebView2 中对象始终存在。
+  window.chrome?.webview?.addEventListener('message', ev => {
     let msg = ev.data;
     if (typeof msg === 'string') { try { msg = JSON.parse(msg); } catch { return; } }
     if (!msg) return;
@@ -1174,6 +1176,7 @@
       applyTheme(b.settings);
       state.update = b.update || state.update;
       state.announcements = Array.isArray(b.announcements) ? b.announcements : [];
+      state.announcementHistory = Array.isArray(b.announcementHistory) ? b.announcementHistory : [];
       mergePendingRecentChests(b.pendingRecentChestIds);
       applyPanelMaximized(b.panelMaximized);
       renderChrome();
@@ -1322,6 +1325,90 @@
     });
   }
 
+  function announcementSeverity(a) {
+    const severity = String(a?.severity || '').toLowerCase();
+    return ['info', 'warning', 'critical'].includes(severity) ? severity : 'info';
+  }
+
+  function announcementTimestamp(a) {
+    const value = a?.publishedAt;
+    if (value == null || value === '') return -Infinity;
+    const time = typeof value === 'number' ? value : Date.parse(String(value));
+    return Number.isFinite(time) ? time : -Infinity;
+  }
+
+  function announcementDateText(value) {
+    if (value == null || value === '') return '';
+    const date = typeof value === 'number' ? new Date(value) : new Date(String(value));
+    if (Number.isNaN(date.getTime())) return '';
+    const pad = n => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  }
+
+  /** 优先使用服务器下发的完整公告牌；推送尚未到达时回退到未读公告，保证入口可用。 */
+  function announcementHistoryList() {
+    const source = Array.isArray(state.announcementHistory) && state.announcementHistory.length
+      ? state.announcementHistory
+      : (Array.isArray(state.announcements) ? state.announcements : []);
+    return source
+      .filter(a => a && typeof a === 'object')
+      .map((a, index) => ({ a, index, time: announcementTimestamp(a) }))
+      .sort((x, y) => x.time === y.time ? x.index - y.index : y.time - x.time)
+      .map(entry => entry.a);
+  }
+
+  function showAnnouncementHistory() {
+    const list = announcementHistoryList();
+    const readIds = new Set((Array.isArray(state.announcements) ? state.announcements : [])
+      .map(a => a?.id == null ? '' : String(a.id))
+      .filter(Boolean));
+    const metaOf = {
+      info: { label: '公告', icon: 'i' },
+      warning: { label: '注意', icon: '!' },
+      critical: { label: '重要', icon: '!' }
+    };
+    const items = list.map(a => {
+      const severity = announcementSeverity(a);
+      const meta = metaOf[severity];
+      const dateText = announcementDateText(a.publishedAt);
+      const action = a.action && a.action.url
+        ? `<div class="announcement-history-actions"><a class="btn ghost" href="${esc(a.action.url)}" target="_blank" rel="noreferrer">${esc(a.action.label || '查看详情')}</a></div>`
+        : '';
+      const unread = a.id != null && readIds.has(String(a.id))
+        ? '<span class="announcement-history-unread">未读</span>'
+        : '';
+      return `<article class="announcement-history-item ${severity}" data-ann-id="${esc(a.id)}">
+        <div class="announcement-history-meta">
+          <span class="announcement-history-badge"><span>${meta.icon}</span>${meta.label}</span>
+          <time class="announcement-history-date"${dateText ? ` datetime="${dateText}"` : ''}>${dateText || '时间未知'}</time>
+          ${unread}
+        </div>
+        <div class="announcement-history-title">${esc(a.title || '公告')}</div>
+        <div class="announcement-history-body">${esc(a.body || '')}</div>
+        ${action}
+      </article>`;
+    }).join('');
+    const body = list.length
+      ? `<div class="announcement-history-list">${items}</div>`
+      : `<div class="announcement-history-empty">
+          <div class="announcement-history-empty-mark">i</div>
+          <div class="announcement-history-empty-title">暂无公告历史</div>
+          <div class="announcement-history-empty-sub">服务器当前没有可显示的公告。</div>
+        </div>`;
+    modal(`
+      <div class="about announcement-history">
+        <div class="announcement-history-head">
+          <div class="about-title">公告历史</div>
+          <div class="announcement-history-sub">${list.length ? `共 ${list.length} 条 · 最新发布在前` : '按发布时间从新到旧排列'}</div>
+        </div>
+        ${body}
+        <button class="btn ghost" id="mCloseAnnouncementHistory" style="align-self:center;min-width:120px">关闭</button>
+      </div>`, host => {
+      host.querySelector('.modal')?.classList.add('announcement-history-modal');
+      host.querySelector('#mCloseAnnouncementHistory').onclick = closeModal;
+    });
+  }
+
   function showInheritLogin() {
     modal(`
       <div class="about">
@@ -1380,6 +1467,7 @@
       state.update = data.update || state.update;
       state.compatibility = data.compatibility || state.compatibility;
       state.announcements = Array.isArray(data.announcements) ? data.announcements : state.announcements;
+      state.announcementHistory = Array.isArray(data.announcementHistory) ? data.announcementHistory : state.announcementHistory;
       mergePendingRecentChests(data.pendingRecentChestIds);
       applyPanelMaximized(data.panelMaximized);
       applyTheme(data.settings);
@@ -1434,6 +1522,11 @@
     if (evt === 'announcements') {
       state.announcements = Array.isArray(data) ? data : [];
       renderNotices();
+      return;
+    }
+    if (evt === 'announcementHistory') {
+      // 公告牌是服务器当前下发的全部有效公告（含已读），不是本地历史归档。
+      state.announcementHistory = Array.isArray(data) ? data : [];
       return;
     }
     if (evt === 'compatibility') {
@@ -5810,6 +5903,7 @@
         <div class="settings-footer">
           <button class="btn ghost" id="checkUpdateBtn">检查更新</button>
           <button class="btn ghost" id="compatRefreshBtn">刷新版本状态</button>
+          <button class="btn ghost" id="announcementHistoryBtn">公告历史</button>
           <button class="btn ghost" id="aboutBtn">关于</button>
           <span class="muted" id="updateCheckStatus"></span>
         </div>
@@ -6879,6 +6973,7 @@
       } catch { }
     });
     document.getElementById('openLog')?.addEventListener('click', () => call('open.log'));
+    document.getElementById('announcementHistoryBtn')?.addEventListener('click', showAnnouncementHistory);
     document.getElementById('aboutBtn')?.addEventListener('click', showAbout);
     document.getElementById('updateChannel')?.addEventListener('change', async e => {
       const select = e.target;
@@ -7365,6 +7460,50 @@
     }];
   }
 
+  function previewAnnouncementHistory() {
+    return [{
+      id: 'preview-history-018',
+      severity: 'critical',
+      publishedAt: '2026-11-17T09:30:00+08:00',
+      title: '0.1.8 版本更新：联机与稳定性改进',
+      body: '0.1.8 已发布，本次更新重点改善联机稳定性与桌宠资源占用。\n\n更新内容：\n· 修复部分场景下联机成员列表不同步的问题；\n· 优化背包图标的缓存策略，切换页签时不再重复闪烁；\n· 调整窗口贴边逻辑，多显示器切换后位置更可靠；\n· 降低长时间挂机时的内存占用。\n\n如果你正在使用 0.1.6 或更早版本，建议尽快更新；遇到问题可以在项目仓库反馈，并附上版本号与复现步骤。',
+      action: { label: '查看更新详情', url: 'https://github.com/DanielToyama/WuwaTappoNative/releases/latest' },
+    }, {
+      id: 'preview-history-maintenance',
+      severity: 'warning',
+      publishedAt: '2026-11-10T18:00:00+08:00',
+      title: '联机服务维护安排',
+      body: '11 月 12 日 02:00–04:00 将进行联机服务维护。\n维护期间房间创建和加入可能短暂失败，单机桌宠、背包与合成功能不受影响。',
+      action: { label: '查看维护公告', url: 'https://github.com/DanielToyama/WuwaTappoNative' },
+    }, {
+      id: 'preview-info',
+      severity: 'info',
+      publishedAt: '2026-10-28T12:00:00+08:00',
+      title: '0.1.7 版本说明',
+      body: '本次更新修复了手机号登录和动态 SDK 配置问题。\n公告只在设置页顶部显示，不打扰其他功能。',
+      action: { label: '查看详情', url: 'https://github.com/DanielToyama/WuwaTappoNative' },
+    }, {
+      id: 'preview-history-atlas',
+      severity: 'info',
+      publishedAt: '2026-09-15T12:00:00+08:00',
+      title: '表情与图鉴数据更新',
+      body: '图鉴数据已同步至最新版本，新增多套角色表情与配件素材。\n如果列表没有立即刷新，可以重新打开图鉴页或重启面板。',
+    }, {
+      id: 'preview-history-login',
+      severity: 'warning',
+      publishedAt: '2026-08-02T12:00:00+08:00',
+      title: '登录方式调整提醒',
+      body: '官方登录流程已更新。旧版客户端继承的登录状态可能失效，请重新登录一次。\n账号数据不会受到影响。',
+    }, {
+      id: 'preview-history-old',
+      severity: 'critical',
+      publishedAt: '2026-06-21T12:00:00+08:00',
+      title: '旧版本停止支持通知',
+      body: '0.1.0–0.1.3 已停止支持，这些版本将无法继续使用联机功能。\n请更新到最新版本后再试。',
+      action: { label: '前往下载', url: 'https://github.com/DanielToyama/WuwaTappoNative/releases/latest' },
+    }];
+  }
+
   if (PREVIEW) {
     window.__previewBoot = previewBoot;
     window.__previewMode = PREVIEW;
@@ -7373,6 +7512,7 @@
     applyTheme(state.boot.settings);
     state.compatibility = previewCompatibility(PREVIEW);
     state.announcements = previewAnnouncements(PREVIEW);
+    if (PREVIEW === 'announcement-history') state.announcementHistory = previewAnnouncementHistory();
     if (PREVIEW === 'synth') {
       state.bag = [
         { id: 101, type: 'character_skin', name: '测试角色材料', rarity: 'rare', quantity: 11, thumb: '' },
@@ -7389,6 +7529,13 @@
     init();
     renderChrome();
     renderPage();
+    if (PREVIEW === 'announcement-history') {
+      setTimeout(() => {
+        const scroller = document.querySelector('.settings-scroll');
+        if (scroller) scroller.scrollTop = scroller.scrollHeight;
+        showAnnouncementHistory();
+      }, 120);
+    }
   } else {
     init();
     boot();

@@ -45,6 +45,7 @@ internal static class Program
             CheckUpdateVersionOrdering();
             CheckAuthStateBasics();
             CheckBusinessErrorMessages();
+            CheckAnnouncementBoard();
             CheckAuthPauseDoesNotLeaveRoom();
             CheckAutoSynthResultPayload();
             CheckPetZOrderGuard();
@@ -1737,6 +1738,36 @@ internal static class Program
         Assert(ApiClient.DescribeHttpStatus(503) == "服务器暂时不可用，请稍后再试",
             "HTTP 503 must be mapped to Chinese.");
         Console.WriteLine("PASS: business error codes and HTTP statuses are mapped to user-facing Chinese.");
+    }
+
+    /// <summary>
+    /// 公告牌保留服务器下发的全部有效公告（含已读），未读队列只用于顶部公告卡片；
+    /// 标记已读不能把公告从公告牌里删掉。
+    /// </summary>
+    static void CheckAnnouncementBoard()
+    {
+        var cfg = new Settings { ReadAnnouncementIds = new List<string> { "read-1" } };
+        var service = new AnnouncementService(cfg);
+        var items = new List<AnnouncementItem>
+        {
+            new() { Id = "read-1", Title = "已读公告", Body = "a", Severity = "info", PublishedAt = "2026-11-01T00:00:00Z" },
+            new() { Id = "unread-1", Title = "未读公告", Body = "b", Severity = "warning", PublishedAt = "2026-11-02T00:00:00Z" },
+        };
+
+        var board = (List<AnnouncementItem>)Invoke(service, "Filter", items);
+        Assert(board.Count == 2 && board.Any(a => a.Id == "read-1"),
+            "Announcement board must keep read items delivered by the server.");
+        var unread = (List<AnnouncementItem>)Invoke(service, "UnreadOnly", board);
+        Assert(unread.Count == 1 && unread[0].Id == "unread-1",
+            "Unread queue must exclude read announcements.");
+
+        SetField(service, "_board", board);
+        SetField(service, "_visible", new List<AnnouncementItem>(unread));
+        var remaining = service.MarkRead("unread-1");
+        Assert(remaining.Count == 0, "MarkRead must return the remaining unread queue.");
+        Assert(service.All.Count == 2 && service.All.Any(a => a.Id == "unread-1"),
+            "MarkRead must keep the announcement on the board after it becomes read.");
+        Console.WriteLine("PASS: announcement board keeps all server items while the unread queue only shows unread ones.");
     }
 
     /// <summary>

@@ -606,6 +606,65 @@ body.panel-maximized #maxBtn .icon-restore { display: block; }
 .about-link { color: #2f7fd0; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .about-link:hover { color: #1c5fa8; }
 
+/* 公告历史：沿用关于弹窗的米色卡片语言，用时间线承载多条公告。 */
+.modal.announcement-history-modal { width: 548px; }
+.announcement-history { max-height: 66vh; overflow: hidden; padding-right: 0; }
+.announcement-history-head { display: flex; flex-direction: column; gap: 3px; padding-right: 4px; }
+.announcement-history-sub { font-size: 12px; color: var(--ink-dim); }
+.announcement-history-list {
+  display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto;
+  overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable;
+  margin-left: 6px; padding: 4px 8px 2px 24px;
+  background: linear-gradient(var(--theme-line), var(--theme-line)) 8px 0 / 2px 100% no-repeat;
+}
+.announcement-history-item { position: relative; padding: 0 0 18px; }
+.announcement-history-item + .announcement-history-item { border-top: 1px dashed var(--theme-line-soft); padding-top: 16px; }
+.announcement-history-item:last-child { padding-bottom: 2px; }
+.announcement-history-item::before {
+  content: ''; position: absolute; left: -22px; top: 4px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--cream-2); border: 2px solid var(--theme-accent-strong); z-index: 1;
+}
+.announcement-history-item.info::before { border-color: #4c978d; }
+.announcement-history-item.warning::before { border-color: #b7792f; }
+.announcement-history-item.critical::before { border-color: #b34a3f; }
+.announcement-history-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.announcement-history-badge {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: 999px;
+  border: 1.5px solid currentColor; font-size: 11px; font-weight: 800;
+  white-space: nowrap;
+}
+.announcement-history-badge span {
+  width: 15px; height: 15px; border-radius: 50%; display: grid; place-items: center;
+  background: currentColor; color: #fff; font-size: 10px; line-height: 1;
+}
+.announcement-history-item.info .announcement-history-badge { color: #4c978d; }
+.announcement-history-item.warning .announcement-history-badge { color: #b7792f; }
+.announcement-history-item.critical .announcement-history-badge { color: #b34a3f; }
+.announcement-history-date { font-size: 12px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.announcement-history-unread {
+  padding: 1px 7px; border-radius: 999px;
+  background: var(--theme-accent-soft); color: var(--ink-strong);
+  font-size: 10px; font-weight: 800; letter-spacing: .04em;
+}
+.announcement-history-title { margin-top: 6px; font-size: 15px; font-weight: 800; line-height: 1.45; color: var(--ink-strong); }
+.announcement-history-body {
+  margin-top: 5px; font-size: 13px; line-height: 1.7; color: var(--ink);
+  white-space: pre-wrap; word-break: break-word; user-select: text;
+}
+.announcement-history-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.announcement-history-actions .btn { height: 30px; padding: 0 12px; font-size: 12px; box-shadow: none; }
+.announcement-history-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 44px 0 46px; text-align: center; color: var(--ink-dim); }
+.announcement-history-empty-mark {
+  width: 42px; height: 42px; border-radius: 50%;
+  display: grid; place-items: center; margin-bottom: 4px;
+  border: 1.5px solid var(--theme-line); background: var(--cream);
+  color: var(--theme-accent-strong); font-size: 22px; font-weight: 900;
+}
+.announcement-history-empty-title { font-size: 14px; font-weight: 800; color: var(--ink-strong); }
+.announcement-history-empty-sub { font-size: 12px; }
+
 .empty-state { margin: auto; text-align: center; color: var(--ink-dim); line-height: 2; }
 .loading { margin: auto; color: var(--ink-dim); }
 

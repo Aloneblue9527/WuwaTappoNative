@@ -364,11 +364,16 @@ public sealed class App : ApplicationContext
         PushRoom();
     }
 
-    /// <summary>拉取公告并把未读队列推给面板；请求失败时保留上次结果。</summary>
+    /// <summary>拉取公告，把未读队列和完整公告牌都推给面板；请求失败时保留上次结果。</summary>
     public async Task RefreshAnnouncementsAsync(bool force = false)
     {
         if (!await Announcements.RefreshAsync(force)) return;
-        try { Panel?.Push("announcements", Announcements.Visible); } catch { }
+        try
+        {
+            Panel?.Push("announcements", Announcements.Visible);
+            Panel?.Push("announcementHistory", Announcements.All);
+        }
+        catch { }
     }
 
     /// <summary>

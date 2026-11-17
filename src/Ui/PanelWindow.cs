@@ -560,6 +560,7 @@ public sealed class PanelWindow : Form
         update = _updateInfo,
         compatibility = _app.Compatibility,
         announcements = _app.Announcements.Visible,
+        announcementHistory = _app.Announcements.All,
         // 面板关闭时自动领取的宝箱奖励；前端合并到「最近获得」后 ack。
         pendingRecentChestIds = RecentChestStore.Pending(RecentChestScope),
         screens = Screen.AllScreens.Select((screen, index) => new

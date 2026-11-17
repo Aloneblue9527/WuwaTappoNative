@@ -59,6 +59,8 @@ public sealed class AnnouncementService
     readonly string _currentVersion;
     readonly object _gate = new();
     List<AnnouncementItem> _visible = new();
+    // 服务器当前下发的全部有效公告（含已读），只存在于内存；不保存正文，也不是历史归档。
+    List<AnnouncementItem> _board = new();
     string _etag = "";
     int _busy;
 
@@ -73,6 +75,15 @@ public sealed class AnnouncementService
         get
         {
             lock (_gate) return _visible.ToArray();
+        }
+    }
+
+    /// <summary>公告牌：服务器当前下发的全部有效公告，包含已读条目；不持久化。</summary>
+    public IReadOnlyList<AnnouncementItem> All
+    {
+        get
+        {
+            lock (_gate) return _board.ToArray();
         }
     }
 
@@ -112,13 +123,15 @@ public sealed class AnnouncementService
                 throw new InvalidOperationException("公告 schema 不支持");
 
             string newEtag = resp.Headers.ETag?.ToString() ?? "";
-            var visible = Filter(payload.Announcements);
+            var board = Filter(payload.Announcements);
+            var visible = UnreadOnly(board);
             lock (_gate)
             {
                 _etag = newEtag;
+                _board = board;
                 _visible = visible;
             }
-            Log.Write($"公告已更新：{visible.Count} 条待显示");
+            Log.Write($"公告已更新：公告牌 {board.Count} 条，其中待显示 {visible.Count} 条");
             return true;
         }
         catch (Exception ex)
@@ -139,7 +152,9 @@ public sealed class AnnouncementService
         if (string.IsNullOrWhiteSpace(id)) return Visible;
         lock (_gate)
         {
-            var item = _visible.FirstOrDefault(a => string.Equals(a.Id, id, StringComparison.Ordinal));
+            // 公告牌里已读的条目仍然保留，只是从未读队列移除；重复标记也允许。
+            var item = _board.FirstOrDefault(a => string.Equals(a.Id, id, StringComparison.Ordinal))
+                ?? _visible.FirstOrDefault(a => string.Equals(a.Id, id, StringComparison.Ordinal));
             if (item == null) return _visible.ToArray();
 
             _cfg.ReadAnnouncementIds ??= new List<string>();
@@ -160,9 +175,6 @@ public sealed class AnnouncementService
         var result = new List<AnnouncementItem>();
         if (items == null) return result;
         var now = DateTimeOffset.UtcNow;
-        HashSet<string> readIds;
-        lock (_gate)
-            readIds = new HashSet<string>(_cfg.ReadAnnouncementIds ?? new List<string>(), StringComparer.Ordinal);
 
         foreach (var item in items)
         {
@@ -172,7 +184,6 @@ public sealed class AnnouncementService
             item.Title = Clean(item.Title, 200);
             if (string.IsNullOrWhiteSpace(item.Title)) continue;
             item.Body = Clean(item.Body, 4000).Replace("\r\n", "\n").Replace('\r', '\n');
-            if (readIds.Contains(item.Id)) continue;
             if (!PlatformApplies(item.Platforms)) continue;
             if (!VersionApplies(item.MinNativeVersion, item.MaxNativeVersion)) continue;
             if (!TimeApplies(item.PublishedAt, item.ExpiresAt, now)) continue;
@@ -182,6 +193,14 @@ public sealed class AnnouncementService
             result.Add(item);
         }
         return result;
+    }
+
+    List<AnnouncementItem> UnreadOnly(List<AnnouncementItem> items)
+    {
+        HashSet<string> readIds;
+        lock (_gate)
+            readIds = new HashSet<string>(_cfg.ReadAnnouncementIds ?? new List<string>(), StringComparer.Ordinal);
+        return items.Where(a => !readIds.Contains(a.Id)).ToList();
     }
 
     bool VersionApplies(string min, string max)
