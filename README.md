@@ -19,6 +19,8 @@ Wuwatappo Native 是 WuwaTappo 1.0.2 的 Windows 原生实现，使用 C# / .NET
 - ✅ 支持面板最大化、八方向边缘缩放，并记住面板大小与最大化状态
 - ✅ 支持 F8 多屏切换：默认位置成员、仅主角、全部成员三种策略，跨分辨率按比例映射
 - ✅ 支持刷 Key 数量（一键 +10000），支持在不足1000的时候自动补齐
+- ✅ 支持自动升阶合成与一键全部升阶
+- ✅ 支持正式版 / 测试版更新通道
 - ✅ 支持自动领取宝箱
 - ✅ 支持自动表情、自动敲击和游戏模式规则
 - ✅ 支持快捷键和设置项搜索
@@ -63,8 +65,8 @@ Wuwatappo Native 是 WuwaTappo 1.0.2 的 Windows 原生实现，使用 C# / .NET
 
 每次向 `main` 推送提交都会触发 GitHub Actions 的 `Beta build`，自动生成一个带测试版本号的测试版，并发布到 GitHub Releases 的 Pre-release。
 
-- 测试版版本号格式：`<下个补丁版本>-beta.<run_number>`，例如 `0.3.2-beta.123`。
-- 下载方式一：打开 [GitHub Releases](https://github.com/DanielToyama/WuwaTappoNative/releases)，找到标记为 **Pre-release** 的 `v<下个补丁版本>-beta`（例如 `v0.3.2-beta`），下载对应测试版本号的 `WuwatappoNative-<测试版本号>-Setup.exe` 或 `WuwatappoNative-<测试版本号>-portable.zip`。
+- 测试版版本号格式：`<下个补丁版本>-beta.<run_number>`，例如 `0.3.3-beta.123`。
+- 下载方式一：打开 [GitHub Releases](https://github.com/DanielToyama/WuwaTappoNative/releases)，找到标记为 **Pre-release** 的 `v<下个补丁版本>-beta`（例如 `v0.3.3-beta`），下载对应测试版本号的 `WuwatappoNative-<测试版本号>-Setup.exe` 或 `WuwatappoNative-<测试版本号>-portable.zip`。
 - 下载方式二：打开 [Beta build Actions](https://github.com/DanielToyama/WuwaTappoNative/actions/workflows/beta.yml) 的最近一次运行，在页面底部 **Artifacts** 中下载 `WuwatappoNative-beta-<run_number>`，压缩包内包含 Setup 和便携版。
 - 测试版同时提供安装包和便携版；安装包与正式版一样支持选择“为所有用户安装”或“仅当前用户安装”，便携版解压后运行 `WuwatappoNative.exe`。测试版不提供自动更新，也不承诺稳定性和兼容性。
 - 正式版发布提交不会再触发新的测试包构建，避免正式发布时混入测试版本。
@@ -141,11 +143,11 @@ Wuwatappo Native 是 WuwaTappo 1.0.2 的 Windows 原生实现，使用 C# / .NET
 | `设置 → 账号` | 区服、登录、继承官方登录、导入 token、退出登录、刷新账号信息、累计点击补充 |
 | `设置 → 窗口与桌宠` | 桌宠大小、联机桌宠大小/跟随主角、不透明度、联机桌宠不透明度/跟随主角、联机玩家名字大小、动画帧率、置顶、鼠标穿透、悬停隐藏、重叠处理、OBS 采集窗口尺寸/背景色/透明背景/兼容模式/停止渲染桌面主角 |
 | `设置 → 桌面键盘` | 26 键、鸣潮专属、音游模式、手柄模式、键位映射和快捷键 |
-| `设置 → 联机与宝箱` | 联机桌宠排列、隐藏其他成员、手动开启宝箱、宝箱显示、自动领取宝箱 |
+| `设置 → 联机与宝箱` | 联机桌宠排列、隐藏其他成员、自动升阶合成、手动开启宝箱、宝箱显示、自动领取宝箱 |
 | `联机` 页面 | 创建/加入/切换房间、历史房间、成员显示、快捷表情 |
 | `设置 → 自动化` | 自动表情、自动敲击、自动敲击频率和虚拟敲击动画 |
 | `设置 → 通知` | 宝箱领取通知、快捷键操作通知 |
-| `设置 → 其他` | 开机自动启动、管理员权限启动、游戏模式规则、检查更新 |
+| `设置 → 其他` | 开机自动启动、管理员权限启动、游戏模式规则、更新通道、更新下载源、HTTP 代理、检查更新 |
 
 自动表情的来源可选快捷栏随机、指定表情或表情库随机，发送频率上限为 1–20 次/秒。自动敲击频率为 1–10 次/秒，是否显示虚拟敲击动画可单独设置。
 
@@ -223,14 +225,14 @@ dotnet run --project tests/SqliteChecks/SqliteChecks.csproj -c Release
 需要 PowerShell 7 和 Inno Setup 6.7 或更高版本。
 
 ```powershell
-pwsh -File .\installer\build.ps1 -Version 0.3.1
+pwsh -File .\installer\build.ps1 -Version 0.3.2
 ```
 
 输出：
 
 ```text
-dist/WuwatappoNative-0.3.1-Setup.exe
-dist/WuwatappoNative-0.3.1-portable.zip
+dist/WuwatappoNative-0.3.2-Setup.exe
+dist/WuwatappoNative-0.3.2-portable.zip
 dist/WuwatappoTokenExtractor-1.1.2-x64.zip
 ```
 

@@ -1,6 +1,6 @@
 param(
   [string]$Configuration = "Release",
-  [string]$Version = "0.3.1",
+  [string]$Version = "0.3.2",
   [string]$DisplayVersion = "",
   [string]$InformationalVersion = "",
   [string]$PublishDir = ""
