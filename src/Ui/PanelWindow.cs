@@ -377,7 +377,9 @@ public sealed class PanelWindow : Form
         if (_updateChecked) return;
         _updateChecked = true;
         string current = CurrentDisplayVersion();
-        var info = await UpdateChecker.CheckAsync(current, false, _app.Cfg.UpdateUseProxy ? _app.Cfg.UpdateHttpProxy : null);
+        bool includePrerelease = EffectiveUpdateChannel() == "beta";
+        var info = await UpdateChecker.CheckAsync(current, false,
+            _app.Cfg.UpdateUseProxy ? _app.Cfg.UpdateHttpProxy : null, includePrerelease);
         if (info == null) return;
         _updateInfo = info;
         Push("update", info);
@@ -393,6 +395,17 @@ public sealed class PanelWindow : Form
         string informational = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         if (!string.IsNullOrWhiteSpace(informational)) return informational;
         return assembly.GetName().Version?.ToString() ?? "0.0.0";
+    }
+
+    /// <summary>
+    /// 用户未显式选择时跟随当前构建：正式构建默认正式通道，测试构建默认测试通道。
+    /// 用户一旦在设置里选择，就固定按选择执行。
+    /// </summary>
+    string EffectiveUpdateChannel()
+    {
+        string configured = (_app.Cfg.UpdateChannel ?? "").Trim().ToLowerInvariant();
+        if (configured is "stable" or "beta") return configured;
+        return UpdateChecker.IsBetaVersion(CurrentDisplayVersion()) ? "beta" : "stable";
     }
 
     async Task DownloadUpdateAsync(ReleaseAsset installer, string tag, string source, string proxy, CancellationToken token)
@@ -629,6 +642,7 @@ public sealed class PanelWindow : Form
             lastRoom = _app.Cfg.LastRoom,
             serverRegion = _app.Cfg.ServerRegion,
             forcedOnlineAcceptedVersion = _app.Cfg.ForcedOnlineAcceptedVersion,
+            updateChannel = EffectiveUpdateChannel(),
             updateDownloadSource = _app.Cfg.UpdateDownloadSource,
             updateUseProxy = _app.Cfg.UpdateUseProxy,
             updateHttpProxy = _app.Cfg.UpdateHttpProxy,
@@ -1522,6 +1536,12 @@ public sealed class PanelWindow : Form
                         case "launchAtLogin":
                             cfg.LaunchAtLogin = AutoStart.Apply(ApiClient.ReadBool(kv.Value), cfg.RunAsAdmin);
                             break;
+                        case "updateChannel":
+                        {
+                            string channel = ApiClient.ReadString(kv.Value).Trim().ToLowerInvariant();
+                            cfg.UpdateChannel = channel is "stable" or "beta" ? channel : "";
+                            break;
+                        }
                         case "updateDownloadSource":
                         {
                             string source = ApiClient.ReadString(kv.Value).Trim().ToLowerInvariant();
@@ -1690,7 +1710,9 @@ public sealed class PanelWindow : Form
             case "update.check":
             {
                 string current = CurrentDisplayVersion();
-                var info = await UpdateChecker.CheckAsync(current, true, _app.Cfg.UpdateUseProxy ? _app.Cfg.UpdateHttpProxy : null);
+                bool includePrerelease = EffectiveUpdateChannel() == "beta";
+                var info = await UpdateChecker.CheckAsync(current, true,
+                    _app.Cfg.UpdateUseProxy ? _app.Cfg.UpdateHttpProxy : null, includePrerelease);
                 _updateInfo = info;
                 Push("update", info);
                 return new { available = info != null, update = info, currentVersion = current };

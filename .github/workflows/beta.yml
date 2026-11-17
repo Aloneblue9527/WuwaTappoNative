@@ -16,6 +16,8 @@ jobs:
   beta:
     name: Build beta
     runs-on: windows-latest
+    # 正式版发布提交固定使用“发布 x.y.z”作为 commit message；不要再为这次提交生成测试包。
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.head_commit.message != null && !startsWith(github.event.head_commit.message, '发布 ')) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
