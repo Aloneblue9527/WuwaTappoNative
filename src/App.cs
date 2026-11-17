@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -50,6 +52,11 @@ public sealed class App : ApplicationContext
     DateTime _nextLeftAttempt = DateTime.MinValue, _nextRightAttempt = DateTime.MinValue;
     int _chestBusy;
     int _autoChestTickBusy;
+    int _autoSynthTicks;
+    // 普通手动合成与自动升阶共用同一把锁，避免同时对同一批背包物资发请求。
+    readonly SemaphoreSlim _synthesisGate = new(1, 1);
+    readonly object _autoSynthCancelGate = new();
+    CancellationTokenSource _autoSynthCts;
 
     public App()
     {
@@ -111,6 +118,11 @@ public sealed class App : ApplicationContext
             if (_clickUserId != 0 && _clickUserId != Auth.UserId) Room.ResetClickState();
             _clickUserId = Auth.UserId;
             Room.SyncServerClicks(Auth.TotalClickCount, Auth.TotalClickConsume);
+        };
+        // 只在登录态真正变为可用时触发一次自动升阶；Auth.Changed 还会被每 30 秒的点击刷新触发。
+        Auth.StateChanged += () =>
+        {
+            if (Cfg.AutoSynthUp && Auth.CanUseOnline) CheckAutoSynthNow();
         };
         // 点击数变化很频繁（每次按键一次）。面板可能没开，开了也不能每次都走一趟
         // WebView2 序列化 + postMessage；这里合并成 100ms 一次。
@@ -614,7 +626,15 @@ public sealed class App : ApplicationContext
         {
             if (!Auth.CanUseOnline) return;
             var session = Auth.CaptureSession();
-            if (session == null || !Cfg.AutoChest || Auth.UserInfo is not System.Text.Json.Nodes.JsonObject me) return;
+            if (session == null) return;
+
+            // 约每 60 秒检查一次自动升阶（若开启）
+            if (++_autoSynthTicks % 12 == 0 && Cfg.AutoSynthUp)
+            {
+                _ = AutoSynthTickAsync(session);
+            }
+
+            if (!Cfg.AutoChest || Auth.UserInfo is not System.Text.Json.Nodes.JsonObject me) return;
             long now = session.ServerNowMs;
             long left = ApiClient.ReadLong(me["left_treasure_chest"]);
             long right = ApiClient.ReadLong(me["right_treasure_chest"]);
@@ -736,6 +756,7 @@ public sealed class App : ApplicationContext
                 Pet.BeginInvoke(new Action(() => Pet.ShowPrize(type, id)));
             }
             Panel?.Push("chest", resp);
+            if (Cfg.AutoSynthUp) CheckAutoSynthNow();
             // 通知只是反馈：任何 UI 异常都不能让它把“已领取”当成失败，否则会重复重试并吃掉冷却。
             try
             {
@@ -999,10 +1020,396 @@ public sealed class App : ApplicationContext
 
     public void Toast(string text, string kind = "info") => Panel?.Push("toast", new { text, kind });
 
+    public void CheckAutoSynthNow()
+    {
+        if (!Cfg.AutoSynthUp) return;
+        _ = AutoSynthTickAsync();
+    }
+
+    /// <summary>关闭自动升阶时取消正在运行的后台任务；手动“一键全部升阶”不调用此方法。</summary>
+    public void CancelAutoSynth()
+    {
+        CancellationTokenSource cts;
+        lock (_autoSynthCancelGate)
+        {
+            cts = _autoSynthCts;
+            _autoSynthCts = null;
+        }
+        if (cts == null) return;
+        try { cts.Cancel(); } catch { }
+    }
+
+    async Task AutoSynthTickAsync(ApiClient session = null)
+    {
+        if (!Cfg.AutoSynthUp || !Auth.CanUseOnline || Cfg.AnyItemSynthesisEnabled) return;
+        if (!string.IsNullOrEmpty(OnlineBlockedReason)) return;
+        session ??= Auth.CaptureSession();
+        if (session == null || !Auth.IsLoggedIn) return;
+
+        // 等待开箱/背包同步落一拍，再重新确认所有门禁和开关，避免等待期间状态变化。
+        await Task.Delay(500);
+        if (!Cfg.AutoSynthUp || !Auth.CanUseOnline || Cfg.AnyItemSynthesisEnabled) return;
+        if (!string.IsNullOrEmpty(OnlineBlockedReason)) return;
+        if (!Auth.IsLoggedIn || !ReferenceEquals(Auth.CaptureSession(), session)) return;
+
+        CancellationTokenSource cts;
+        lock (_autoSynthCancelGate)
+        {
+            if (_autoSynthCts != null) return;
+            _autoSynthCts = cts = new CancellationTokenSource();
+        }
+        try
+        {
+            await RunAutoSynthAsync(session, manual: false, cts.Token);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { Log.Write("自动升阶任务异常: " + ex.Message); }
+        finally
+        {
+            lock (_autoSynthCancelGate)
+            {
+                if (ReferenceEquals(_autoSynthCts, cts)) _autoSynthCts = null;
+            }
+            cts.Dispose();
+        }
+    }
+
+    static string NextRarity(string rarity) => (rarity ?? "").ToLowerInvariant() switch
+    {
+        "common" => "uncommon",
+        "uncommon" => "rare",
+        "rare" => "epic",
+        _ => null
+    };
+
+    static readonly string[] SynthTypes = { "character_skin", "accessory", "emote" };
+    static readonly string[] SynthRarityOrder = { "common", "uncommon", "rare", "epic" };
+
+    static bool IsSynthType(string type) =>
+        type == "character_skin" || type == "accessory" || type == "emote";
+
+    static int RarityRank(string rarity) => (rarity ?? "").ToLowerInvariant() switch
+    {
+        "common" => 1,
+        "uncommon" => 2,
+        "rare" => 3,
+        "epic" => 4,
+        _ => 0
+    };
+
+    /// <summary>按图鉴数据计算某类收集物的实际最高稀有度；数据不足时不做限制。</summary>
+    string MaxSynthRarity(string type)
+    {
+        int max = 0;
+        if (Catalog.ByType.TryGetValue(type, out var entries))
+        {
+            foreach (var id in entries.Keys)
+            {
+                if (Catalog.Rarities.TryGetValue(id, out var rarity))
+                    max = Math.Max(max, RarityRank(rarity));
+            }
+        }
+        return max <= 0 ? "epic" : SynthRarityOrder[max - 1];
+    }
+
+    // 合成接口不是幂等操作：只对服务器明确返回“本次未成功/限流”的错误重试，
+    // 不对超时、HTTP 5xx 等结果未知的失败盲目重发，避免重复消耗材料。
+    static bool IsRetryableSynthesisError(Exception ex) =>
+        ex is ApiException api && (api.Code == 50002 || api.Code == 429);
+
+    async Task<JsonNode> PostSynthesisWithRetryAsync(ApiClient session, long[] assetIds, CancellationToken token)
+    {
+        const int MaxAttempts = 3;
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await session.PostAsync("api/frontend/assets/synthesis", new { asset_ids = assetIds });
+            }
+            catch (Exception ex) when (attempt < MaxAttempts && IsRetryableSynthesisError(ex))
+            {
+                Log.Write($"自动升阶合成请求失败（第 {attempt} 次）：{ex.Message}");
+                await Task.Delay(500 * attempt, token);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 自动升阶合成：拥有 10 件以上相同类型和稀有度的多余材料时自动进行升阶合成。
+    /// 每种收集物至少保留 1 份底物不消耗；上锁只影响高级合成时是否保留最后 1 件，
+    /// 不影响普通 10/5 件合成和本自动升阶（本功能始终使用普通升阶接口）。
+    /// 供后台定时/开箱后自动触发，也可供前端“一键全部升阶”主动调用。
+    /// </summary>
+    public async Task<AutoSynthResult> RunAutoSynthAsync(ApiClient session = null, bool manual = false, CancellationToken cancellationToken = default)
+    {
+        if (Cfg.AnyItemSynthesisEnabled)
+            return new AutoSynthResult { Message = "高级合成开启时不会自动升阶，请先关闭高级合成。" };
+        if (!manual && !Cfg.AutoSynthUp)
+            return new AutoSynthResult { Message = "自动升阶合成已关闭。" };
+
+        string blocked = OnlineBlockedReason;
+        if (!string.IsNullOrEmpty(blocked))
+            return new AutoSynthResult { Message = blocked };
+        if (!Auth.CanUseOnline) return new AutoSynthResult { Message = Auth.PauseMessage };
+        session ??= Auth.CaptureSession();
+        if (session == null) return new AutoSynthResult { Message = "请先登录" };
+        if (!Auth.IsLoggedIn || !ReferenceEquals(Auth.CaptureSession(), session))
+            return new AutoSynthResult { Message = "登录状态已变化，请稍后重试" };
+
+        if (!await _synthesisGate.WaitAsync(0))
+            return new AutoSynthResult { Busy = true, Message = "正在进行其他合成操作，请稍候" };
+
+        try
+        {
+            var bagData = await session.PostAsync("api/frontend/bags/list");
+            if (bagData is not JsonArray bagArr || bagArr.Count == 0)
+                return new AutoSynthResult { Success = true, Message = "背包暂无收集物" };
+
+            var maxRarityByType = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var type in SynthTypes) maxRarityByType[type] = MaxSynthRarity(type);
+
+            var ownedAssetIds = new HashSet<long>();
+            var pool = new Dictionary<string, List<SynthCandidateItem>>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var node in bagArr)
+            {
+                if (node is not JsonObject o) continue;
+                long id = ApiClient.ReadLong(o["asset_id"]);
+                string type = ApiClient.ReadString(o["asset_type"]);
+                if (id <= 0 || !IsSynthType(type)) continue;
+
+                ownedAssetIds.Add(id);
+
+                // 普通升阶/自动升阶一律保留每件底物 1 个；锁定只影响高级合成，
+                // 这里不能把锁定物资排除出池子（见 wwwroot/app.js 的 synthBaseUsable）。
+                long qty = Math.Max(1, ApiClient.ReadLong(o["quantity"]));
+                int usable = (int)Math.Max(0, qty - 1);
+                if (usable <= 0) continue;
+
+                string rarity = ApiClient.ReadString(o["rarity"]).ToLowerInvariant();
+                if (string.IsNullOrEmpty(rarity))
+                    rarity = Catalog.Rarities.TryGetValue(id, out var r) ? r.ToLowerInvariant() : "common";
+
+                // 按类型实际最高稀有度排除，而不是只排除 epic。
+                if (rarity == maxRarityByType[type]) continue;
+
+                string groupKey = $"{type}|{rarity}";
+                if (!pool.TryGetValue(groupKey, out var list))
+                    pool[groupKey] = list = new List<SynthCandidateItem>();
+
+                list.Add(new SynthCandidateItem { Id = id, Usable = usable, Type = type, Rarity = rarity });
+            }
+
+            var results = new List<long>();
+            int processed = 0;
+            string lastResultType = "";
+            string errorMessage = null;
+            const int BatchNeed = 10;
+            const int MaxRounds = 50;
+            int round = 0;
+
+            try
+            {
+                while (round < MaxRounds)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!manual && (!Cfg.AutoSynthUp || Cfg.AnyItemSynthesisEnabled)) break;
+                    if (!string.IsNullOrEmpty(OnlineBlockedReason))
+                    {
+                        errorMessage = OnlineBlockedReason;
+                        break;
+                    }
+                    if (!Auth.CanUseOnline || Auth.CaptureSession() != session)
+                    {
+                        errorMessage = "登录状态已变化，自动升阶已停止。";
+                        break;
+                    }
+
+                    string selectedGroupKey = null;
+                    List<SynthCandidateItem> selectedList = null;
+
+                    // 优先从 common -> uncommon -> rare 升阶，便于将低阶材料升阶后的新产物继续参与更高阶合成
+                    foreach (var r in new[] { "common", "uncommon", "rare" })
+                    {
+                        foreach (var t in SynthTypes)
+                        {
+                            string k = $"{t}|{r}";
+                            if (pool.TryGetValue(k, out var l) && l.Sum(x => x.Usable) >= BatchNeed)
+                            {
+                                selectedGroupKey = k;
+                                selectedList = l;
+                                break;
+                            }
+                        }
+                        if (selectedGroupKey != null) break;
+                    }
+
+                    if (selectedGroupKey == null) break;
+
+                    var batchIds = new List<long>(BatchNeed);
+                    int needed = BatchNeed;
+                    for (int i = 0; i < selectedList.Count && needed > 0; i++)
+                    {
+                        var item = selectedList[i];
+                        if (item.Usable <= 0) continue;
+                        int take = Math.Min(item.Usable, needed);
+                        for (int k = 0; k < take; k++) batchIds.Add(item.Id);
+                        item.Usable -= take;
+                        needed -= take;
+                    }
+
+                    if (batchIds.Count != BatchNeed) break;
+
+                    // 只要请求发出，服务器就可能已经消耗/产出；用于缺失 asset_id 或异常时仍刷新背包。
+                    processed++;
+                    var resp = await PostSynthesisWithRetryAsync(session, batchIds.ToArray(), cancellationToken);
+                    long newAssetId = ApiClient.ReadLong(resp?["asset_id"] ?? resp?["data"]?["asset_id"]);
+                    round++;
+
+                    if (newAssetId <= 0)
+                    {
+                        errorMessage = "自动升阶合成响应未包含 asset_id，请刷新背包确认结果。";
+                        Log.Write("自动升阶合成响应未包含 asset_id");
+                        break;
+                    }
+
+                    results.Add(newAssetId);
+                    string[] parts = selectedGroupKey.Split('|');
+                    string targetType = parts[0];
+                    string currentRarity = parts[1];
+
+                    // 普通升阶不会改变类型；优先使用服务器返回的 asset_type，缺失时沿用输入类型。
+                    string responseType = ApiClient.ReadString(resp?["asset_type"]);
+                    if (string.IsNullOrEmpty(responseType))
+                        responseType = ApiClient.ReadString(resp?["data"]?["asset_type"]);
+                    string newType = IsSynthType(responseType) ? responseType : targetType;
+                    lastResultType = newType;
+
+                    string responseRarity = ApiClient.ReadString(resp?["rarity"]).ToLowerInvariant();
+                    if (string.IsNullOrEmpty(responseRarity))
+                        responseRarity = ApiClient.ReadString(resp?["data"]?["rarity"]).ToLowerInvariant();
+                    string nextRarity;
+                    if (!string.IsNullOrEmpty(responseRarity))
+                        nextRarity = responseRarity;
+                    else if (Catalog.Rarities.TryGetValue(newAssetId, out var catalogRarity))
+                        nextRarity = catalogRarity.ToLowerInvariant();
+                    else
+                        nextRarity = NextRarity(currentRarity);
+
+                    string newName = null;
+                    if (Catalog.Names.TryGetValue(newAssetId, out var cnName) && !string.IsNullOrEmpty(cnName))
+                        newName = cnName;
+                    else if (Catalog.Find(newType, newAssetId) is { } entry && !string.IsNullOrEmpty(entry.Name))
+                        newName = entry.Name;
+                    if (string.IsNullOrEmpty(newName)) newName = "新收集物";
+
+                    Log.Write($"自动升阶合成成功 [{round}]: {selectedGroupKey} -> {newName}({newAssetId})");
+
+                    if (!string.IsNullOrEmpty(nextRarity) && nextRarity != maxRarityByType[newType])
+                    {
+                        string nextGroupKey = $"{newType}|{nextRarity}";
+                        if (!pool.TryGetValue(nextGroupKey, out var nextList))
+                            pool[nextGroupKey] = nextList = new List<SynthCandidateItem>();
+
+                        var existingInPool = nextList.Find(x => x.Id == newAssetId);
+                        if (existingInPool != null)
+                        {
+                            existingInPool.Usable++;
+                        }
+                        else if (ownedAssetIds.Contains(newAssetId))
+                        {
+                            nextList.Add(new SynthCandidateItem { Id = newAssetId, Usable = 1, Type = newType, Rarity = nextRarity });
+                        }
+                    }
+                    ownedAssetIds.Add(newAssetId);
+
+                    await Task.Delay(300, cancellationToken);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                Log.Write("自动升阶合成已取消");
+            }
+            catch (Exception ex)
+            {
+                errorMessage = ex.Message;
+                Log.Write("自动升阶合成执行异常: " + ex);
+            }
+
+            if (results.Count > 0 || processed > 0)
+                PublishAutoSynthResults(results, lastResultType, processed, manual, errorMessage);
+
+            bool emptyAfterProcessing = processed > 0 && results.Count == 0;
+            return new AutoSynthResult
+            {
+                Success = errorMessage == null && !emptyAfterProcessing,
+                Count = results.Count,
+                Processed = processed,
+                AssetIds = results,
+                Message = errorMessage ?? (results.Count > 0
+                    ? ""
+                    : (emptyAfterProcessing
+                        ? "自动升阶合成未返回新物品，请刷新背包确认。"
+                        : "当前没有满足升阶条件的材料")),
+            };
+        }
+        catch (Exception ex)
+        {
+            Log.Write("自动升阶合成执行异常: " + ex.Message);
+            return new AutoSynthResult { Message = ex.Message };
+        }
+        finally
+        {
+            _synthesisGate.Release();
+        }
+    }
+
+    void PublishAutoSynthResults(List<long> results, string lastType, int processed, bool manual, string errorMessage)
+    {
+        long lastId = results.Count > 0 ? results[^1] : 0;
+        if (lastId > 0)
+        {
+            string lastName = null;
+            if (Catalog.Names.TryGetValue(lastId, out var cnName) && !string.IsNullOrEmpty(cnName))
+                lastName = cnName;
+            else if (Catalog.Find(lastType, lastId) is { } entry && !string.IsNullOrEmpty(entry.Name))
+                lastName = entry.Name;
+            if (string.IsNullOrEmpty(lastName)) lastName = "新收集物";
+
+            try { Pet.BeginInvoke(new Action(() => Pet.ShowPrize(lastType, lastId))); } catch { }
+
+            // 面板关闭时才把最终产物放进“最近获得”队列；中间产物和面板打开时都交给 synth.auto 事件处理。
+            if (Panel == null || Panel.IsDisposed)
+                RecentChestStore.Add(lastId, (Cfg.ServerRegion == "global" ? "global" : "cn") + ":" + (Auth.Cuid ?? ""));
+
+            if (!manual)
+            {
+                if (string.IsNullOrEmpty(errorMessage))
+                    Toast($"自动升阶合成完成：共完成 {results.Count} 次合成，获得了【{lastName}】等");
+                else
+                    Toast($"自动升阶部分完成（{results.Count} 次）：{errorMessage}", "err");
+            }
+        }
+        else if (processed > 0 && !manual)
+        {
+            Toast(string.IsNullOrEmpty(errorMessage)
+                ? "自动升阶合成已执行，正在刷新背包…"
+                : "自动升阶合成失败：" + errorMessage,
+                string.IsNullOrEmpty(errorMessage) ? "info" : "err");
+        }
+
+        Panel?.Push("synth.auto", new { count = results.Count, processed, last_asset_id = lastId, asset_ids = results });
+    }
+
+    public Task<bool> TryBeginSynthesisAsync() => _synthesisGate.WaitAsync(0);
+
+    public void ReleaseSynthesis() => _synthesisGate.Release();
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
+            try { CancelAutoSynth(); } catch { }
             try { _autoChestTimer?.Dispose(); } catch { }
             try { _autoBoostTimer?.Dispose(); } catch { }
             try { _clickRefreshTimer?.Dispose(); } catch { }
@@ -1015,4 +1422,28 @@ public sealed class App : ApplicationContext
         }
         base.Dispose(disposing);
     }
+}
+
+public sealed class AutoSynthResult
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+    [JsonPropertyName("busy")]
+    public bool Busy { get; set; }
+    [JsonPropertyName("count")]
+    public int Count { get; set; }
+    [JsonPropertyName("processed")]
+    public int Processed { get; set; }
+    [JsonPropertyName("assetIds")]
+    public List<long> AssetIds { get; set; } = new();
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = "";
+}
+
+sealed class SynthCandidateItem
+{
+    public long Id;
+    public int Usable;
+    public string Type = "";
+    public string Rarity = "";
 }

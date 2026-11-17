@@ -40,6 +40,16 @@ Wuwatappo Native 是 WuwaTappo 1.0.2 的 Windows 原生实现，使用 C# / .NET
 
 如果这个项目对你有帮助，希望收到你的 Star，也欢迎到哔哩哔哩一键三连。交流 QQ 群：1130030892。
 
+## Star History ⭐⭐⭐
+
+<a href="https://www.star-history.com/?repos=danieltoyama%2Fwuwatapponative&type=date&releases=&legend=bottom-right">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=danieltoyama/wuwatapponative&type=date&theme=dark&legend=bottom-right" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=danieltoyama/wuwatapponative&type=date&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=danieltoyama/wuwatapponative&type=date&legend=bottom-right" />
+ </picture>
+</a>
+
 ## 安装
 
 ### 使用发布包

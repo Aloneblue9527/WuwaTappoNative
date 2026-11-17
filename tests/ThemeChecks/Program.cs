@@ -46,6 +46,7 @@ internal static class Program
             CheckAuthStateBasics();
             CheckBusinessErrorMessages();
             CheckAuthPauseDoesNotLeaveRoom();
+            CheckAutoSynthResultPayload();
             CheckPetZOrderGuard();
             CheckCatOrderScreenSelection();
             if (args.Length > 0 && File.Exists(args[0])) CheckExternalPresetFile(args[0]);
@@ -1755,6 +1756,28 @@ internal static class Program
                block.Contains("AuthState.NetworkUnknown", StringComparison.Ordinal),
             "Checking/network states must not proactively close an existing room socket.");
         Console.WriteLine("PASS: auth pause never sends an explicit room leave; host room remains reconnectable.");
+    }
+
+    /// <summary>面板靠 res.busy/count/message/processed 判断自动升阶结果，桥接 JSON 必须是 camelCase。</summary>
+    static void CheckAutoSynthResultPayload()
+    {
+        var result = new WuwatappoNative.AutoSynthResult
+        {
+            Success = true,
+            Busy = false,
+            Count = 2,
+            Processed = 3,
+            AssetIds = new List<long> { 101, 102 },
+            Message = "ok",
+        };
+        string json = JsonSerializer.Serialize(result);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        foreach (string name in new[] { "success", "busy", "count", "processed", "assetIds", "message" })
+            Assert(root.TryGetProperty(name, out _), $"AutoSynthResult JSON must contain camelCase field '{name}': {json}");
+        Assert(root.GetProperty("count").GetInt32() == 2 && root.GetProperty("processed").GetInt32() == 3,
+            "AutoSynthResult count/processed values must survive bridge serialization.");
+        Console.WriteLine("PASS: AutoSynthResult bridge payload uses camelCase success/busy/count/processed/message/assetIds.");
     }
 
     /// <summary>

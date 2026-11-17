@@ -625,6 +625,7 @@ public sealed class PanelWindow : Form
             captureStopRenderingMain = _app.Cfg.CaptureStopRenderingMain,
             alwaysShowChest = _app.Cfg.AlwaysShowChest,
             autoChest = _app.Cfg.AutoChest,
+            autoSynthUp = _app.Cfg.AutoSynthUp,
             autoEmoteEnabled = _app.Cfg.AutoEmoteEnabled,
             autoEmoteMaxPerSecond = _app.Cfg.AutoEmoteMaxPerSecond,
             autoEmoteMode = _app.Cfg.AutoEmoteMode,
@@ -712,7 +713,7 @@ public sealed class PanelWindow : Form
     {
         return cmd switch
         {
-            "synthesize" or "redeem" or "appearance.sync" or "presets.create" or "presets.delete"
+            "synthesize" or "synth.auto" or "redeem" or "appearance.sync" or "presets.create" or "presets.delete"
                 or "favorite" or "emote.send" => true,
             // 只有显式上传云端的表情槽位会改服务器；仅本地槽位在安全模式下仍可用。
             "appearance.setSlot" => ApiClient.ReadBool(data?["upload"]),
@@ -1498,7 +1499,10 @@ public sealed class PanelWindow : Form
                             break;
                         }
                         case "anyItemSynthesisUnlocked": cfg.AnyItemSynthesisUnlocked = ApiClient.ReadBool(kv.Value); break;
-                        case "anyItemSynthesisEnabled": cfg.AnyItemSynthesisEnabled = ApiClient.ReadBool(kv.Value); break;
+                        case "anyItemSynthesisEnabled":
+                            cfg.AnyItemSynthesisEnabled = ApiClient.ReadBool(kv.Value);
+                            if (cfg.AnyItemSynthesisEnabled) _app.CancelAutoSynth();
+                            break;
                         case "autoClickBoost": cfg.AutoClickBoost = ApiClient.ReadBool(kv.Value); break;
                         case "captureMode": cfg.CaptureMode = ApiClient.ReadBool(kv.Value); break;
                         case "captureWidth": cfg.CaptureWidth = Math.Clamp((int)ApiClient.ReadLong(kv.Value), 160, 1600); break;
@@ -1511,6 +1515,11 @@ public sealed class PanelWindow : Form
                         case "autoChest":
                             cfg.AutoChest = ApiClient.ReadBool(kv.Value);
                             if (cfg.AutoChest) _app.CheckAutoChestNow();
+                            break;
+                        case "autoSynthUp":
+                            cfg.AutoSynthUp = ApiClient.ReadBool(kv.Value);
+                            if (cfg.AutoSynthUp) _app.CheckAutoSynthNow();
+                            else _app.CancelAutoSynth();
                             break;
                         case "autoEmoteEnabled": cfg.AutoEmoteEnabled = ApiClient.ReadBool(kv.Value); break;
                         case "autoEmoteMaxPerSecond": cfg.AutoEmoteMaxPerSecond = Math.Clamp((int)ApiClient.ReadLong(kv.Value), 1, 20); break;
@@ -1634,9 +1643,21 @@ public sealed class PanelWindow : Form
                 if (data["ids"] is JsonArray arr) foreach (var n in arr) ids.Add(ApiClient.ReadLong(n));
                 bool same = ApiClient.ReadBool(data["sameLevel"]);
                 string path = same ? "api/frontend/assets/synthesis/same-level" : "api/frontend/assets/synthesis";
-                var resp = await auth.Api.PostAsync(path, new { asset_ids = ids.ToArray() });
-                return resp;
+                if (!await _app.TryBeginSynthesisAsync())
+                    throw new ApiException(-1, "正在进行其他合成操作，请稍候");
+                try
+                {
+                    var resp = await auth.Api.PostAsync(path, new { asset_ids = ids.ToArray() });
+                    return resp;
+                }
+                finally
+                {
+                    _app.ReleaseSynthesis();
+                }
             }
+
+            case "synth.auto":
+                return await _app.RunAutoSynthAsync(manual: true);
 
             case "favorite":
             {
