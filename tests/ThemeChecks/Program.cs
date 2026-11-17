@@ -49,6 +49,7 @@ internal static class Program
             CheckAutoSynthResultPayload();
             CheckPetZOrderGuard();
             CheckCatOrderScreenSelection();
+            CheckPetMultiSelectBehavior();
             if (args.Length > 0 && File.Exists(args[0])) CheckExternalPresetFile(args[0]);
 
             Console.WriteLine($"PASS: {_checks} assertions.");
@@ -1835,6 +1836,100 @@ internal static class Program
         string panel = ReadRepoSource("src", "Ui", "PanelWindow.cs");
         Assert(Regex.IsMatch(panel, @"case\s+""room\.resetOrder"":\s*_app\.Pet\.BeginInvoke\(new Action\(_app\.Pet\.ResetCatOrder\)\);"),
             "Panel reset-order command must use the parameterless ResetCatOrder() overload.");
+    }
+
+    /// <summary>
+    /// Ctrl 多选桌宠四项行为：Ctrl+A 条件与主角保留策略、起拖死区、整组贴边偏移，
+    /// 以及 PetWindow 是否走统一的纯逻辑入口（静态源码检查）。
+    /// </summary>
+    static void CheckPetMultiSelectBehavior()
+    {
+        // Ctrl+A 必须已有选中；只认 Ctrl，Alt/Shift 不参与。
+        Assert(PetSelectionLogic.ShouldSelectAllOnCtrlA(0x41, true, false, false, 1),
+            "Ctrl+A must select all when at least one pet is selected.");
+        Assert(PetSelectionLogic.ShouldSelectAllOnCtrlA(0x41, true, false, false, 3),
+            "Ctrl+A must stay active with multiple selected pets.");
+        Assert(!PetSelectionLogic.ShouldSelectAllOnCtrlA(0x41, true, false, false, 0),
+            "Ctrl+A must do nothing when no pet is selected.");
+        Assert(!PetSelectionLogic.ShouldSelectAllOnCtrlA(0x41, false, false, false, 2),
+            "A without Ctrl must not select all pets.");
+        Assert(!PetSelectionLogic.ShouldSelectAllOnCtrlA(0x41, true, true, false, 2),
+            "Ctrl+Alt+A must not select all pets.");
+        Assert(!PetSelectionLogic.ShouldSelectAllOnCtrlA(0x41, true, false, true, 2),
+            "Ctrl+Shift+A must not select all pets.");
+        Assert(!PetSelectionLogic.ShouldSelectAllOnCtrlA(0x42, true, false, false, 2),
+            "Only the A key may select all pets.");
+
+        // Ctrl+A 只加远程成员，主角原来选中就保留、原来没选就不主动加。
+        var keepMain = PetSelectionLogic.BuildCtrlASelection(true, new long[] { 2, 3, 2 });
+        Assert(keepMain.SelfSelected && keepMain.CatIds.SequenceEqual(new long[] { 2, 3 }),
+            "Ctrl+A must preserve a self-selected main pet and select all remotes.");
+        var noMain = PetSelectionLogic.BuildCtrlASelection(false, new long[] { 2, 3 });
+        Assert(!noMain.SelfSelected && noMain.CatIds.SequenceEqual(new long[] { 2, 3 }),
+            "Ctrl+A must not add the main pet when it was not selected.");
+        var onlyMain = PetSelectionLogic.BuildCtrlASelection(true, Array.Empty<long>());
+        Assert(onlyMain.SelfSelected && onlyMain.CatIds.Length == 0,
+            "Ctrl+A triggered while only the main pet is selected must keep it selected.");
+
+        // 起拖死区：宽高分别判断，达到/超过都算，负方向同样正确。
+        var drag = new Size(4, 4);
+        Assert(!PetSelectionLogic.ExceedsDragThreshold(new Point(100, 100), new Point(103, 103), drag),
+            "3px of jitter must stay inside the 4px drag dead zone.");
+        Assert(PetSelectionLogic.ExceedsDragThreshold(new Point(100, 100), new Point(104, 100), drag),
+            "Exactly 4px horizontally must start the drag.");
+        Assert(PetSelectionLogic.ExceedsDragThreshold(new Point(100, 100), new Point(100, 96), drag),
+            "Negative vertical movement beyond the threshold must start the drag.");
+        Assert(PetSelectionLogic.ExceedsDragThreshold(new Point(100, 100), new Point(96, 100), drag),
+            "Negative horizontal movement beyond the threshold must start the drag.");
+        Assert(PetSelectionLogic.ExceedsDragThreshold(new Point(100, 100), new Point(101, 100), new Size(0, 0)),
+            "Degenerate DragSize must fall back to at least 1px.");
+
+        var wa = new Rectangle(0, 0, 1000, 800);
+        AssertSnap(PetSelectionLogic.ComputeGroupSnapDelta(new Rectangle(3, 300, 200, 200), wa, 10),
+            -3, 0, "left edge");
+        AssertSnap(PetSelectionLogic.ComputeGroupSnapDelta(new Rectangle(797, 300, 200, 200), wa, 10),
+            3, 0, "right edge");
+        AssertSnap(PetSelectionLogic.ComputeGroupSnapDelta(new Rectangle(300, 3, 200, 200), wa, 10),
+            0, -3, "top edge");
+        AssertSnap(PetSelectionLogic.ComputeGroupSnapDelta(new Rectangle(300, 597, 200, 200), wa, 10),
+            0, 3, "bottom edge");
+        AssertSnap(PetSelectionLogic.ComputeGroupSnapDelta(new Rectangle(300, 300, 200, 200), wa, 10),
+            0, 0, "no nearby edge");
+        AssertSnap(PetSelectionLogic.ComputeGroupSnapDelta(new Rectangle(3, 300, 996, 200), wa, 10),
+            1, 0, "nearer right side");
+
+        // 负坐标多屏工作区、组比工作区宽/高时该轴不吸附。
+        var negativeScreen = new Rectangle(-1920, -200, 1920, 1080);
+        AssertSnap(PetSelectionLogic.ComputeGroupSnapDelta(new Rectangle(-1917, 300, 200, 200), negativeScreen, 10),
+            -3, 0, "negative-origin left edge");
+        AssertSnap(PetSelectionLogic.ComputeGroupSnapDelta(new Rectangle(-1915, 300, 2000, 200), negativeScreen, 10),
+            0, 0, "group wider than working area");
+        AssertSnap(PetSelectionLogic.ComputeGroupSnapDelta(new Rectangle(300, -195, 200, 1200), negativeScreen, 10),
+            0, 0, "group taller than working area");
+
+        // PetWindow 必须使用系统 DragSize、统一组吸附 helper，并在自己的 UI 线程清选中。
+        string pet = ReadRepoSource("src", "Pet", "PetWindow.cs");
+        Assert(pet.Contains("SystemInformation.DragSize", StringComparison.Ordinal),
+            "PetWindow must use SystemInformation.DragSize for the group drag dead zone.");
+        Assert(pet.Contains("PetSelectionLogic.ComputeGroupSnapDelta", StringComparison.Ordinal),
+            "PetWindow must snap a group through the shared ComputeGroupSnapDelta helper.");
+        Assert(pet.Contains("PetSelectionLogic.ShouldSelectAllOnCtrlA", StringComparison.Ordinal) &&
+               pet.Contains("GetForegroundWindow", StringComparison.Ordinal),
+            "Ctrl+A must be gated by the shared helper and foreground-process check.");
+        Assert(pet.Contains("ClearSelectionOnOutsideClick", StringComparison.Ordinal),
+            "Outside-click selection clearing must be wired through ClearSelectionOnOutsideClick().");
+        string selectAllBody = Regex.Match(pet, @"void\s+SelectAllRemoteCats\(\)[\s\S]*?\n    \}").Value;
+        Assert(selectAllBody.Contains("BuildCtrlASelection", StringComparison.Ordinal) &&
+               !selectAllBody.Contains("ClearSelection", StringComparison.Ordinal),
+            "SelectAllRemoteCats must use BuildCtrlASelection and never clear the main pet's selection.");
+
+        Console.WriteLine("PASS: Ctrl multi-select (Ctrl+A preserves main selection, drag dead zone, group snapping, outside-click clear).");
+    }
+
+    static void AssertSnap(Point delta, int expectedX, int expectedY, string description)
+    {
+        Assert(delta.X == expectedX && delta.Y == expectedY,
+            $"Group snap {description} expected ({expectedX},{expectedY}) but got ({delta.X},{delta.Y}).");
     }
 
     static string ReadRepoSource(params string[] relativeParts)

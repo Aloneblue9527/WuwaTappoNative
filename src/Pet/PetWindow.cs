@@ -32,6 +32,10 @@ public sealed class PetWindow : Form
     long _groupDragOwner = SelfSelectionId;
     Point _groupDragCursor;
     readonly Dictionary<long, Point> _groupDragOrigins = new();
+    // Ctrl 按下后先等待鼠标越过系统拖拽阈值，避免 1~3px 抖动就把整组带跑。
+    bool _groupDragPending;
+    long _groupDragPendingOwner = SelfSelectionId;
+    Point _groupDragPendingStart;
     bool _multiSelectClickPending;
     long _multiSelectClickId = SelfSelectionId;
     bool _multiSelectClickWasSelected;
@@ -137,6 +141,9 @@ public sealed class PetWindow : Form
         Location = cfg.PetX >= 0 ? new Point(cfg.PetX, cfg.PetY) : DefaultLocation();
         _hook.KeyDown += vk => Safe(() =>
         {
+            // VK_LBUTTON 只会收到“点在本程序所有窗口之外”的左键按下；
+            // 有选中时点桌面/别的程序立即退出多选。
+            if (vk == 0x01) ClearSelectionOnOutsideClick();
             if (_auth.CanUseOnline)
             {
                 _room.AddClicks(1);
@@ -628,6 +635,17 @@ public sealed class PetWindow : Form
         Compose();
     }
 
+    /// <summary>Ctrl+A：把所有可见联机成员加入选中；主角是否选中完全保持原样。</summary>
+    void SelectAllRemoteCats()
+    {
+        _multiSelectClickPending = false;
+        CancelPendingGroupDrag();
+        var selection = PetSelectionLogic.BuildCtrlASelection(_selfSelected, _cats.Keys);
+        if (selection.SelfSelected != _selfSelected) SetSelected(SelfSelectionId, selection.SelfSelected);
+        foreach (var id in selection.CatIds)
+            SetSelected(id, true);
+    }
+
     /// <summary>多选拖拽开始时记录所有选中角色的起始位置。</summary>
     void BeginGroupDrag(long ownerId, Point cursor)
     {
@@ -639,6 +657,48 @@ public sealed class PetWindow : Form
         foreach (var id in _selectedCatIds)
             if (_cats.TryGetValue(id, out var cat) && cat.Visible)
                 _groupDragOrigins[id] = cat.Location;
+    }
+
+    /// <summary>按住 Ctrl 点中角色后先进入等待，鼠标越过系统阈值才真正开始整组移动。</summary>
+    void BeginPendingGroupDrag(long ownerId, Point cursor)
+    {
+        _groupDragPending = true;
+        _groupDragPendingOwner = ownerId;
+        _groupDragPendingStart = cursor;
+        _groupDragging = false;
+        _groupDragOrigins.Clear();
+    }
+
+    bool TryStartPendingGroupDrag(Point cursor)
+    {
+        if (!_groupDragPending) return false;
+        var systemDrag = SystemInformation.DragSize;
+        // 系统设置偶尔会给出 0/负数（远程桌面、精简系统），至少按 4px，避免刚按下就起拖。
+        var threshold = new Size(Math.Max(4, systemDrag.Width), Math.Max(4, systemDrag.Height));
+        if (!PetSelectionLogic.ExceedsDragThreshold(_groupDragPendingStart, cursor, threshold))
+            return false;
+
+        long owner = _groupDragPendingOwner;
+        CancelPendingGroupDrag();
+        // 以刚越过阈值的光标为锚点：死区内那段距离不回补，角色不会跳一下。
+        BeginGroupDrag(owner, cursor);
+        return true;
+    }
+
+    void CancelPendingGroupDrag()
+    {
+        _groupDragPending = false;
+        _groupDragPendingOwner = SelfSelectionId;
+    }
+
+    /// <summary>点击桌面/其他程序或主角窗口空白时清空选择，同时丢弃未完成的 Ctrl 单击状态。</summary>
+    void ClearSelectionOnOutsideClick()
+    {
+        _multiSelectClickPending = false;
+        _multiSelectClickId = SelfSelectionId;
+        _multiSelectClickWasSelected = false;
+        CancelPendingGroupDrag();
+        ClearSelection();
     }
 
     void UpdateGroupDrag(Point cursor)
@@ -665,6 +725,8 @@ public sealed class PetWindow : Form
         _groupDragging = false;
         if (moved)
         {
+            // 只有真正移动过才贴边；整组共用一个偏移，避免各吸各的拆散队形。
+            SnapGroupToWorkingArea(Cursor.Position);
             if (_selfSelected)
             {
                 _cfg.PetX = Left;
@@ -684,6 +746,48 @@ public sealed class PetWindow : Form
         _groupDragOrigins.Clear();
     }
 
+    /// <summary>整组松手贴边：先求所有选中角色可见矩形的并集，再按同一偏移移动。</summary>
+    void SnapGroupToWorkingArea(Point cursor)
+    {
+        var bounds = SelectedGroupVisibleBounds();
+        if (bounds.IsEmpty) return;
+        var wa = Screen.FromPoint(cursor).WorkingArea;
+        int threshold = Math.Max(8, (int)Math.Round(28 * DpiScale));
+        var delta = PetSelectionLogic.ComputeGroupSnapDelta(bounds, wa, threshold);
+        if (delta.X == 0 && delta.Y == 0) return;
+
+        if (_selfSelected) Location = new Point(Left + delta.X, Top + delta.Y);
+        foreach (var id in _selectedCatIds)
+            if (_cats.TryGetValue(id, out var cat) && cat.Visible)
+                cat.Location = new Point(cat.Left + delta.X, cat.Top + delta.Y);
+    }
+
+    /// <summary>
+    /// 组可见范围：主角与 SnapToWorkingArea 的内容范围保持一致（猫 + 底栏），
+    /// 远程角色用 CatVisibleRect。这里只求并集，不对单个角色做吸附。
+    /// </summary>
+    Rectangle SelectedGroupVisibleBounds()
+    {
+        Rectangle bounds = Rectangle.Empty;
+        bool any = false;
+        if (_selfSelected)
+        {
+            float s = Width / (float)PetComposer.WindowW;
+            int leftOffset = (int)Math.Round(PetComposer.CatX * s);
+            int rightOffset = (int)Math.Round(Math.Max(PetComposer.ToolbarX + PetComposer.ToolbarW, PetComposer.ChestRightRect.Right) * s);
+            bounds = new Rectangle(Left + leftOffset, Top, Math.Max(1, rightOffset - leftOffset), Height);
+            any = true;
+        }
+        foreach (var id in _selectedCatIds)
+        {
+            if (!_cats.TryGetValue(id, out var cat) || !cat.Visible) continue;
+            var rect = CatVisibleRect(cat);
+            bounds = any ? Rectangle.Union(bounds, rect) : rect;
+            any = true;
+        }
+        return any ? bounds : Rectangle.Empty;
+    }
+
     /// <summary>Ctrl+单击但没有拖动时，取消点击前已选中的那个角色；拖动过则保留选择。</summary>
     void CompleteMultiSelectClick(bool moved)
     {
@@ -697,11 +801,13 @@ public sealed class PetWindow : Form
     void OnCatDragStarted(RemoteCatWindow cat)
     {
         _multiSelectClickPending = false;
-        cat.ExternalDrag = false;
+        bool ctrl = (Control.ModifierKeys & Keys.Control) != 0;
+        // 按住 Ctrl 时先由主窗口接管，哪怕点中的是选中框而不是猫体，也不能让
+        // RemoteCatWindow 在死区内自己先挪动；非 Ctrl 才保留窗口自身拖动。
+        cat.ExternalDrag = ctrl;
         // 透明气泡区域不参与选择/拖动。
         if (!cat.ContainsCatScreenPoint(Cursor.Position)) return;
         long id = cat.MemberId;
-        bool ctrl = (Control.ModifierKeys & Keys.Control) != 0;
         if (!ctrl)
         {
             ClearSelection();
@@ -714,26 +820,41 @@ public sealed class PetWindow : Form
         _multiSelectClickPending = true;
         _multiSelectClickId = id;
         _multiSelectClickWasSelected = wasSelected;
-        if (SelectedCount() > 1)
-        {
-            cat.ExternalDrag = true;
-            BeginGroupDrag(id, Cursor.Position);
-        }
-        else cat.ExternalDrag = false;
+        // Ctrl 点击一律先进入死区等待，由 PetWindow 统一移动；
+        // 不能等确认拖动后再接管，否则 RemoteCatWindow 已经先挪了 2px。
+        cat.ExternalDrag = true;
+        BeginPendingGroupDrag(id, Cursor.Position);
     }
 
     void OnCatDragMoved(RemoteCatWindow cat, Point cursor)
     {
+        if (_groupDragPending && _groupDragPendingOwner == cat.MemberId)
+        {
+            if (!TryStartPendingGroupDrag(cursor)) return;
+            UpdateGroupDrag(cursor);
+            return;
+        }
         if (_groupDragging && _groupDragOwner == cat.MemberId) UpdateGroupDrag(cursor);
     }
 
     void OnCatDragEnded(RemoteCatWindow cat, bool moved)
     {
-        if (_groupDragging && _groupDragOwner == cat.MemberId)
+        // pending 未启动说明还在死区内：RemoteCatWindow 的 moved 只按 >2px 判断，
+        // 比我们的阈值更敏感，不能让它把一次 Ctrl+单击误判成拖动。
+        if (_groupDragPending && _groupDragPendingOwner == cat.MemberId && !_groupDragging)
         {
-            EndGroupDrag(moved);
+            CancelPendingGroupDrag();
+            cat.ExternalDrag = false;
+            CompleteMultiSelectClick(false);
             return;
         }
+        if (_groupDragging && _groupDragOwner == cat.MemberId)
+        {
+            cat.ExternalDrag = false;
+            EndGroupDrag(true);
+            return;
+        }
+        cat.ExternalDrag = false;
         CompleteMultiSelectClick(moved);
     }
 
@@ -960,7 +1081,12 @@ public sealed class PetWindow : Form
             OpenPanelRequested?.Invoke();
             return;
         }
-        if (!zone.Cat) return;
+        if (!zone.Cat)
+        {
+            // 非交互的空白/HUD 区域：顺手退出多选，但不影响上面表情轮盘/宝箱/键盘/菜单的点击逻辑。
+            ClearSelectionOnOutsideClick();
+            return;
+        }
 
         bool ctrl = (Control.ModifierKeys & Keys.Control) != 0;
         if (ctrl)
@@ -976,7 +1102,7 @@ public sealed class PetWindow : Form
             _lastDragCursorX = _dragCursor.X;
             _dragOrigin = Location;
             Capture = true;
-            if (SelectedCount() > 1) BeginGroupDrag(SelfSelectionId, Cursor.Position);
+            BeginPendingGroupDrag(SelfSelectionId, Cursor.Position);
             return;
         }
 
@@ -1009,6 +1135,14 @@ public sealed class PetWindow : Form
         while (PeekMessage(out _, Handle, WM_MOUSEMOVE, WM_MOUSEMOVE, PM_REMOVE)) { }
 
         var now = Cursor.Position;
+        if (_groupDragPending && _groupDragPendingOwner == SelfSelectionId)
+        {
+            // 没越过系统拖拽阈值前一动不动，避免点选第二个角色时手抖导致整组位移。
+            if (!TryStartPendingGroupDrag(now)) return;
+            _moved = true;
+            UpdateGroupDrag(now);
+            return;
+        }
         int dx = now.X - _dragCursor.X, dy = now.Y - _dragCursor.Y;
         if (!_moved && Math.Abs(dx) + Math.Abs(dy) < 3) return;
         _moved = true;
@@ -1079,6 +1213,14 @@ public sealed class PetWindow : Form
         if (e.Button == MouseButtons.Left)
         {
             Capture = false;
+            if (_groupDragPending && _groupDragPendingOwner == SelfSelectionId && !_groupDragging)
+            {
+                // 死区内松手仍按 Ctrl+单击处理，不能因为 1~3px 抖动当成拖动。
+                CancelPendingGroupDrag();
+                _dragging = false;
+                CompleteMultiSelectClick(false);
+                return;
+            }
             if (_groupDragging && _groupDragOwner == SelfSelectionId)
             {
                 bool moved = _moved;
@@ -1603,6 +1745,19 @@ public sealed class PetWindow : Form
     /// <summary>Raw Input 线程回调：按键照常下发给前台程序，这里只做匹配。</summary>
     void OnHotkeyKeyDown(int vk, bool ctrl, bool alt, bool shift)
     {
+        // Ctrl+A 是桌宠多选快捷键，不是普通热键：设置面板输入框里要保留文本全选，
+        // 因此前台窗口属于本进程时直接放行。数量条件切回 UI 线程后再检查。
+        if (PetSelectionLogic.ShouldSelectAllOnCtrlA(vk, ctrl, alt, shift, 1))
+        {
+            if (IsOwnProcessForeground()) return;
+            Safe(() =>
+            {
+                if (PetSelectionLogic.ShouldSelectAllOnCtrlA(vk, ctrl, alt, shift, SelectedCount()))
+                    SelectAllRemoteCats();
+            });
+            return;
+        }
+
         uint mods = (ctrl ? Hotkeys.ModControl : 0) | (alt ? Hotkeys.ModAlt : 0) | (shift ? Hotkeys.ModShift : 0);
         var map = _hotkeyMap;
         if (map.TryGetValue((mods, (uint)vk), out string action))
@@ -1879,6 +2034,36 @@ public sealed class PetWindow : Form
     [DllImport("user32.dll")] static extern bool PeekMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax, uint wRemoveMsg);
     const uint WM_MOUSEMOVE = 0x0200;
     const uint PM_REMOVE = 0x0001;
+
+    [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+    [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT p);
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT p);
+    [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
+
+    /// <summary>
+    /// 只有“本进程窗口在前台，且光标也停在这个前台窗口上”时才把 Ctrl+A 让给输入框。
+    /// 点击桌宠不会激活窗口，前台可能仍是设置面板；此时光标在桌宠/桌面上，
+    /// 不能误判成正在输入而吞掉桌宠多选快捷键。
+    /// </summary>
+    static bool IsOwnProcessForeground()
+    {
+        try
+        {
+            IntPtr h = GetForegroundWindow();
+            if (h == IntPtr.Zero) return false;
+            GetWindowThreadProcessId(h, out uint pid);
+            if (pid != (uint)Environment.ProcessId) return false;
+            if (!GetCursorPos(out var cursor)) return true;
+            IntPtr under = WindowFromPoint(cursor);
+            if (under == IntPtr.Zero) return false;
+            IntPtr root = GetAncestor(under, 2 /* GA_ROOT */);
+            if (root == IntPtr.Zero) root = under;
+            return root == h;
+        }
+        catch { return false; }
+    }
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
