@@ -153,7 +153,7 @@ public sealed class Settings
     public bool CaptureStopRenderingMain { get; set; }
     public bool AlwaysShowChest { get; set; }
     public bool AutoChest { get; set; }
-    /// <summary>是否开启自动升阶合成：拥有 10 件以上相同类型和稀有度的多余材料时自动升阶合成（每种物品至少保留 1 份底物，锁定物品不参与）。</summary>
+    /// <summary>是否开启自动升阶合成：拥有 10 件以上相同类型和稀有度的多余材料时自动升阶合成（每种物品至少保留 1 份底物；上锁只在高级合成中表示保留最后 1 份，不影响普通/自动升阶）。</summary>
     public bool AutoSynthUp { get; set; }
     /// <summary>每次产生敲击时自动发送一个表情。</summary>
     public bool AutoEmoteEnabled { get; set; }

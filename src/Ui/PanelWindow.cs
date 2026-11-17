@@ -1485,7 +1485,10 @@ public sealed class PanelWindow : Form
                             break;
                         }
                         case "anyItemSynthesisUnlocked": cfg.AnyItemSynthesisUnlocked = ApiClient.ReadBool(kv.Value); break;
-                        case "anyItemSynthesisEnabled": cfg.AnyItemSynthesisEnabled = ApiClient.ReadBool(kv.Value); break;
+                        case "anyItemSynthesisEnabled":
+                            cfg.AnyItemSynthesisEnabled = ApiClient.ReadBool(kv.Value);
+                            if (cfg.AnyItemSynthesisEnabled) _app.CancelAutoSynth();
+                            break;
                         case "autoClickBoost": cfg.AutoClickBoost = ApiClient.ReadBool(kv.Value); break;
                         case "captureMode": cfg.CaptureMode = ApiClient.ReadBool(kv.Value); break;
                         case "captureWidth": cfg.CaptureWidth = Math.Clamp((int)ApiClient.ReadLong(kv.Value), 160, 1600); break;
@@ -1502,6 +1505,7 @@ public sealed class PanelWindow : Form
                         case "autoSynthUp":
                             cfg.AutoSynthUp = ApiClient.ReadBool(kv.Value);
                             if (cfg.AutoSynthUp) _app.CheckAutoSynthNow();
+                            else _app.CancelAutoSynth();
                             break;
                         case "autoEmoteEnabled": cfg.AutoEmoteEnabled = ApiClient.ReadBool(kv.Value); break;
                         case "autoEmoteMaxPerSecond": cfg.AutoEmoteMaxPerSecond = Math.Clamp((int)ApiClient.ReadLong(kv.Value), 1, 20); break;
@@ -1619,12 +1623,21 @@ public sealed class PanelWindow : Form
                 if (data["ids"] is JsonArray arr) foreach (var n in arr) ids.Add(ApiClient.ReadLong(n));
                 bool same = ApiClient.ReadBool(data["sameLevel"]);
                 string path = same ? "api/frontend/assets/synthesis/same-level" : "api/frontend/assets/synthesis";
-                var resp = await auth.Api.PostAsync(path, new { asset_ids = ids.ToArray() });
-                return resp;
+                if (!await _app.TryBeginSynthesisAsync())
+                    throw new ApiException(-1, "正在进行其他合成操作，请稍候");
+                try
+                {
+                    var resp = await auth.Api.PostAsync(path, new { asset_ids = ids.ToArray() });
+                    return resp;
+                }
+                finally
+                {
+                    _app.ReleaseSynthesis();
+                }
             }
 
             case "synth.auto":
-                return await _app.RunAutoSynthAsync();
+                return await _app.RunAutoSynthAsync(manual: true);
 
             case "favorite":
             {

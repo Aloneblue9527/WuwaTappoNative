@@ -1516,12 +1516,15 @@
       refreshAfterAcquire(id);
       return;
     }
-    // 自动升阶合成发生在后台，面板收到后同步背包并刷新合成页
+    // 自动升阶合成发生在后台，面板收到后同步背包并刷新合成/图鉴页
     if (evt === 'synth.auto') {
       const id = Number(data?.last_asset_id) || 0;
-      if (id) markRecentObtained(id);
-      refreshAfterAcquire(id);
-      if (state.page === 'synth') renderSynth(true);
+      (async () => {
+        if (id) markRecentObtained(id);
+        await refreshAfterAcquire(id);
+        if (state.page === 'synth') renderSynth(true);
+        else if (state.page === 'atlas') renderAtlas(true);
+      })().catch(() => { });
       return;
     }
     if (evt === 'clicks') {
@@ -2980,7 +2983,7 @@
           <span class="synth-advanced-meta">锁定 ${state.locks.size} 件</span>
           <button class="btn ghost" id="synthHide">隐藏</button>
         </div>
-        <div class="synth-advanced-note">锁定物资不参与合成，单独保存在 locks.json；每次合成前会二次确认。重新打开操作面板后会自动关闭，需要重新输入隐藏指令。</div>
+        <div class="synth-advanced-note">锁定物资只保证在高级合成中保留最后 1 件，不会被消耗到 0；普通 10/5 件合成和自动升阶不受上锁影响。锁定记录单独保存在 locks.json；每次合成前会二次确认。重新打开操作面板后会自动关闭，需要重新输入隐藏指令。</div>
         <div class="synth-advanced-actions"><button class="btn" id="synthSave">保存设置</button></div>
       </div>` : '';
 
@@ -3014,7 +3017,7 @@
           <div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border);display:flex;align-items:center;justify-content:space-between">
             <div>
               <div class="setting-title" style="font-size:12px">自动升阶合成</div>
-              <div class="setting-sub" style="font-size:10px;margin-top:2px">满10件多余材料自动合成</div>
+              <div class="setting-sub" style="font-size:10px;margin-top:2px">满10件多余材料自动升阶（锁定物资同样保留1件）</div>
             </div>
             <div class="switch ${state.boot?.settings?.autoSynthUp ? 'on' : ''}" id="synthAutoSwitch"></div>
           </div>
@@ -3092,11 +3095,17 @@
             toast('正在进行其他合成操作，请稍候', 'err');
             return;
           }
-          if (res?.count > 0) {
-            toast(`自动升阶合成完成：共完成 ${res.count} 次合成！`, 'ok');
+          const count = Number(res?.count) || 0;
+          const processed = Number(res?.processed) || 0;
+          if (count > 0 || processed > 0) {
+            if (res?.success === false)
+              toast(`${res?.message || '自动升阶部分完成'}（已完成 ${count} 次，请刷新背包确认）`, 'err');
+            else
+              toast(`自动升阶合成完成：共完成 ${count} 次合成！`, 'ok');
             synthResetSlots();
             await fetchBagItems(true);
-            renderSynth();
+            if (state.page === 'synth') renderSynth();
+            else if (state.page === 'atlas') renderAtlas(true);
           } else {
             toast(res?.message || '当前没有满足升阶条件的材料（需要 10 件同类型同稀有度多余材料）');
           }
@@ -3404,7 +3413,10 @@
       </div>`, host => host.querySelector('#mOk').onclick = closeModal);
       synthResetSlots();
       renderSynth();
-    } catch { }
+    } catch (e) {
+      // 后端互斥锁可能返回“正在进行其他合成操作”，这里不能静默吞掉。
+      toast(e?.message || '合成失败', 'err');
+    }
     finally { state.synthBusy = false; }
   }
 
@@ -5653,7 +5665,7 @@
             <div class="switch ${s.autoChest ? 'on' : ''}" data-switch="autoChest"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">自动升阶合成</div><div class="setting-sub">拥有 10 件以上相同类型和稀有度的多余材料时自动升阶合成（保留 1 份底物不消耗，锁定物品不参与）</div></div>
+            <div><div class="setting-title">自动升阶合成</div><div class="setting-sub">拥有 10 件以上相同类型和稀有度的多余材料时自动升阶合成（每种物品保留 1 份底物；上锁只在高级合成中保留最后 1 件，不影响普通/自动升阶）</div></div>
             <div class="switch ${s.autoSynthUp ? 'on' : ''}" data-switch="autoSynthUp"></div>
           </div>
           <div class="setting-item">
