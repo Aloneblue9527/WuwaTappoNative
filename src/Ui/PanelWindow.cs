@@ -612,6 +612,7 @@ public sealed class PanelWindow : Form
             captureStopRenderingMain = _app.Cfg.CaptureStopRenderingMain,
             alwaysShowChest = _app.Cfg.AlwaysShowChest,
             autoChest = _app.Cfg.AutoChest,
+            autoSynthUp = _app.Cfg.AutoSynthUp,
             autoEmoteEnabled = _app.Cfg.AutoEmoteEnabled,
             autoEmoteMaxPerSecond = _app.Cfg.AutoEmoteMaxPerSecond,
             autoEmoteMode = _app.Cfg.AutoEmoteMode,
@@ -698,7 +699,7 @@ public sealed class PanelWindow : Form
     {
         return cmd switch
         {
-            "synthesize" or "redeem" or "appearance.sync" or "presets.create" or "presets.delete"
+            "synthesize" or "synth.auto" or "redeem" or "appearance.sync" or "presets.create" or "presets.delete"
                 or "favorite" or "emote.send" => true,
             // 只有显式上传云端的表情槽位会改服务器；仅本地槽位在安全模式下仍可用。
             "appearance.setSlot" => ApiClient.ReadBool(data?["upload"]),
@@ -1498,6 +1499,10 @@ public sealed class PanelWindow : Form
                             cfg.AutoChest = ApiClient.ReadBool(kv.Value);
                             if (cfg.AutoChest) _app.CheckAutoChestNow();
                             break;
+                        case "autoSynthUp":
+                            cfg.AutoSynthUp = ApiClient.ReadBool(kv.Value);
+                            if (cfg.AutoSynthUp) _app.CheckAutoSynthNow();
+                            break;
                         case "autoEmoteEnabled": cfg.AutoEmoteEnabled = ApiClient.ReadBool(kv.Value); break;
                         case "autoEmoteMaxPerSecond": cfg.AutoEmoteMaxPerSecond = Math.Clamp((int)ApiClient.ReadLong(kv.Value), 1, 20); break;
                         case "autoEmoteMode":
@@ -1617,6 +1622,9 @@ public sealed class PanelWindow : Form
                 var resp = await auth.Api.PostAsync(path, new { asset_ids = ids.ToArray() });
                 return resp;
             }
+
+            case "synth.auto":
+                return await _app.RunAutoSynthAsync();
 
             case "favorite":
             {

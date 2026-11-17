@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
+using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -50,6 +51,8 @@ public sealed class App : ApplicationContext
     DateTime _nextLeftAttempt = DateTime.MinValue, _nextRightAttempt = DateTime.MinValue;
     int _chestBusy;
     int _autoChestTickBusy;
+    int _autoSynthBusy;
+    int _autoSynthTicks;
 
     public App()
     {
@@ -111,6 +114,7 @@ public sealed class App : ApplicationContext
             if (_clickUserId != 0 && _clickUserId != Auth.UserId) Room.ResetClickState();
             _clickUserId = Auth.UserId;
             Room.SyncServerClicks(Auth.TotalClickCount, Auth.TotalClickConsume);
+            if (Cfg.AutoSynthUp) CheckAutoSynthNow();
         };
         // 点击数变化很频繁（每次按键一次）。面板可能没开，开了也不能每次都走一趟
         // WebView2 序列化 + postMessage；这里合并成 100ms 一次。
@@ -614,7 +618,15 @@ public sealed class App : ApplicationContext
         {
             if (!Auth.CanUseOnline) return;
             var session = Auth.CaptureSession();
-            if (session == null || !Cfg.AutoChest || Auth.UserInfo is not System.Text.Json.Nodes.JsonObject me) return;
+            if (session == null) return;
+
+            // 约每 60 秒检查一次自动升阶（若开启）
+            if (++_autoSynthTicks % 12 == 0 && Cfg.AutoSynthUp)
+            {
+                _ = AutoSynthTickAsync(session);
+            }
+
+            if (!Cfg.AutoChest || Auth.UserInfo is not System.Text.Json.Nodes.JsonObject me) return;
             long now = session.ServerNowMs;
             long left = ApiClient.ReadLong(me["left_treasure_chest"]);
             long right = ApiClient.ReadLong(me["right_treasure_chest"]);
@@ -736,6 +748,7 @@ public sealed class App : ApplicationContext
                 Pet.BeginInvoke(new Action(() => Pet.ShowPrize(type, id)));
             }
             Panel?.Push("chest", resp);
+            if (Cfg.AutoSynthUp) CheckAutoSynthNow();
             // 通知只是反馈：任何 UI 异常都不能让它把“已领取”当成失败，否则会重复重试并吃掉冷却。
             try
             {
@@ -809,6 +822,7 @@ public sealed class App : ApplicationContext
                 PushAuth();
                 // 启动恢复登录后立刻检查一次，别让已经可领的宝箱干等 30 秒首个定时器。
                 CheckAutoChestNow();
+                if (Cfg.AutoSynthUp) CheckAutoSynthNow();
             }
             else
             {
@@ -999,6 +1013,204 @@ public sealed class App : ApplicationContext
 
     public void Toast(string text, string kind = "info") => Panel?.Push("toast", new { text, kind });
 
+    public void CheckAutoSynthNow() => _ = AutoSynthTickAsync();
+
+    async Task AutoSynthTickAsync(ApiClient session = null)
+    {
+        if (!Cfg.AutoSynthUp || !Auth.CanUseOnline) return;
+        session ??= Auth.CaptureSession();
+        if (session == null || !Auth.IsLoggedIn) return;
+        await Task.Delay(500);
+        await RunAutoSynthAsync(session);
+    }
+
+    static string NextRarity(string rarity) => (rarity ?? "").ToLowerInvariant() switch
+    {
+        "common" => "uncommon",
+        "uncommon" => "rare",
+        "rare" => "epic",
+        _ => null
+    };
+
+    /// <summary>
+    /// 自动升阶合成：拥有 10 件以上相同类型和稀有度的多余材料时自动进行升阶合成。
+    /// 每种收集物至少保留 1 份底物不消耗，被锁定的物资不参与合成。
+    /// 供后台定时/开箱后自动触发，也可供前端“一键全部升阶”主动调用。
+    /// </summary>
+    public async Task<AutoSynthResult> RunAutoSynthAsync(ApiClient session = null)
+    {
+        if (Interlocked.Exchange(ref _autoSynthBusy, 1) == 1)
+            return new AutoSynthResult { Busy = true, Message = "正在进行合成操作，请稍候" };
+
+        try
+        {
+            if (!Auth.CanUseOnline) return new AutoSynthResult { Message = Auth.PauseMessage };
+            session ??= Auth.CaptureSession();
+            if (session == null || !Auth.IsLoggedIn) return new AutoSynthResult { Message = "请先登录" };
+
+            var bagData = await session.PostAsync("api/frontend/bags/list");
+            if (bagData is not JsonArray bagArr || bagArr.Count == 0)
+                return new AutoSynthResult { Success = true, Message = "背包暂无收集物" };
+
+            var ownedAssetIds = new HashSet<long>();
+            var pool = new Dictionary<string, List<SynthCandidateItem>>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var node in bagArr)
+            {
+                if (node is not JsonObject o) continue;
+                long id = ApiClient.ReadLong(o["asset_id"]);
+                string type = ApiClient.ReadString(o["asset_type"]);
+                if (id <= 0 || (type != "character_skin" && type != "accessory" && type != "emote"))
+                    continue;
+
+                ownedAssetIds.Add(id);
+
+                if (AssetLockStore.IsLocked(type, id))
+                    continue;
+
+                long qty = ApiClient.ReadLong(o["quantity"]);
+                int usable = (int)Math.Max(0, qty - 1);
+                if (usable <= 0) continue;
+
+                string rarity = ApiClient.ReadString(o["rarity"]).ToLowerInvariant();
+                if (string.IsNullOrEmpty(rarity))
+                    rarity = Catalog.Rarities.TryGetValue(id, out var r) ? r.ToLowerInvariant() : "common";
+
+                if (rarity == "epic") continue;
+
+                string groupKey = $"{type}|{rarity}";
+                if (!pool.TryGetValue(groupKey, out var list))
+                    pool[groupKey] = list = new List<SynthCandidateItem>();
+
+                list.Add(new SynthCandidateItem { Id = id, Usable = usable, Type = type, Rarity = rarity });
+            }
+
+            var results = new List<long>();
+            const int BatchNeed = 10;
+            const int MaxRounds = 50;
+            int round = 0;
+
+            while (round < MaxRounds)
+            {
+                if (!Auth.CanUseOnline || Auth.CaptureSession() != session) break;
+
+                string selectedGroupKey = null;
+                List<SynthCandidateItem> selectedList = null;
+
+                // 优先从 common -> uncommon -> rare 升阶，便于将低阶材料升阶后的新产物继续参与更高阶合成
+                foreach (var r in new[] { "common", "uncommon", "rare" })
+                {
+                    foreach (var t in new[] { "character_skin", "accessory", "emote" })
+                    {
+                        string k = $"{t}|{r}";
+                        if (pool.TryGetValue(k, out var l) && l.Sum(x => x.Usable) >= BatchNeed)
+                        {
+                            selectedGroupKey = k;
+                            selectedList = l;
+                            break;
+                        }
+                    }
+                    if (selectedGroupKey != null) break;
+                }
+
+                if (selectedGroupKey == null) break;
+
+                var batchIds = new List<long>(BatchNeed);
+                int needed = BatchNeed;
+                for (int i = 0; i < selectedList.Count && needed > 0; i++)
+                {
+                    var item = selectedList[i];
+                    if (item.Usable <= 0) continue;
+                    int take = Math.Min(item.Usable, needed);
+                    for (int k = 0; k < take; k++) batchIds.Add(item.Id);
+                    item.Usable -= take;
+                    needed -= take;
+                }
+
+                if (batchIds.Count != BatchNeed) break;
+
+                var resp = await session.PostAsync("api/frontend/assets/synthesis", new { asset_ids = batchIds.ToArray() });
+                long newAssetId = ApiClient.ReadLong(resp?["asset_id"] ?? resp?["data"]?["asset_id"]);
+                round++;
+
+                if (newAssetId > 0)
+                {
+                    results.Add(newAssetId);
+                    string[] parts = selectedGroupKey.Split('|');
+                    string targetType = parts[0];
+                    string currentRarity = parts[1];
+                    string newType = GuessAssetType(newAssetId);
+                    if (string.IsNullOrEmpty(newType)) newType = targetType;
+                    string newName = null;
+                    if (Catalog.Names.TryGetValue(newAssetId, out var cnName) && !string.IsNullOrEmpty(cnName))
+                        newName = cnName;
+                    else if (Catalog.Find(newType, newAssetId) is { } entry && !string.IsNullOrEmpty(entry.Name))
+                        newName = entry.Name;
+                    if (string.IsNullOrEmpty(newName)) newName = "新收集物";
+
+                    Log.Write($"自动升阶合成成功 [{round}]: {selectedGroupKey} -> {newName}({newAssetId})");
+                    RecentChestStore.Add(newAssetId, (Cfg.ServerRegion == "global" ? "global" : "cn") + ":" + (Auth.Cuid ?? ""));
+
+                    string nextRarity = NextRarity(currentRarity);
+                    if (!string.IsNullOrEmpty(nextRarity) && nextRarity != "epic" && !AssetLockStore.IsLocked(newType, newAssetId))
+                    {
+                        string nextGroupKey = $"{newType}|{nextRarity}";
+                        if (!pool.TryGetValue(nextGroupKey, out var nextList))
+                            pool[nextGroupKey] = nextList = new List<SynthCandidateItem>();
+
+                        var existingInPool = nextList.Find(x => x.Id == newAssetId);
+                        if (existingInPool != null)
+                        {
+                            existingInPool.Usable++;
+                        }
+                        else if (ownedAssetIds.Contains(newAssetId))
+                        {
+                            nextList.Add(new SynthCandidateItem { Id = newAssetId, Usable = 1, Type = newType, Rarity = nextRarity });
+                        }
+                    }
+                    ownedAssetIds.Add(newAssetId);
+                }
+                else
+                {
+                    Log.Write("自动升阶合成响应未包含 asset_id");
+                    break;
+                }
+
+                await Task.Delay(300);
+            }
+
+            if (results.Count > 0)
+            {
+                long lastId = results.Last();
+                string lastType = GuessAssetType(lastId);
+                string lastName = null;
+                if (Catalog.Names.TryGetValue(lastId, out var cnName) && !string.IsNullOrEmpty(cnName))
+                    lastName = cnName;
+                else if (Catalog.Find(lastType, lastId) is { } entry && !string.IsNullOrEmpty(entry.Name))
+                    lastName = entry.Name;
+                if (string.IsNullOrEmpty(lastName)) lastName = "新收集物";
+
+                try { Pet.BeginInvoke(new Action(() => Pet.ShowPrize(lastType, lastId))); } catch { }
+                Toast($"自动升阶合成完成：共完成 {results.Count} 次合成，获得了【{lastName}】等");
+                if (Cfg.NotifyChestClaimed)
+                    Pet.Notify($"自动升阶合成完成：共合成 {results.Count} 次");
+
+                Panel?.Push("synth.auto", new { count = results.Count, last_asset_id = lastId, asset_ids = results });
+            }
+
+            return new AutoSynthResult { Success = true, Count = results.Count, AssetIds = results };
+        }
+        catch (Exception ex)
+        {
+            Log.Write("自动升阶合成执行异常: " + ex.Message);
+            return new AutoSynthResult { Message = ex.Message };
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _autoSynthBusy, 0);
+        }
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
@@ -1015,4 +1227,21 @@ public sealed class App : ApplicationContext
         }
         base.Dispose(disposing);
     }
+}
+
+public sealed class AutoSynthResult
+{
+    public bool Success { get; set; }
+    public bool Busy { get; set; }
+    public int Count { get; set; }
+    public List<long> AssetIds { get; set; } = new();
+    public string Message { get; set; } = "";
+}
+
+sealed class SynthCandidateItem
+{
+    public long Id;
+    public int Usable;
+    public string Type = "";
+    public string Rarity = "";
 }

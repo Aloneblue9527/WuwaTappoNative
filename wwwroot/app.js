@@ -1516,6 +1516,14 @@
       refreshAfterAcquire(id);
       return;
     }
+    // 自动升阶合成发生在后台，面板收到后同步背包并刷新合成页
+    if (evt === 'synth.auto') {
+      const id = Number(data?.last_asset_id) || 0;
+      if (id) markRecentObtained(id);
+      refreshAfterAcquire(id);
+      if (state.page === 'synth') renderSynth(true);
+      return;
+    }
     if (evt === 'clicks') {
       applyClicks(typeof data === 'object' && data !== null ? data : { available: data });
       return;
@@ -1532,7 +1540,7 @@
     return JSON.stringify([boot?.appearance || {}, boot?.locks || [], boot?.auth?.cuid || '', boot?.settings?.serverRegion || '']);
   }
   function bootSynthSignature(boot) {
-    return JSON.stringify([boot?.locks || [], boot?.settings?.synthCheckMode || '', boot?.settings?.anyItemSynthesisUnlocked || false, boot?.settings?.anyItemSynthesisEnabled || false]);
+    return JSON.stringify([boot?.locks || [], boot?.settings?.synthCheckMode || '', boot?.settings?.anyItemSynthesisUnlocked || false, boot?.settings?.anyItemSynthesisEnabled || false, boot?.settings?.autoSynthUp || false]);
   }
   /** auth 推送只做字段级刷新：昵称、UID、点击数、宝箱时间；不重建当前页面。 */
   function applyAuthFields(auth) {
@@ -2996,12 +3004,19 @@
           </div>
         </div>
         <div class="synth-check-card">
-          <div class="setting-title">合成提醒</div>
-          <div class="setting-sub">获得新物品后检查是否可合成</div>
+          <div class="setting-title">合成设置</div>
+          <div class="setting-sub">获得新物品后检查或自动合成</div>
           <div class="pill-row" style="margin-top:8px">
             <button class="pill ${checkMode === 'up' ? 'active' : ''}" data-scm="up">升阶</button>
             <button class="pill ${checkMode === 'same' ? 'active' : ''}" data-scm="same">平阶</button>
-            <button class="pill ${checkMode === 'off' ? 'active' : ''}" data-scm="off">关闭</button>
+            <button class="pill ${checkMode === 'off' ? 'active' : ''}" data-scm="off">关闭提醒</button>
+          </div>
+          <div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border);display:flex;align-items:center;justify-content:space-between">
+            <div>
+              <div class="setting-title" style="font-size:12px">自动升阶合成</div>
+              <div class="setting-sub" style="font-size:10px;margin-top:2px">满10件多余材料自动合成</div>
+            </div>
+            <div class="switch ${state.boot?.settings?.autoSynthUp ? 'on' : ''}" id="synthAutoSwitch"></div>
           </div>
         </div>
       </div>
@@ -3012,6 +3027,7 @@
         <span class="spacer"></span>
         <button class="btn ghost" id="synthClear">清空</button>
         <button class="btn ghost" id="synthOne" ${synthAnyMode() ? 'disabled title="高级合成禁止一键放置"' : ''}>一键选择</button>
+        <button class="btn ghost" id="synthAutoAll" ${synthAnyMode() ? 'disabled title="高级合成模式下请手动选择材料"' : ''}>一键全部升阶</button>
         <button class="btn" id="synthSubmit" ${filled === need ? '' : 'disabled'}>合成</button>
       </div>
       ${advancedPanelHtml}
@@ -3048,6 +3064,49 @@
       synthOneClick().catch(e => toast(e.message || '一键选择失败', 'err'));
     };
     document.getElementById('synthSubmit').onclick = doSynth;
+    const autoSwitch = document.getElementById('synthAutoSwitch');
+    if (autoSwitch) {
+      autoSwitch.onclick = async () => {
+        const next = !autoSwitch.classList.contains('on');
+        autoSwitch.classList.toggle('on', next);
+        try {
+          const boot = await tryCall('settings.set', { autoSynthUp: next });
+          if (boot?.settings) state.boot = boot;
+          toast(next ? '已开启自动升阶合成' : '已关闭自动升阶合成');
+          renderSynth(true);
+        } catch {
+          autoSwitch.classList.toggle('on', !next);
+        }
+      };
+    }
+    const autoAllBtn = document.getElementById('synthAutoAll');
+    if (autoAllBtn) {
+      autoAllBtn.onclick = async () => {
+        if (synthAnyMode()) return toast('高级合成模式下请手动选择材料', 'err');
+        if (state.synthBusy) return;
+        try {
+          state.synthBusy = true;
+          toast('正在检查并执行自动升阶合成…');
+          const res = await tryCall('synth.auto');
+          if (res?.busy) {
+            toast('正在进行其他合成操作，请稍候', 'err');
+            return;
+          }
+          if (res?.count > 0) {
+            toast(`自动升阶合成完成：共完成 ${res.count} 次合成！`, 'ok');
+            synthResetSlots();
+            await fetchBagItems(true);
+            renderSynth();
+          } else {
+            toast(res?.message || '当前没有满足升阶条件的材料（需要 10 件同类型同稀有度多余材料）');
+          }
+        } catch (e) {
+          toast('自动升阶合成失败：' + (e.message || e), 'err');
+        } finally {
+          state.synthBusy = false;
+        }
+      };
+    }
     if (state.synthPanelVisible) {
       document.getElementById('synthHide').onclick = () => {
         state.synthPanelVisible = false;
@@ -4975,11 +5034,13 @@
     }
     const autoBoost = scroller.querySelector('[data-switch="autoClickBoost"]')?.closest('.setting-item');
     const autoChest = scroller.querySelector('[data-switch="autoChest"]')?.closest('.setting-item');
+    const autoSynth = scroller.querySelector('[data-switch="autoSynthUp"]')?.closest('.setting-item');
     if (autoBoost) {
       autoBoost.removeAttribute('style');
       basicBody.appendChild(autoBoost);
     }
     if (autoChest) basicBody.appendChild(autoChest);
+    if (autoSynth) basicBody.appendChild(autoSynth);
     if (basicBody.children.length) groups.push(basic);
 
     // 游戏模式规则属于桌面/穿透行为的补充设置，放在游戏模式开关正下方。
@@ -5590,6 +5651,10 @@
           <div class="setting-item">
             <div><div class="setting-title">自动领取宝箱</div><div class="setting-sub">倒计时结束后至少等待 5 秒再领取</div></div>
             <div class="switch ${s.autoChest ? 'on' : ''}" data-switch="autoChest"></div>
+          </div>
+          <div class="setting-item">
+            <div><div class="setting-title">自动升阶合成</div><div class="setting-sub">拥有 10 件以上相同类型和稀有度的多余材料时自动升阶合成（保留 1 份底物不消耗，锁定物品不参与）</div></div>
+            <div class="switch ${s.autoSynthUp ? 'on' : ''}" data-switch="autoSynthUp"></div>
           </div>
           <div class="setting-item">
             <div><div class="setting-title">手动开启宝箱</div><div class="setting-sub">每次消耗 1000 点击数，冷却 30 分钟，以服务器返回为准</div></div>
@@ -7130,6 +7195,7 @@
         anyItemSynthesisEnabled: mode === 'synth',
         autoClickBoost: false,
         autoChest: true,
+        autoSynthUp: false,
         autoEmoteEnabled: false,
         autoClickEnabled: false,
         notifyChestClaimed: false,
