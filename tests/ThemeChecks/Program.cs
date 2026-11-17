@@ -1644,7 +1644,10 @@ internal static class Program
             "A beta of the next base version must be newer than the previous stable.");
         Assert(UpdateVersion.TryParse("0.3.0", out var stable30) && stable30.CompareTo(beta8) < 0,
             "Older stable must not supersede a current beta.");
-        Console.WriteLine("PASS: beta/stable update version ordering.");
+        Assert(UpdateChecker.IsBetaVersion("0.3.1-beta.8+abc") &&
+               !UpdateChecker.IsBetaVersion("0.3.1+abc"),
+            "Update channel must distinguish beta and stable display versions.");
+        Console.WriteLine("PASS: beta/stable update version ordering and channel detection.");
     }
 
     /// <summary>

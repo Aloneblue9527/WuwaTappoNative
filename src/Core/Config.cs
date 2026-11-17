@@ -209,6 +209,11 @@ public sealed class Settings
     /// 仅当官方强制更新且版本完全匹配时生效；官方再次更新后会重新要求确认。
     /// </summary>
     public string ForcedOnlineAcceptedVersion { get; set; } = "";
+    /// <summary>
+    /// 更新通道：空=跟随当前构建（正式版默认正式通道，测试版默认测试通道）；
+    /// stable=只接收正式版；beta=同时接收正式版和后续测试版。
+    /// </summary>
+    public string UpdateChannel { get; set; } = "";
     /// <summary>更新下载源：auto | github | ghproxy。auto 按 GH-Proxy -> GitHub 顺序回退。</summary>
     public string UpdateDownloadSource { get; set; } = "auto";
     /// <summary>更新检查和下载是否显式使用 HTTP 代理；关闭时使用系统代理。</summary>
@@ -308,6 +313,12 @@ public static class ConfigStore
                     cfg.ThemeBackgroundBlur = Math.Clamp(cfg.ThemeBackgroundBlur, 0, 24);
                     cfg.ForcedOnlineAcceptedVersion = (cfg.ForcedOnlineAcceptedVersion ?? "").Trim();
                     if (cfg.ForcedOnlineAcceptedVersion.Length > 64) cfg.ForcedOnlineAcceptedVersion = "";
+                    cfg.UpdateChannel = (cfg.UpdateChannel ?? "").Trim().ToLowerInvariant() switch
+                    {
+                        "stable" => "stable",
+                        "beta" => "beta",
+                        _ => "",
+                    };
                     cfg.UpdateDownloadSource = cfg.UpdateDownloadSource switch
                     {
                         "github" => "github",

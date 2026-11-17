@@ -67,7 +67,8 @@ Wuwatappo Native 是 WuwaTappo 1.0.2 的 Windows 原生实现，使用 C# / .NET
 - 下载方式一：打开 [GitHub Releases](https://github.com/DanielToyama/WuwaTappoNative/releases)，找到标记为 **Pre-release** 的 `v<下个补丁版本>-beta`（例如 `v0.3.2-beta`），下载对应测试版本号的 `WuwatappoNative-<测试版本号>-Setup.exe` 或 `WuwatappoNative-<测试版本号>-portable.zip`。
 - 下载方式二：打开 [Beta build Actions](https://github.com/DanielToyama/WuwaTappoNative/actions/workflows/beta.yml) 的最近一次运行，在页面底部 **Artifacts** 中下载 `WuwatappoNative-beta-<run_number>`，压缩包内包含 Setup 和便携版。
 - 测试版同时提供安装包和便携版；安装包与正式版一样支持选择“为所有用户安装”或“仅当前用户安装”，便携版解压后运行 `WuwatappoNative.exe`。测试版不提供自动更新，也不承诺稳定性和兼容性。
-- 测试版的“检查更新”会同时检查正式版和后续测试版；正式版只检查正式版。发现更新后仍需手动下载安装，不会静默升级。
+- 正式版发布提交不会再触发新的测试包构建，避免正式发布时混入测试版本。
+- 测试版和正式版都可以在 `设置 → 更新 → 更新通道` 选择正式版或测试版：正式通道只接收正式版，测试通道同时接收正式版和后续测试版。发现更新后仍需手动下载安装，不会静默升级。
 - 测试版与正式版共用 `%LOCALAPPDATA%\WuwatappoNative` 配置目录；测试前建议先退出正在运行的旧实例，如担心配置被改动，可先备份该目录。
 - 反馈时请附上测试版本号、复现步骤和相关日志，提交到 [GitHub Issues](https://github.com/DanielToyama/WuwaTappoNative/issues)。**不要上传 token、账号凭据或包含凭据的截图。**
 - 日常使用请下载 Releases 中非 Pre-release 的正式版；测试版不会影响正式版的更新检查。

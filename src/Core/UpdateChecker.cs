@@ -117,21 +117,36 @@ public static class UpdateChecker
     const int MaxEntries = 20;
     static ReleaseInfo _cached;
     static DateTimeOffset _cachedUntil;
+    static bool _cachedPrerelease;
 
     public static Task<ReleaseInfo> CheckAsync(Version current, bool force = false, string httpProxy = null)
         => CheckAsync(current?.ToString() ?? "0.0.0", force, httpProxy);
 
-    public static async Task<ReleaseInfo> CheckAsync(string currentVersion, bool force = false, string httpProxy = null)
+    internal static bool IsBetaVersion(string raw)
+        => UpdateVersion.TryParse(raw, out var version) && version.IsBeta;
+
+    /// <summary>
+    /// 检查更新。includePrerelease 为 true 时同时接收正式版和测试版；
+    /// 为 false 时只接收正式版。为空时按当前构建类型自动选择。
+    /// </summary>
+    public static async Task<ReleaseInfo> CheckAsync(
+        string currentVersion,
+        bool force = false,
+        string httpProxy = null,
+        bool? includePrerelease = null)
     {
-        if (!force && DateTimeOffset.UtcNow < _cachedUntil) return _cached;
+        if (!UpdateVersion.TryParse(currentVersion, out var current))
+        {
+            Log.Write("检查更新失败：无法解析当前版本 " + currentVersion);
+            _cachedUntil = DateTimeOffset.UtcNow.AddMinutes(10);
+            return _cached = null;
+        }
+        bool betaChannel = includePrerelease ?? current.IsBeta;
+        if (!force && _cachedPrerelease == betaChannel && DateTimeOffset.UtcNow < _cachedUntil)
+            return _cached;
+        _cachedPrerelease = betaChannel;
         try
         {
-            if (!UpdateVersion.TryParse(currentVersion, out var current))
-            {
-                Log.Write("检查更新失败：无法解析当前版本 " + currentVersion);
-                _cachedUntil = DateTimeOffset.UtcNow.AddMinutes(10);
-                return _cached = null;
-            }
             using var http = CreateHttpClient(httpProxy, TimeSpan.FromSeconds(15));
             http.DefaultRequestHeaders.UserAgent.ParseAdd("WuwatappoNative/" + current.Text);
             http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
@@ -142,8 +157,7 @@ public static class UpdateChecker
                 return _cached = null;
             }
 
-            // 正式版只收正式版；测试版同时收正式版和后续测试版。
-            bool betaChannel = current.IsBeta;
+            // 用户选择的通道决定是否接收 prerelease；不再是“当前是测试版才收测试版”。
             var newer = new List<(ReleaseEntry Entry, UpdateVersion Version)>();
             foreach (var node in releases)
             {

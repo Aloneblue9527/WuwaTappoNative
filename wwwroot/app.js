@@ -5777,6 +5777,15 @@
         <div class="section">
           <div class="section-title">更新</div>
           <div class="setting-item">
+            <div><div class="setting-title">更新通道</div><div class="setting-sub">正式版只接收正式版；测试版同时接收正式版和后续测试版</div></div>
+            <div class="setting-content">
+              <select class="select" id="updateChannel" style="width:180px">
+                <option value="stable" ${(s.updateChannel || 'stable') === 'stable' ? 'selected' : ''}>正式版</option>
+                <option value="beta" ${s.updateChannel === 'beta' ? 'selected' : ''}>测试版</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting-item">
             <div><div class="setting-title">更新下载源</div><div class="setting-sub">自动模式固定按 GH-Proxy → GitHub 官方的顺序尝试，失败才回退；不会在下载中按速度中断</div></div>
             <div class="setting-content">
               <select class="select" id="updateDownloadSource">
@@ -6871,6 +6880,25 @@
     });
     document.getElementById('openLog')?.addEventListener('click', () => call('open.log'));
     document.getElementById('aboutBtn')?.addEventListener('click', showAbout);
+    document.getElementById('updateChannel')?.addEventListener('change', async e => {
+      const select = e.target;
+      const value = select.value === 'beta' ? 'beta' : 'stable';
+      try {
+        const boot = await tryCall('settings.set', { updateChannel: value });
+        if (boot?.settings) state.boot = boot;
+        // 切通道后清掉上一个通道的更新横幅，并按新通道重新检查一次。
+        state.update = null;
+        state.updateDownload = null;
+        state.updateDismissed = false;
+        const check = await tryCall('update.check');
+        if (check) state.update = check.update || null;
+        renderSettings();
+        toast(value === 'beta' ? '更新通道：测试版（含后续测试版）' : '更新通道：正式版');
+      } catch {
+        select.value = state.boot?.settings?.updateChannel || 'stable';
+        renderSettings();
+      }
+    });
     document.getElementById('updateDownloadSource')?.addEventListener('change', async e => {
       const select = e.target;
       const value = select.value;
