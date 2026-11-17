@@ -2983,7 +2983,7 @@
           <span class="synth-advanced-meta">锁定 ${state.locks.size} 件</span>
           <button class="btn ghost" id="synthHide">隐藏</button>
         </div>
-        <div class="synth-advanced-note">锁定物资只保证在高级合成中保留最后 1 件，不会被消耗到 0；普通 10/5 件合成和自动升阶不受上锁影响。锁定记录单独保存在 locks.json；每次合成前会二次确认。重新打开操作面板后会自动关闭，需要重新输入隐藏指令。</div>
+        <div class="synth-advanced-note">锁定物资在高级合成中只保证保留最后 1 件，不会被消耗到 0。锁定记录单独保存在 locks.json；每次合成前会二次确认。重新打开操作面板后会自动关闭，需要重新输入隐藏指令。</div>
         <div class="synth-advanced-actions"><button class="btn" id="synthSave">保存设置</button></div>
       </div>` : '';
 
@@ -3017,7 +3017,7 @@
           <div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border);display:flex;align-items:center;justify-content:space-between">
             <div>
               <div class="setting-title" style="font-size:12px">自动升阶合成</div>
-              <div class="setting-sub" style="font-size:10px;margin-top:2px">满10件多余材料自动升阶（锁定物资同样保留1件）</div>
+              <div class="setting-sub" style="font-size:10px;margin-top:2px">满10件同类型同稀有度多余材料自动升阶</div>
             </div>
             <div class="switch ${state.boot?.settings?.autoSynthUp ? 'on' : ''}" id="synthAutoSwitch"></div>
           </div>
@@ -5665,7 +5665,7 @@
             <div class="switch ${s.autoChest ? 'on' : ''}" data-switch="autoChest"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">自动升阶合成</div><div class="setting-sub">拥有 10 件以上相同类型和稀有度的多余材料时自动升阶合成（每种物品保留 1 份底物；上锁只在高级合成中保留最后 1 件，不影响普通/自动升阶）</div></div>
+            <div><div class="setting-title">自动升阶合成</div><div class="setting-sub">拥有 10 件以上相同类型和稀有度的多余材料时自动升阶合成（每种物品保留 1 份底物）</div></div>
             <div class="switch ${s.autoSynthUp ? 'on' : ''}" data-switch="autoSynthUp"></div>
           </div>
           <div class="setting-item">
