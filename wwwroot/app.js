@@ -6809,9 +6809,17 @@
       try {
         const boot = await tryCall('settings.set', { updateChannel: value });
         if (boot?.settings) state.boot = boot;
+        // 切通道后清掉上一个通道的更新横幅，并按新通道重新检查一次。
+        state.update = null;
+        state.updateDownload = null;
+        state.updateDismissed = false;
+        const check = await tryCall('update.check');
+        if (check) state.update = check.update || null;
+        renderSettings();
         toast(value === 'beta' ? '更新通道：测试版（含后续测试版）' : '更新通道：正式版');
       } catch {
         select.value = state.boot?.settings?.updateChannel || 'stable';
+        renderSettings();
       }
     });
     document.getElementById('updateDownloadSource')?.addEventListener('change', async e => {
