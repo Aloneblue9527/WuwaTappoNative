@@ -36,6 +36,8 @@ public sealed class RemoteCatWindow : Form
     string _lastNickname;
     readonly LayeredSurface _surface = new();
     Bitmap _baseFrame;
+    // 渲染 OOM 后 10 秒内不重试，避免 CatPainter 连续调度造成异常风暴。
+    long _renderBlockedUntilMs;
     (Size Size, Image Head, Image Body, Image Accessory, double X, double Y, float Scale, double NameScale, bool BarVisible, string Nickname, bool Selected, Color PillColor, Color PillTextColor) _baseFrameKey;
     float _scale = 1f;
     bool _dragging;
@@ -421,12 +423,26 @@ public sealed class RemoteCatWindow : Form
 
     void Compose()
     {
-        int w = Math.Max(1, Width), h = Math.Max(1, Height);
-        // 复用同一张后缓冲：人多时每个成员每秒都会重画，反复分配 150KB 位图会造成明显的 GC 压力。
-        var surface = _surface.Begin(w, h);
-        ComposeInto(surface);
-        // 这里是全不透明内容；悬停/窗口透明度交给 UpdateLayeredWindow 的常量 alpha。
-        _surface.Apply(this, _opacity);
+        if (Environment.TickCount64 < _renderBlockedUntilMs) return;
+        try
+        {
+            int w = Math.Max(1, Width), h = Math.Max(1, Height);
+            // 复用同一张后缓冲：人多时每个成员每秒都会重画，反复分配 150KB 位图会造成明显的 GC 压力。
+            var surface = _surface.Begin(w, h);
+            ComposeInto(surface);
+            // 这里是全不透明内容；悬停/窗口透明度交给 UpdateLayeredWindow 的常量 alpha。
+            _surface.Apply(this, _opacity);
+        }
+        catch (OutOfMemoryException ex)
+        {
+            // 释放本窗口的离屏缓冲，下一次重试时重新分配；异常不能抛回 CatPainter/UI 线程。
+            _renderBlockedUntilMs = Environment.TickCount64 + RuntimeDiagnostics.RenderRetrySeconds * 1000L;
+            try { _baseFrame?.Dispose(); } catch { }
+            _baseFrame = null;
+            _baseFrameKey = default;
+            try { _surface.Dispose(); } catch { }
+            RuntimeDiagnostics.LogRenderOom("remote-cat", MemberId, ex);
+        }
     }
 
     internal void ComposeInto(Bitmap surface)

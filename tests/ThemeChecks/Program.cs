@@ -48,6 +48,10 @@ internal static class Program
             CheckAnnouncementBoard();
             CheckAuthPauseDoesNotLeaveRoom();
             CheckAutoSynthResultPayload();
+            CheckRetryBackoff();
+            CheckLogRetention();
+            CheckLegacyLogMigration();
+            CheckSynthesisSnapshotSerialization();
             CheckPetZOrderGuard();
             CheckCatOrderScreenSelection();
             CheckPetMultiSelectBehavior();
@@ -1810,6 +1814,205 @@ internal static class Program
         Assert(root.GetProperty("count").GetInt32() == 2 && root.GetProperty("processed").GetInt32() == 3,
             "AutoSynthResult count/processed values must survive bridge serialization.");
         Console.WriteLine("PASS: AutoSynthResult bridge payload uses camelCase success/busy/count/processed/message/assetIds.");
+    }
+
+    /// <summary>点击上报（30/60/120/300 封顶）与自动升阶（1/2/5/10/30 分钟封顶）退避档位及成功重置。</summary>
+    static void CheckRetryBackoff()
+    {
+        int[] click = RetryBackoff.ClickRejectSchedule;
+        Assert(RetryBackoff.DelaySeconds(0, click) == 0, "No failure must mean no click backoff.");
+        Assert(RetryBackoff.DelaySeconds(1, click) == 30, "First click rejection must back off 30s.");
+        Assert(RetryBackoff.DelaySeconds(2, click) == 60, "Second click rejection must back off 60s.");
+        Assert(RetryBackoff.DelaySeconds(3, click) == 120, "Third click rejection must back off 120s.");
+        Assert(RetryBackoff.DelaySeconds(4, click) == 300, "Fourth click rejection must back off 300s.");
+        Assert(RetryBackoff.DelaySeconds(9, click) == 300, "Click backoff must stay capped at 300s.");
+
+        int[] synth = RetryBackoff.AutoSynthSchedule;
+        Assert(RetryBackoff.DelaySeconds(1, synth) == 60, "First auto-synth failure must back off 1 minute.");
+        Assert(RetryBackoff.DelaySeconds(2, synth) == 120, "Second auto-synth failure must back off 2 minutes.");
+        Assert(RetryBackoff.DelaySeconds(3, synth) == 300, "Third auto-synth failure must back off 5 minutes.");
+        Assert(RetryBackoff.DelaySeconds(4, synth) == 600, "Fourth auto-synth failure must back off 10 minutes.");
+        Assert(RetryBackoff.DelaySeconds(5, synth) == 1800, "Fifth auto-synth failure must back off 30 minutes.");
+        Assert(RetryBackoff.DelaySeconds(12, synth) == 1800, "Auto-synth backoff must stay capped at 30 minutes.");
+
+        long now = 1_000_000;
+        var state = new RetryBackoff(click);
+        Assert(!state.IsCoolingDown(now), "New retry state must not be cooling down.");
+        Assert(state.RecordFailure(now) == 30 && state.Failures == 1, "First recorded failure must start a 30s cooldown.");
+        Assert(state.IsCoolingDown(now + 29_999), "Failure cooldown must still be active after 29.999s.");
+        Assert(!state.IsCoolingDown(now + 30_000), "Failure cooldown must end at 30s.");
+        Assert(state.RecordFailure(now + 30_000) == 60 && state.Failures == 2, "Second recorded failure must use the 60s step.");
+        state.Reset();
+        Assert(state.Failures == 0, "Success reset must clear the failure count.");
+        Assert(!state.IsCoolingDown(now + 30_000), "Success reset must clear the cooldown.");
+        Console.WriteLine("PASS: retry backoff click 30/60/120/300 cap, auto-synth 1/2/5/10/30min cap, reset clears state.");
+    }
+
+    /// <summary>
+    /// 日志保留：7 个自然日内（含今天）保留，8/15 天前删除，当前文件永不删除。
+    /// 使用临时目录，绝不触碰真实 %LOCALAPPDATA%。
+    /// </summary>
+    static void CheckLogRetention()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "wuwa-log-retention-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var now = DateTime.UtcNow;
+            string[] prefixes = { "app", "synth", "diag" };
+            string[] extensions = { ".log", ".jsonl", ".log" };
+            var kept = new List<string>();
+            var removed = new List<string>();
+            for (int i = 0; i < prefixes.Length; i++)
+            {
+                kept.Add(CreateLogFile(dir, $"{prefixes[i]}-{now:yyyy-MM-dd}{extensions[i]}", now.AddMinutes(-5)));
+                kept.Add(CreateLogFile(dir, $"{prefixes[i]}-{now.AddDays(-3):yyyy-MM-dd}{extensions[i]}", now.AddDays(-3)));
+                removed.Add(CreateLogFile(dir, $"{prefixes[i]}-{now.AddDays(-8):yyyy-MM-dd}{extensions[i]}", now.AddDays(-8)));
+                removed.Add(CreateLogFile(dir, $"{prefixes[i]}-{now.AddDays(-15):yyyy-MM-dd}{extensions[i]}", now.AddDays(-15)));
+            }
+            // 分卷也按同一规则清理。
+            string oldVolume = CreateLogFile(dir, $"app-{now.AddDays(-8):yyyy-MM-dd}.1.log", now.AddDays(-8));
+            string newVolume = CreateLogFile(dir, $"app-{now.AddDays(-2):yyyy-MM-dd}.1.log", now.AddDays(-2));
+            removed.Add(oldVolume);
+            kept.Add(newVolume);
+            // 非日志文件不应被清理。
+            string note = CreateLogFile(dir, "notes.txt", now.AddDays(-30));
+
+            int deleted = Log.CleanupOldLogs(dir, now);
+            Assert(deleted == removed.Count, $"Expected {removed.Count} old log files deleted, got {deleted}.");
+            foreach (string path in kept)
+                Assert(File.Exists(path), "Log within 7 natural days must be kept: " + Path.GetFileName(path));
+            foreach (string path in removed)
+                Assert(!File.Exists(path), "Log older than 7 natural days must be deleted: " + Path.GetFileName(path));
+            Assert(File.Exists(note), "Cleanup must only touch known log file patterns.");
+            Console.WriteLine("PASS: log retention keeps 7 natural days, deletes older app/synth/diag files and volumes.");
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
+
+    static string CreateLogFile(string dir, string name, DateTime lastWriteUtc)
+    {
+        string path = Path.Combine(dir, name);
+        File.WriteAllText(path, "log");
+        File.SetLastWriteTimeUtc(path, lastWriteUtc);
+        return path;
+    }
+
+    /// <summary>旧版根目录 log.txt 启动时迁移；超过保留期直接删除。</summary>
+    static void CheckLegacyLogMigration()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "wuwa-log-migrate-" + Guid.NewGuid().ToString("N"));
+        string logs = Path.Combine(root, "logs");
+        Directory.CreateDirectory(logs);
+        var now = DateTime.UtcNow;
+        try
+        {
+            string legacy = Path.Combine(root, "log.txt");
+            File.WriteAllText(legacy, "legacy-line");
+            File.SetLastWriteTimeUtc(legacy, now.AddDays(-2));
+            string migrated = Log.MigrateLegacyLog(root, logs, now);
+            Assert(!string.IsNullOrEmpty(migrated) && File.Exists(migrated),
+                "Recent legacy log.txt must be migrated into logs/app-<date>.log.");
+            Assert(!File.Exists(legacy), "Legacy log.txt must be removed after migration.");
+            Assert(File.ReadAllText(migrated).Contains("legacy-line"), "Migrated log content must be preserved.");
+
+            File.WriteAllText(legacy, "too-old");
+            File.SetLastWriteTimeUtc(legacy, now.AddDays(-8));
+            string expired = Log.MigrateLegacyLog(root, logs, now);
+            Assert(expired == null && !File.Exists(legacy),
+                "Legacy log older than 7 natural days must be deleted instead of migrated.");
+            Console.WriteLine("PASS: legacy log.txt migration preserves recent contents and drops expired files.");
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// 自动升阶快照必须包含操作、素材、每轮请求/响应和结果，且绝不包含凭据字段名。
+    /// </summary>
+    static void CheckSynthesisSnapshotSerialization()
+    {
+        var cfg = new Settings { AutoSynthUp = true, AnyItemSynthesisEnabled = false };
+        var snapshot = SynthesisLog.StartAuto(manual: false, cfg);
+        snapshot.Bag.Total = 1;
+        snapshot.Bag.Items.Add(new AutoSynthesisItemSnapshot
+        {
+            AssetId = 1001,
+            Name = "测试素材",
+            Type = "accessory",
+            Rarity = "common",
+            Quantity = 12,
+            Usable = 11,
+        });
+        snapshot.Rounds.Add(new AutoSynthesisRoundSnapshot
+        {
+            Round = 1,
+            GroupKey = "accessory|common",
+            ConsumedAssetIds = new List<long> { 1001 },
+            Materials = new List<AutoSynthesisMaterialSnapshot>
+            {
+                new() { AssetId = 1001, Quantity = 10 },
+            },
+            RetryCount = 1,
+            RequestElapsedMs = 123,
+            ResponseAssetId = 2002,
+            ResponseAssetType = "accessory",
+            ResponseRarity = "uncommon",
+            ResponseName = "测试产物",
+        });
+        snapshot.Result.Success = true;
+        snapshot.Result.Processed = 1;
+        snapshot.Result.Count = 1;
+        snapshot.Result.AssetIds = new List<long> { 2002 };
+        snapshot.Result.Message = "ok";
+        snapshot.Result.ElapsedMs = 456;
+
+        string json = SynthesisLog.Serialize(snapshot);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        Assert(root.TryGetProperty("schemaVersion", out _), "Snapshot must contain schemaVersion.");
+        Assert(root.GetProperty("operationId").GetString()?.Length > 0, "Snapshot must contain operationId.");
+        Assert(root.GetProperty("trigger").GetString() == "auto", "Snapshot trigger must be auto.");
+        Assert(root.GetProperty("rounds").GetArrayLength() == 1, "Snapshot must contain rounds.");
+        Assert(root.GetProperty("result").GetProperty("assetIds")[0].GetInt64() == 2002,
+            "Snapshot result must contain result assetIds.");
+
+        var item = root.GetProperty("bag").GetProperty("items")[0];
+        Assert(item.GetProperty("assetId").GetInt64() == 1001 &&
+               item.GetProperty("name").GetString() == "测试素材" &&
+               item.GetProperty("quantity").GetInt64() == 12,
+            "Snapshot bag item must contain assetId/name/quantity.");
+        var round = root.GetProperty("rounds")[0];
+        Assert(round.GetProperty("materials")[0].GetProperty("assetId").GetInt64() == 1001 &&
+               round.GetProperty("materials")[0].GetProperty("quantity").GetInt32() == 10,
+            "Snapshot round must contain each consumed material and quantity.");
+
+        AssertNoForbiddenCredentialProperties(root, json);
+        Console.WriteLine("PASS: synthesis snapshot contains operation/bag/round/result data and no credential field names.");
+    }
+
+    static void AssertNoForbiddenCredentialProperties(JsonElement element, string json)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                string name = property.Name.ToLowerInvariant();
+                Assert(name != "token" && name != "cookie" && name != "authorization",
+                    $"Synthesis snapshot must not contain credential field '{property.Name}': {json}");
+                AssertNoForbiddenCredentialProperties(property.Value, json);
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+                AssertNoForbiddenCredentialProperties(item, json);
+        }
     }
 
     /// <summary>

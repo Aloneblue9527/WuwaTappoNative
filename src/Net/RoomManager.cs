@@ -49,6 +49,9 @@ public sealed class RoomManager : IDisposable
     bool _roomReady;
     bool _awaitingSnapshot;
     long _lastRejectedClickLogMs;
+    // 连续被拒后的指数退避：30s → 60s → 120s → 300s 封顶。
+    readonly RetryBackoff _clickBackoff = new(RetryBackoff.ClickRejectSchedule);
+    int _lastClickBackoffSeconds;
     int _connectionFailures;
     volatile bool _serviceUnavailable;
     volatile string _lastError = "";
@@ -296,6 +299,7 @@ public sealed class RoomManager : IDisposable
             ConfigStore.Save(_cfg);
             Members.Clear();
             StateChanged?.Invoke();
+            Log.Info($"room left room={(string.IsNullOrEmpty(leavingRoom) ? "(lobby)" : leavingRoom)}", "room");
             if (reconnectLobby) await EnsureLobbyAsync();
         }
         finally { Interlocked.Exchange(ref _busy, 0); }
@@ -478,6 +482,7 @@ public sealed class RoomManager : IDisposable
         StateChanged?.Invoke();
         await ConnectSocketAsync(roomNo);
         StateChanged?.Invoke();
+        Log.Info($"room joined room={roomNo} owner={SelfIsOwner}", "room");
         if (announce) Log.Write("进入房间 " + roomNo);
     }
 
@@ -529,6 +534,7 @@ public sealed class RoomManager : IDisposable
             }
             if (!_leavingIntentionally && LooksLikeSessionTakenOver(reason))
                 _ = _auth.ReportSessionTakenOverAsync("socket: " + reason);
+            Log.Warn($"socket closed room={(string.IsNullOrEmpty(RoomNo) ? "(lobby)" : RoomNo)} reason={(string.IsNullOrWhiteSpace(reason) ? "unknown" : reason)}", "room");
             MarkConnectionFailure(reason);
             SocketClosed?.Invoke(reason);
         };
@@ -736,6 +742,7 @@ public sealed class RoomManager : IDisposable
                 case "fd":
                 {
                     int code = ApiClient.ReadInt(payload?["c"]);
+                    Log.Warn($"room forced disconnect room={(string.IsNullOrEmpty(RoomNo) ? "(lobby)" : RoomNo)} code={code}", "room");
                     _reconnectSuppressed = true;
                     State = "idle";
                     _roomReady = false;
@@ -991,6 +998,9 @@ public sealed class RoomManager : IDisposable
             _inflightClicks = 0;
             _serverConsume = 0;
         }
+        // 换账号后重置上报退避：不能把上一个账号的 80013 冷却带进新会话。
+        _clickBackoff.Reset();
+        _lastClickBackoffSeconds = 0;
         ClicksChanged?.Invoke();
     }
 
@@ -1031,6 +1041,8 @@ public sealed class RoomManager : IDisposable
 
     async Task FlushClicksAsync()
     {
+        // 80013 连续被拒后进入冷却：未到时间直接返回，不发送 cr；AddClicks 仍可继续累计。
+        if (_clickBackoff.IsCoolingDown(Environment.TickCount64)) return;
         if (!string.IsNullOrEmpty(_blockedReason?.Invoke()) || !_auth.CanUseOnline) return;
         if (!await _clickUploadGate.WaitAsync(0)) return;
         long sent = 0, gross = 0;
@@ -1047,25 +1059,16 @@ public sealed class RoomManager : IDisposable
             }
 
             bool success = false;
+            int code = -1;
             try
             {
                 var ack = await socket.EmitAsync("cr", new JsonObject { ["num"] = gross });
-                int code = ack is JsonObject o ? ApiClient.ReadInt(o["c"]) : -1;
+                code = ack is JsonObject o ? ApiClient.ReadInt(o["c"]) : -1;
                 success = code == 0 || code == 200;
-                if (!success)
-                {
-                    // 80013 是官方客户端会静默忽略的错误（通常是上报频率/风控），
-                    // 保留待上报增量并在下个 30 秒周期重试；日志限频，避免刷屏。
-                    long now = Environment.TickCount64;
-                    if (code != 80013 || now - Interlocked.Read(ref _lastRejectedClickLogMs) >= 300_000)
-                    {
-                        Interlocked.Exchange(ref _lastRejectedClickLogMs, now);
-                        Log.Write($"点击上报被拒绝 c={code} num={gross} pending={sent} base={_baseClicks}");
-                    }
-                }
             }
             catch (Exception ex) { Log.Write("点击上报异常 " + ex.Message); }
 
+            long pendingAfter, baseAfter;
             lock (_clicksLock)
             {
                 if (_inflightClicks > 0)
@@ -1073,6 +1076,29 @@ public sealed class RoomManager : IDisposable
                     if (success) _baseClicks += _inflightClicks;
                     else _pendingClicks += _inflightClicks;
                     _inflightClicks = 0;
+                }
+                pendingAfter = _pendingClicks;
+                baseAfter = _baseClicks;
+            }
+
+            if (success)
+            {
+                // 成功即清零连续拒绝计数与冷却。
+                _clickBackoff.Reset();
+                _lastClickBackoffSeconds = 0;
+            }
+            else
+            {
+                long now = Environment.TickCount64;
+                int nextRetry = _clickBackoff.RecordFailure(now);
+                int failures = _clickBackoff.Failures;
+                bool levelChanged = nextRetry != _lastClickBackoffSeconds;
+                _lastClickBackoffSeconds = nextRetry;
+                // 首次拒绝/退避档位变化必须留痕；其余重复拒绝沿用 5 分钟限频，避免刷屏。
+                if (failures <= 1 || levelChanged || now - Interlocked.Read(ref _lastRejectedClickLogMs) >= 300_000)
+                {
+                    Interlocked.Exchange(ref _lastRejectedClickLogMs, now);
+                    Log.Warn($"点击上报被拒绝 c={code} pending={pendingAfter} base={baseAfter} consecutive={failures} nextRetrySeconds={nextRetry}", "clicks");
                 }
             }
             ClicksChanged?.Invoke();

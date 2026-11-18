@@ -57,6 +57,9 @@ public sealed class App : ApplicationContext
     readonly SemaphoreSlim _synthesisGate = new(1, 1);
     readonly object _autoSynthCancelGate = new();
     CancellationTokenSource _autoSynthCts;
+    // 自动升阶连续失败后的冷却：1 → 2 → 5 → 10 → 30 分钟封顶；手动 synth.auto 不受影响。
+    readonly RetryBackoff _autoSynthBackoff = new(RetryBackoff.AutoSynthSchedule);
+    System.Threading.Timer _memoryTimer;
 
     public App()
     {
@@ -196,8 +199,31 @@ public sealed class App : ApplicationContext
         _compatibilityTimer = new System.Threading.Timer(_ => _ = RefreshCompatibilityAsync(), null, 2500, 30 * 60 * 1000);
         // 公告独立拉取；只在设置页显示，失败静默忽略。
         _announcementTimer = new System.Threading.Timer(_ => _ = RefreshAnnouncementsAsync(), null, 3500, 30 * 60 * 1000);
+        // 进程内存/GDI 观测：启动 1 分钟后首次采样，之后每 5 分钟一次；只读计数器，不做 GC。
+        _memoryTimer = new System.Threading.Timer(_ => LogMemorySnapshot(), null, 60_000, 300_000);
         ApplyAutoClickTimer();
         StartStressHarness();
+    }
+
+    /// <summary>周期记录 WorkingSet/Private/GDI/USER 和可见桌宠数；可见数在 UI 线程统计。</summary>
+    void LogMemorySnapshot()
+    {
+        try
+        {
+            if (Pet == null || Pet.IsDisposed || !Pet.IsHandleCreated)
+            {
+                RuntimeDiagnostics.LogPeriodic(0);
+                return;
+            }
+            Pet.BeginInvoke(new Action(() =>
+            {
+                try { RuntimeDiagnostics.LogPeriodic(Pet.VisiblePetCount); } catch { }
+            }));
+        }
+        catch
+        {
+            try { RuntimeDiagnostics.LogPeriodic(0); } catch { }
+        }
     }
 
     bool _stressMode;
@@ -1048,6 +1074,8 @@ public sealed class App : ApplicationContext
     {
         if (!Cfg.AutoSynthUp || !Auth.CanUseOnline || Cfg.AnyItemSynthesisEnabled) return;
         if (!string.IsNullOrEmpty(OnlineBlockedReason)) return;
+        // 自动升阶网络失败后的冷却期内直接返回，不再消耗一次请求。
+        if (_autoSynthBackoff.IsCoolingDown(Environment.TickCount64)) return;
         session ??= Auth.CaptureSession();
         if (session == null || !Auth.IsLoggedIn) return;
 
@@ -1056,6 +1084,8 @@ public sealed class App : ApplicationContext
         if (!Cfg.AutoSynthUp || !Auth.CanUseOnline || Cfg.AnyItemSynthesisEnabled) return;
         if (!string.IsNullOrEmpty(OnlineBlockedReason)) return;
         if (!Auth.IsLoggedIn || !ReferenceEquals(Auth.CaptureSession(), session)) return;
+        // 等待期间可能已有另一次自动检查失败并写入冷却，这里再确认一次。
+        if (_autoSynthBackoff.IsCoolingDown(Environment.TickCount64)) return;
 
         CancellationTokenSource cts;
         lock (_autoSynthCancelGate)
@@ -1065,10 +1095,20 @@ public sealed class App : ApplicationContext
         }
         try
         {
-            await RunAutoSynthAsync(session, manual: false, cts.Token);
+            AutoSynthResult result;
+            try
+            {
+                result = await RunAutoSynthAsync(session, manual: false, cts.Token);
+            }
+            catch (OperationCanceledException) { return; }
+            catch (Exception ex)
+            {
+                Log.Write("自动升阶任务异常: " + ex.Message);
+                RecordAutoSynthFailure(ex.Message);
+                return;
+            }
+            ApplyAutoSynthResult(result);
         }
-        catch (OperationCanceledException) { }
-        catch (Exception ex) { Log.Write("自动升阶任务异常: " + ex.Message); }
         finally
         {
             lock (_autoSynthCancelGate)
@@ -1077,6 +1117,32 @@ public sealed class App : ApplicationContext
             }
             cts.Dispose();
         }
+    }
+
+    /// <summary>自动升阶返回后更新失败冷却；手动 synth.auto 不经过这里。</summary>
+    void ApplyAutoSynthResult(AutoSynthResult result)
+    {
+        if (result == null) return;
+        if (result.Success)
+        {
+            int previous = _autoSynthBackoff.Failures;
+            _autoSynthBackoff.Reset();
+            if (previous > 0) Log.Info("auto synth recovered failures=" + previous, "synth");
+            return;
+        }
+        // Busy/门禁拦截不是网络失败：不推进冷却，避免把“正在手动合成”误判成服务异常。
+        if (result.Busy || result.GateBlocked) return;
+        RecordAutoSynthFailure(result.Message);
+    }
+
+    void RecordAutoSynthFailure(string reason)
+    {
+        long now = Environment.TickCount64;
+        int nextRetry = _autoSynthBackoff.RecordFailure(now);
+        int failures = _autoSynthBackoff.Failures;
+        string text = string.IsNullOrWhiteSpace(reason) ? "unknown" : reason.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        if (text.Length > 200) text = text.Substring(0, 200);
+        Log.Warn($"auto synth backoff failure={failures} nextRetry={nextRetry}s reason={text}", "synth");
     }
 
     static string NextRarity(string rarity) => (rarity ?? "").ToLowerInvariant() switch
@@ -1122,21 +1188,45 @@ public sealed class App : ApplicationContext
     static bool IsRetryableSynthesisError(Exception ex) =>
         ex is ApiException api && (api.Code == 50002 || api.Code == 429);
 
-    async Task<JsonNode> PostSynthesisWithRetryAsync(ApiClient session, long[] assetIds, CancellationToken token)
+    async Task<JsonNode> PostSynthesisWithRetryAsync(ApiClient session, long[] assetIds, CancellationToken token, AutoSynthesisRoundSnapshot round = null)
     {
         const int MaxAttempts = 3;
-        for (int attempt = 1; ; attempt++)
+        var sw = Stopwatch.StartNew();
+        try
         {
-            try
+            for (int attempt = 1; ; attempt++)
             {
-                return await session.PostAsync("api/frontend/assets/synthesis", new { asset_ids = assetIds });
-            }
-            catch (Exception ex) when (attempt < MaxAttempts && IsRetryableSynthesisError(ex))
-            {
-                Log.Write($"自动升阶合成请求失败（第 {attempt} 次）：{ex.Message}");
-                await Task.Delay(500 * attempt, token);
+                // RetryCount 表示已经重试过的次数，首次请求为 0。
+                if (round != null) round.RetryCount = Math.Max(0, attempt - 1);
+                try
+                {
+                    var resp = await session.PostAsync("api/frontend/assets/synthesis", new { asset_ids = assetIds });
+                    if (round != null) round.Error = "";
+                    return resp;
+                }
+                catch (Exception ex) when (attempt < MaxAttempts && IsRetryableSynthesisError(ex))
+                {
+                    if (round != null)
+                    {
+                        round.RetryCount = attempt;
+                        round.Error = ex.Message;
+                    }
+                    Log.Write($"自动升阶合成请求失败（第 {attempt} 次）：{ex.Message}");
+                    await Task.Delay(500 * attempt, token);
+                }
             }
         }
+        finally
+        {
+            if (round != null) round.RequestElapsedMs = sw.ElapsedMilliseconds;
+        }
+    }
+
+    /// <summary>图鉴名称优先，缺失时按类型查找；只用于日志快照，不影响业务逻辑。</summary>
+    string ResolveCatalogName(string type, long id)
+    {
+        if (Catalog.Names.TryGetValue(id, out var name) && !string.IsNullOrEmpty(name)) return name;
+        return Catalog.Find(type, id)?.Name ?? "";
     }
 
     /// <summary>
@@ -1147,28 +1237,65 @@ public sealed class App : ApplicationContext
     /// </summary>
     public async Task<AutoSynthResult> RunAutoSynthAsync(ApiClient session = null, bool manual = false, CancellationToken cancellationToken = default)
     {
+        const int MaxBagItems = 2000;
+        var snapshot = SynthesisLog.StartAuto(manual, Cfg);
+        var totalSw = Stopwatch.StartNew();
+        int processed = 0;
+        var results = new List<long>();
+        string lastResultType = "";
+        string errorMessage = null;
+        bool cancelled = false;
+
+        // 只有真正发过合成请求，或用户手动点“一键全部升阶”时才落盘；
+        // 自动空检查（processed == 0 且非 manual）不写文件。
+        void WriteSnapshot(AutoSynthResult result, string error)
+        {
+            if (!manual && processed <= 0) return;
+            snapshot.Result.Success = result.Success;
+            snapshot.Result.Busy = result.Busy;
+            snapshot.Result.Processed = processed;
+            snapshot.Result.Count = results.Count;
+            snapshot.Result.AssetIds = new List<long>(results);
+            snapshot.Result.Message = result.Message ?? "";
+            snapshot.Result.ElapsedMs = totalSw.ElapsedMilliseconds;
+            snapshot.Result.Cancelled = cancelled;
+            snapshot.Result.Error = string.IsNullOrEmpty(error) && cancelled ? "操作已取消" : (error ?? "");
+            SynthesisLog.WriteAuto(snapshot);
+            Log.Info(
+                $"op={snapshot.OperationId} trigger={snapshot.Trigger} result={(result.Success ? "success" : (result.Busy ? "busy" : "fail"))}"
+                + $" processed={processed} count={results.Count} assets={string.Join(",", results)} elapsed={snapshot.Result.ElapsedMs}ms",
+                "synth");
+        }
+
+        AutoSynthResult Early(string message, bool success = false, bool busy = false, bool gate = false)
+        {
+            var result = new AutoSynthResult { Success = success, Busy = busy, GateBlocked = gate, Message = message };
+            WriteSnapshot(result, message);
+            return result;
+        }
+
         if (Cfg.AnyItemSynthesisEnabled)
-            return new AutoSynthResult { Message = "高级合成开启时不会自动升阶，请先关闭高级合成。" };
+            return Early("高级合成开启时不会自动升阶，请先关闭高级合成。", gate: true);
         if (!manual && !Cfg.AutoSynthUp)
-            return new AutoSynthResult { Message = "自动升阶合成已关闭。" };
+            return Early("自动升阶合成已关闭。", gate: true);
 
         string blocked = OnlineBlockedReason;
         if (!string.IsNullOrEmpty(blocked))
-            return new AutoSynthResult { Message = blocked };
-        if (!Auth.CanUseOnline) return new AutoSynthResult { Message = Auth.PauseMessage };
+            return Early(blocked, gate: true);
+        if (!Auth.CanUseOnline) return Early(Auth.PauseMessage, gate: true);
         session ??= Auth.CaptureSession();
-        if (session == null) return new AutoSynthResult { Message = "请先登录" };
+        if (session == null) return Early("请先登录", gate: true);
         if (!Auth.IsLoggedIn || !ReferenceEquals(Auth.CaptureSession(), session))
-            return new AutoSynthResult { Message = "登录状态已变化，请稍后重试" };
+            return Early("登录状态已变化，请稍后重试", gate: true);
 
         if (!await _synthesisGate.WaitAsync(0))
-            return new AutoSynthResult { Busy = true, Message = "正在进行其他合成操作，请稍候" };
+            return Early("正在进行其他合成操作，请稍候", busy: true);
 
         try
         {
             var bagData = await session.PostAsync("api/frontend/bags/list");
             if (bagData is not JsonArray bagArr || bagArr.Count == 0)
-                return new AutoSynthResult { Success = true, Message = "背包暂无收集物" };
+                return Early("背包暂无收集物", success: true);
 
             var maxRarityByType = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var type in SynthTypes) maxRarityByType[type] = MaxSynthRarity(type);
@@ -1189,11 +1316,27 @@ public sealed class App : ApplicationContext
                 // 这里不能把锁定物资排除出池子（见 wwwroot/app.js 的 synthBaseUsable）。
                 long qty = Math.Max(1, ApiClient.ReadLong(o["quantity"]));
                 int usable = (int)Math.Max(0, qty - 1);
-                if (usable <= 0) continue;
 
                 string rarity = ApiClient.ReadString(o["rarity"]).ToLowerInvariant();
                 if (string.IsNullOrEmpty(rarity))
                     rarity = Catalog.Rarities.TryGetValue(id, out var r) ? r.ToLowerInvariant() : "common";
+
+                // 快照记录初始背包里的全部可合成物资，超过 2000 条时截断并标记。
+                snapshot.Bag.Total++;
+                if (snapshot.Bag.Items.Count < MaxBagItems)
+                {
+                    snapshot.Bag.Items.Add(new AutoSynthesisItemSnapshot
+                    {
+                        AssetId = id,
+                        Name = ResolveCatalogName(type, id),
+                        Type = type,
+                        Rarity = rarity,
+                        Quantity = qty,
+                        Usable = usable,
+                    });
+                }
+
+                if (usable <= 0) continue;
 
                 // 按类型实际最高稀有度排除，而不是只排除 epic。
                 if (rarity == maxRarityByType[type]) continue;
@@ -1204,11 +1347,8 @@ public sealed class App : ApplicationContext
 
                 list.Add(new SynthCandidateItem { Id = id, Usable = usable, Type = type, Rarity = rarity });
             }
+            snapshot.Bag.Truncated = snapshot.Bag.Total > MaxBagItems;
 
-            var results = new List<long>();
-            int processed = 0;
-            string lastResultType = "";
-            string errorMessage = null;
             const int BatchNeed = 10;
             const int MaxRounds = 50;
             int round = 0;
@@ -1252,6 +1392,7 @@ public sealed class App : ApplicationContext
                     if (selectedGroupKey == null) break;
 
                     var batchIds = new List<long>(BatchNeed);
+                    var usedCounts = new Dictionary<long, int>();
                     int needed = BatchNeed;
                     for (int i = 0; i < selectedList.Count && needed > 0; i++)
                     {
@@ -1259,21 +1400,46 @@ public sealed class App : ApplicationContext
                         if (item.Usable <= 0) continue;
                         int take = Math.Min(item.Usable, needed);
                         for (int k = 0; k < take; k++) batchIds.Add(item.Id);
+                        usedCounts[item.Id] = (usedCounts.TryGetValue(item.Id, out var used) ? used : 0) + take;
                         item.Usable -= take;
                         needed -= take;
                     }
 
                     if (batchIds.Count != BatchNeed) break;
 
+                    var roundSnapshot = new AutoSynthesisRoundSnapshot
+                    {
+                        Round = round + 1,
+                        GroupKey = selectedGroupKey,
+                        ConsumedAssetIds = new List<long>(batchIds),
+                        Materials = usedCounts.Select(kv => new AutoSynthesisMaterialSnapshot
+                        {
+                            AssetId = kv.Key,
+                            Quantity = kv.Value,
+                        }).ToList(),
+                    };
+                    snapshot.Rounds.Add(roundSnapshot);
+
                     // 只要请求发出，服务器就可能已经消耗/产出；用于缺失 asset_id 或异常时仍刷新背包。
                     processed++;
-                    var resp = await PostSynthesisWithRetryAsync(session, batchIds.ToArray(), cancellationToken);
+                    JsonNode resp;
+                    try
+                    {
+                        resp = await PostSynthesisWithRetryAsync(session, batchIds.ToArray(), cancellationToken, roundSnapshot);
+                    }
+                    catch (Exception ex)
+                    {
+                        roundSnapshot.Error = ex.ToString();
+                        throw;
+                    }
                     long newAssetId = ApiClient.ReadLong(resp?["asset_id"] ?? resp?["data"]?["asset_id"]);
                     round++;
+                    roundSnapshot.ResponseAssetId = newAssetId;
 
                     if (newAssetId <= 0)
                     {
                         errorMessage = "自动升阶合成响应未包含 asset_id，请刷新背包确认结果。";
+                        roundSnapshot.Error = errorMessage;
                         Log.Write("自动升阶合成响应未包含 asset_id");
                         break;
                     }
@@ -1308,6 +1474,10 @@ public sealed class App : ApplicationContext
                         newName = entry.Name;
                     if (string.IsNullOrEmpty(newName)) newName = "新收集物";
 
+                    roundSnapshot.ResponseAssetType = newType ?? "";
+                    roundSnapshot.ResponseRarity = nextRarity ?? "";
+                    roundSnapshot.ResponseName = newName;
+
                     Log.Write($"自动升阶合成成功 [{round}]: {selectedGroupKey} -> {newName}({newAssetId})");
 
                     if (!string.IsNullOrEmpty(nextRarity) && nextRarity != maxRarityByType[newType])
@@ -1333,19 +1503,21 @@ public sealed class App : ApplicationContext
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                cancelled = true;
                 Log.Write("自动升阶合成已取消");
             }
             catch (Exception ex)
             {
                 errorMessage = ex.Message;
                 Log.Write("自动升阶合成执行异常: " + ex);
+                Log.Exception("自动升阶合成执行异常", ex);
             }
 
             if (results.Count > 0 || processed > 0)
                 PublishAutoSynthResults(results, lastResultType, processed, manual, errorMessage);
 
             bool emptyAfterProcessing = processed > 0 && results.Count == 0;
-            return new AutoSynthResult
+            var finalResult = new AutoSynthResult
             {
                 Success = errorMessage == null && !emptyAfterProcessing,
                 Count = results.Count,
@@ -1357,11 +1529,16 @@ public sealed class App : ApplicationContext
                         ? "自动升阶合成未返回新物品，请刷新背包确认。"
                         : "当前没有满足升阶条件的材料")),
             };
+            WriteSnapshot(finalResult, errorMessage);
+            return finalResult;
         }
         catch (Exception ex)
         {
             Log.Write("自动升阶合成执行异常: " + ex.Message);
-            return new AutoSynthResult { Message = ex.Message };
+            Log.Exception("自动升阶合成执行异常", ex);
+            var failed = new AutoSynthResult { Message = ex.Message };
+            WriteSnapshot(failed, ex.ToString());
+            return failed;
         }
         finally
         {
@@ -1421,6 +1598,7 @@ public sealed class App : ApplicationContext
             try { _autoClickTimer?.Dispose(); } catch { }
             try { _gameModeRuleTimer?.Dispose(); } catch { }
             try { _clicksPushTimer?.Dispose(); } catch { }
+            try { _memoryTimer?.Dispose(); } catch { }
             try { Room.Dispose(); } catch { }
             try { Store.Dispose(); } catch { }
             try { Auth.Api.Dispose(); } catch { }
@@ -1443,6 +1621,9 @@ public sealed class AutoSynthResult
     public List<long> AssetIds { get; set; } = new();
     [JsonPropertyName("message")]
     public string Message { get; set; } = "";
+    /// <summary>门禁/配置/登录态拦截；仅用于自动升阶退避判断，不进入前端 JSON。</summary>
+    [JsonIgnore]
+    internal bool GateBlocked { get; set; }
 }
 
 sealed class SynthCandidateItem

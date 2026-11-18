@@ -29,7 +29,16 @@ public static class Paths
     /// <summary>面板关闭期间领取到的宝箱奖励；下次打开面板时补进「最近获得」。</summary>
     public static string RecentChestFile => Path.Combine(Root, "recent_chests.json");
     public static string UpdatesDir => Path.Combine(Root, "updates");
-    public static string LogFile => Path.Combine(Root, "log.txt");
+    /// <summary>日志根目录；按天滚动的 app/diag 日志和合成 JSONL 都放在这里。</summary>
+    public static string LogsDir => Path.Combine(Root, "logs");
+    /// <summary>合成快照目录。当前与 logs 同目录，单独暴露便于后续调整。</summary>
+    public static string SynthLogsDir => LogsDir;
+    /// <summary>诊断快照目录。当前与 logs 同目录，单独暴露便于后续调整。</summary>
+    public static string DiagLogsDir => LogsDir;
+    /// <summary>今天的 app 日志。跨天时属性会返回新日期文件。</summary>
+    public static string CurrentAppLogFile => Path.Combine(LogsDir, "app-" + DateTime.Now.ToString("yyyy-MM-dd") + ".log");
+    /// <summary>兼容旧引用：等价于当前 app 日志。</summary>
+    public static string LogFile => CurrentAppLogFile;
     public static string CatalogCache => Path.Combine(CacheDir, "appearance_asset.json");
     public static string CatalogMeta => Path.Combine(CacheDir, "appearance_meta.json");
     public static string DefaultAssets => Path.Combine(AppDir, "assets", "default");
@@ -42,5 +51,8 @@ public static class Paths
         Directory.CreateDirectory(CacheDir);
         Directory.CreateDirectory(ImageCacheDir);
         Directory.CreateDirectory(ThemeDir);
+        Directory.CreateDirectory(LogsDir);
+        Directory.CreateDirectory(SynthLogsDir);
+        Directory.CreateDirectory(DiagLogsDir);
     }
 }

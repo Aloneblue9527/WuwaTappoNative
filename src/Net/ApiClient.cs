@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -107,7 +109,9 @@ public sealed class ApiClient : IDisposable
             req.Content = new StringContent(JsonSerializer.Serialize(body, JsonOpts), Encoding.UTF8, "application/json");
 
         long requestStartedMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var requestWatch = Stopwatch.StartNew();
         using var resp = await _http.SendAsync(req).ConfigureAwait(false);
+        int status = (int)resp.StatusCode;
         long requestEndedMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         // 用服务器 Date 头校准本机时钟：宝箱解锁时间戳是服务器时间，
         // 用户 BIOS/Windows 时间慢几十分钟时不能直接与本机时间比较。
@@ -117,12 +121,15 @@ public sealed class ApiClient : IDisposable
             Interlocked.Exchange(ref _serverOffsetMs, serverDate.ToUnixTimeMilliseconds() - midpoint);
         }
         var text = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
-        if ((int)resp.StatusCode == 601)
+        if (status == 601)
+        {
+            LogSlowRequest(requestWatch, method, path, status, null);
             throw new ApiException(601, "当前服务正在维护中，请稍后再试。", null);
+        }
         if (!resp.IsSuccessStatusCode)
         {
-            int status = (int)resp.StatusCode;
             Log.Write($"API HTTP 错误 status={status} path={path}");
+            LogSlowRequest(requestWatch, method, path, status, ResponseRequestId(resp));
             var failure = new ApiException(status, DescribeHttpStatus(status), null);
             if (!bypassGate && IsAuthFailureCode(failure.Code))
                 RequestFailed?.Invoke(path, failure);
@@ -131,9 +138,16 @@ public sealed class ApiClient : IDisposable
 
         JsonNode root;
         try { root = JsonNode.Parse(text); }
-        catch { throw new ApiException(-1, "响应格式异常", null); }
-        if (root is not JsonObject obj)
+        catch
+        {
+            LogSlowRequest(requestWatch, method, path, status, null);
             throw new ApiException(-1, "响应格式异常", null);
+        }
+        if (root is not JsonObject obj)
+        {
+            LogSlowRequest(requestWatch, method, path, status, null);
+            throw new ApiException(-1, "响应格式异常", null);
+        }
 
         int code = ReadInt(obj["code"]);
         string message = obj["message"]?.GetValue<string>();
@@ -141,14 +155,39 @@ public sealed class ApiClient : IDisposable
         if (code != 0 && code != 200)
         {
             Log.Write($"API 业务错误 code={code} message={message} request_id={requestId} path={path}");
+            LogSlowRequest(requestWatch, method, path, status, requestId);
             var failure = new ApiException(code, DescribeCode(code, message), requestId);
             if (!bypassGate && IsAuthFailureCode(code))
                 RequestFailed?.Invoke(path, failure);
             throw failure;
         }
 
+        LogSlowRequest(requestWatch, method, path, status, requestId);
         ReadTokenCookie();
         return obj["data"];
+    }
+
+    /// <summary>只记录 method/path/status/elapsed/request_id；不记录请求体或凭据。</summary>
+    static void LogSlowRequest(Stopwatch watch, HttpMethod method, string path, int status, string requestId)
+    {
+        try
+        {
+            long elapsed = watch.ElapsedMilliseconds;
+            if (elapsed <= 2000) return;
+            Log.Warn($"API 慢请求 method={method?.Method} path={path} status={status} elapsed={elapsed}ms request_id={requestId ?? ""}", "api");
+        }
+        catch { }
+    }
+
+    static string ResponseRequestId(HttpResponseMessage response)
+    {
+        try
+        {
+            return response.Headers.TryGetValues("X-Request-Id", out var values)
+                ? values.FirstOrDefault()
+                : null;
+        }
+        catch { return null; }
     }
 
     static bool IsAuthFailureCode(int code)

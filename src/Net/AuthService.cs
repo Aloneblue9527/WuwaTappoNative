@@ -186,9 +186,11 @@ public sealed class AuthService
     void SetState(AuthState state, string message, bool credentialValid = false)
     {
         bool changed;
+        AuthState oldState;
         lock (_stateGate)
         {
             message ??= "";
+            oldState = _state;
             changed = _state != state || _stateMessage != message;
             _state = state;
             _stateMessage = message;
@@ -198,7 +200,8 @@ public sealed class AuthService
             else if (credentialValid) _lastProbeCredentialValid = true;
         }
         if (!changed) return;
-        Log.Write("登录态：" + state + (string.IsNullOrEmpty(message) ? "" : " " + message));
+        // 只记录状态与原因，绝不记录 token/Cookie。
+        Log.Info($"登录态变化 old={oldState} new={state} reason={message}", "auth");
         try { StateChanged?.Invoke(); } catch { }
         try { Changed?.Invoke(); } catch { }
     }

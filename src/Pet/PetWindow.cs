@@ -3,7 +3,11 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using System.Windows.Forms;
 using WuwatappoNative.Assets;
 using WuwatappoNative.Core;
@@ -53,6 +57,8 @@ public sealed class PetWindow : Form
     bool _dragging, _moved;
     bool _handIsLeft;
     long _lastGeometryMs;
+    // 渲染 OOM 后暂停重绘的时间点（Environment.TickCount64）；避免异常风暴。
+    long _renderBlockedUntilMs;
     Point _dragCursor, _dragOrigin;
     int _lastDragCursorX;
     readonly EmoteBubbleLayer _bubbles = new(10);
@@ -63,6 +69,12 @@ public sealed class PetWindow : Form
     bool _zOrderRepairing;
     bool _zOrderRestackQueued;
     long _lastZOrderRepairLogMs;
+    readonly object _zOrderDiagGate = new();
+    readonly Dictionary<string, long> _lastZOrderSnapshotMs = new();
+    static readonly JsonSerializerOptions ZOrderJsonOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
     long _lastSkin = -1, _lastAcc = -1;
     Image _chestBtnArt, _chestBgArt;
     ContextMenuStrip _menu;
@@ -225,28 +237,41 @@ public sealed class PetWindow : Form
     {
         if (!IsHandleCreated) return;
         if (_frames == null || (!_frames.Ready && !_frames.Loading)) return;
-        var info = BuildInfo(_auth.ServerNowMs);
-        info.Loading = _frames.Loading;
-        info.LoadingPhase = (Environment.TickCount64 % 1000) / 1000.0;
-        // 高频重绘（每次按键、每次计数变化）复用同一张后缓冲。
-        var surface = _surface.Begin(Size.Width, Size.Height);
-        if (_frames.Ready)
+        // OOM 后 10 秒内不重试：窗口仍在，等下一轮按键/计数/计时器重绘时再重新分配缓冲。
+        if (Environment.TickCount64 < _renderBlockedUntilMs) return;
+        try
         {
-            // 窗口内容始终按全不透明绘制；实际透明度交给 UpdateLayeredWindow 常量 alpha。
-            // 这样悬停淡出不用每帧重画整张位图，鼠标频繁移动时 CPU 占用会低很多。
-            PetComposer.ComposeInto(surface, _frames, _bodyFrame, _headFrame, info, _frameCache);
+            var info = BuildInfo(_auth.ServerNowMs);
+            info.Loading = _frames.Loading;
+            info.LoadingPhase = (Environment.TickCount64 % 1000) / 1000.0;
+            // 高频重绘（每次按键、每次计数变化）复用同一张后缓冲。
+            var surface = _surface.Begin(Size.Width, Size.Height);
+            if (_frames.Ready)
+            {
+                // 窗口内容始终按全不透明绘制；实际透明度交给 UpdateLayeredWindow 常量 alpha。
+                // 这样悬停淡出不用每帧重画整张位图，鼠标频繁移动时 CPU 占用会低很多。
+                PetComposer.ComposeInto(surface, _frames, _bodyFrame, _headFrame, info, _frameCache);
+            }
+            else
+            {
+                using var g = Graphics.FromImage(surface);
+                g.Clear(Color.Transparent);
+                float s = surface.Width / (float)PetComposer.WindowW;
+                PetComposer.DrawLoading(g, s, info.LoadingPhase,
+                    PetComposer.CatX + PetComposer.CatSize / 2f,
+                    PetComposer.CatY + PetComposer.CatSize / 2f);
+            }
+            _surface.Apply(this, EffectiveOpacity);
+            CaptureChanged?.Invoke();
         }
-        else
+        catch (OutOfMemoryException ex)
         {
-            using var g = Graphics.FromImage(surface);
-            g.Clear(Color.Transparent);
-            float s = surface.Width / (float)PetComposer.WindowW;
-            PetComposer.DrawLoading(g, s, info.LoadingPhase,
-                PetComposer.CatX + PetComposer.CatSize / 2f,
-                PetComposer.CatY + PetComposer.CatSize / 2f);
+            // 丢弃后缓冲和帧缓存，下一次重试时重新分配；不把异常抛给 UI 线程/计时器。
+            _renderBlockedUntilMs = Environment.TickCount64 + RuntimeDiagnostics.RenderRetrySeconds * 1000L;
+            try { _frameCache.Dispose(); } catch { }
+            try { _surface.Dispose(); } catch { }
+            RuntimeDiagnostics.LogRenderOom("main-pet", 0, ex);
         }
-        _surface.Apply(this, EffectiveOpacity);
-        CaptureChanged?.Invoke();
     }
 
     double EffectiveOpacity
@@ -1540,6 +1565,10 @@ public sealed class PetWindow : Form
             requireContiguous: topmost);
         if (!force && problem == PetZOrderProblem.None) return;
 
+        // 只记录现场，不改变重排行为。同一原因 30 秒内最多一条快照。
+        if (problem != PetZOrderProblem.None)
+            LogZOrderSnapshot("restack", problem.ToString());
+
         _zOrderRepairing = true;
         try
         {
@@ -1575,6 +1604,236 @@ public sealed class PetWindow : Form
             if (IsWindowVisible(h)) result.Add(h);
         }
         return result;
+    }
+
+    /// <summary>主桌宠猫体（不含 HUD）的屏幕矩形，用于 z-order 快照的命中测试。</summary>
+    Rectangle LocalCatBodyRect()
+    {
+        if (!Visible || _hiddenByHotkey) return Rectangle.Empty;
+        float s = Width / (float)PetComposer.WindowW;
+        return new Rectangle(
+            Left + (int)Math.Round(PetComposer.CatX * s),
+            Top + (int)Math.Round(PetComposer.CatY * s),
+            (int)Math.Round(PetComposer.CatSize * s),
+            (int)Math.Round(PetComposer.CatSize * s));
+    }
+
+    /// <summary>
+    /// 记录 z-order 现场到 diag 日志：版本/管理员/前台窗口、可见顶层窗口顺序、
+    /// 每个桌宠的 topmost/band/cloaked/rect、猫体中心 WindowFromPoint 命中，
+    /// 以及桌宠组上方最近的 10 个外部可见窗口。只读，不修改任何窗口状态。
+    /// </summary>
+    public void LogZOrderSnapshot(string reason, string detail = null)
+    {
+        try
+        {
+            string key = (reason ?? "") + "|" + (detail ?? "");
+            lock (_zOrderDiagGate)
+            {
+                long now = Environment.TickCount64;
+                if (_lastZOrderSnapshotMs.TryGetValue(key, out long last) && now - last < 30_000) return;
+                _lastZOrderSnapshotMs[key] = now;
+            }
+
+            var order = VisibleTopLevelZOrder();
+            var indexByHwnd = new Dictionary<IntPtr, int>(order.Count);
+            for (int i = 0; i < order.Count; i++) indexByHwnd[order[i]] = i;
+
+            var petRows = new List<object>();
+            var petRects = new List<Rectangle>();
+            var petIndexes = new List<int>();
+
+            void AddPet(string tag, IntPtr hwnd, Rectangle bodyRect, bool visible)
+            {
+                if (hwnd == IntPtr.Zero) return;
+                if (visible && !bodyRect.IsEmpty) petRects.Add(bodyRect);
+                if (indexByHwnd.TryGetValue(hwnd, out int pos)) petIndexes.Add(pos);
+
+                IntPtr hit = IntPtr.Zero;
+                bool hitOwn = false;
+                int hitPid = 0;
+                object point = null;
+                if (visible && !bodyRect.IsEmpty)
+                {
+                    var center = new Point(bodyRect.Left + bodyRect.Width / 2, bodyRect.Top + bodyRect.Height / 2);
+                    hit = WindowFromPoint(new POINT { X = center.X, Y = center.Y });
+                    if (hit != IntPtr.Zero)
+                    {
+                        uint pid = HwndProcessId(hit);
+                        hitPid = (int)pid;
+                        hitOwn = pid == (uint)Environment.ProcessId;
+                    }
+                    point = new { x = center.X, y = center.Y };
+                }
+
+                petRows.Add(new
+                {
+                    tag,
+                    hwnd = HwndText(hwnd),
+                    visible,
+                    topmost = HasTopMostStyle(hwnd),
+                    windowBand = GetWindowBandValue(hwnd),
+                    cloaked = GetDwmCloaked(hwnd),
+                    rect = RectDto(GetWindowRectOrEmpty(hwnd)),
+                    bodyRect = RectDto(bodyRect),
+                    hitPoint = point,
+                    hitHwnd = hit == IntPtr.Zero ? "" : HwndText(hit),
+                    hitPid,
+                    hitOwn,
+                });
+            }
+
+            AddPet("Main", IsHandleCreated ? Handle : IntPtr.Zero, LocalCatBodyRect(),
+                Visible && !_hiddenByHotkey && IsHandleCreated);
+            foreach (var pair in _cats.OrderBy(x => x.Key))
+            {
+                var cat = pair.Value;
+                if (cat == null || cat.IsDisposed || !cat.IsHandleCreated) continue;
+                bool visible = cat.Visible && IsWindowVisible(cat.Handle);
+                AddPet("Remote(" + pair.Key + ")", cat.Handle,
+                    visible ? CatVisibleRect(cat) : Rectangle.Empty, visible);
+            }
+            var keyboard = KeyboardUI;
+            if (keyboard != null && !keyboard.IsDisposed && keyboard.IsHandleCreated)
+            {
+                bool visible = keyboard.Visible && IsWindowVisible(keyboard.Handle);
+                AddPet("Keyboard", keyboard.Handle, visible ? keyboard.Bounds : Rectangle.Empty, visible);
+            }
+
+            int groupTop = petIndexes.Count > 0 ? petIndexes.Min() : -1;
+            var above = new List<object>();
+            if (groupTop > 0)
+            {
+                for (int i = groupTop - 1; i >= 0 && above.Count < 10; i--)
+                {
+                    IntPtr hwnd = order[i];
+                    if (HwndProcessId(hwnd) == (uint)Environment.ProcessId) continue;
+                    above.Add(DescribeTopLevelWindow(hwnd, i, petRects));
+                }
+            }
+
+            var topLevel = new List<object>(order.Count);
+            for (int i = 0; i < order.Count; i++)
+                topLevel.Add(DescribeTopLevelWindow(order[i], i, petRects));
+
+            var payload = new
+            {
+                schemaVersion = 1,
+                time = DateTimeOffset.Now,
+                reason = reason ?? "",
+                detail = detail ?? "",
+                version = Application.ProductVersion,
+                informationalVersion = typeof(PetWindow).Assembly
+                    .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "",
+                topmostConfigured = _cfg.Topmost,
+                elevated = Elevation.IsElevated,
+                foreground = HwndText(GetForegroundWindow()),
+                topLevel,
+                pets = petRows,
+                above,
+            };
+            Log.Diagnostic("zorder", JsonSerializer.Serialize(payload, ZOrderJsonOptions));
+        }
+        catch (Exception ex)
+        {
+            Log.DiagnosticException("zorder", "生成 z-order 快照失败", ex);
+        }
+    }
+
+    object DescribeTopLevelWindow(IntPtr hwnd, int z, List<Rectangle> petRects)
+    {
+        Rectangle rect = GetWindowRectOrEmpty(hwnd);
+        uint pid = HwndProcessId(hwnd);
+        bool overlap = false;
+        foreach (var petRect in petRects)
+        {
+            if (!petRect.IsEmpty && !rect.IsEmpty && rect.IntersectsWith(petRect)) { overlap = true; break; }
+        }
+        return new
+        {
+            z,
+            hwnd = HwndText(hwnd),
+            className = WindowClassName(hwnd),
+            pid = (int)pid,
+            process = ProcessName(pid),
+            title = TruncateText(WindowTitle(hwnd), 100),
+            topmost = HasTopMostStyle(hwnd),
+            cloaked = GetDwmCloaked(hwnd),
+            rect = RectDto(rect),
+            own = pid == (uint)Environment.ProcessId,
+            overlapsPet = overlap,
+        };
+    }
+
+    static string HwndText(IntPtr hwnd)
+        => hwnd == IntPtr.Zero ? "0x0" : "0x" + hwnd.ToInt64().ToString("X");
+
+    static uint HwndProcessId(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return 0;
+        GetWindowThreadProcessId(hwnd, out uint pid);
+        return pid;
+    }
+
+    static string ProcessName(uint pid)
+    {
+        try { return pid == 0 ? "" : Process.GetProcessById((int)pid).ProcessName; }
+        catch { return ""; }
+    }
+
+    static string WindowClassName(IntPtr hwnd)
+    {
+        try
+        {
+            var sb = new StringBuilder(256);
+            GetClassName(hwnd, sb, sb.Capacity);
+            return sb.ToString();
+        }
+        catch { return ""; }
+    }
+
+    static string WindowTitle(IntPtr hwnd)
+    {
+        try
+        {
+            var sb = new StringBuilder(256);
+            GetWindowText(hwnd, sb, sb.Capacity);
+            return sb.ToString();
+        }
+        catch { return ""; }
+    }
+
+    static string TruncateText(string text, int max)
+        => string.IsNullOrEmpty(text) || text.Length <= max ? text : text[..max];
+
+    static Rectangle GetWindowRectOrEmpty(IntPtr hwnd)
+    {
+        try
+        {
+            return GetWindowRect(hwnd, out RECT rect)
+                ? Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom)
+                : Rectangle.Empty;
+        }
+        catch { return Rectangle.Empty; }
+    }
+
+    static object RectDto(Rectangle rect)
+        => rect.IsEmpty ? null : new { left = rect.Left, top = rect.Top, width = rect.Width, height = rect.Height };
+
+    static uint? GetWindowBandValue(IntPtr hwnd)
+    {
+        try { return GetWindowBand(hwnd, out uint band) ? band : null; }
+        catch { return null; }
+    }
+
+    static int? GetDwmCloaked(IntPtr hwnd)
+    {
+        try
+        {
+            const int DwmwaCloaked = 14;
+            return DwmGetWindowAttribute(hwnd, DwmwaCloaked, out int value, sizeof(int)) == 0 ? value : null;
+        }
+        catch { return null; }
     }
 
     static readonly IntPtr HwndTopMost = new(-1);
@@ -1925,6 +2184,7 @@ public sealed class PetWindow : Form
         }
         else if (action == "visibility")
         {
+            if (!_hiddenByHotkey) LogZOrderSnapshot("f9-hide");
             _hiddenByHotkey = !_hiddenByHotkey;
             Visible = !_hiddenByHotkey && !(_cfg.CaptureMode && _cfg.CaptureStopRenderingMain);
             foreach (var c in _cats.Values) c.Visible = !_hiddenByHotkey;
@@ -2071,6 +2331,14 @@ public sealed class PetWindow : Form
     [DllImport("user32.dll")] static extern IntPtr GetTopWindow(IntPtr hWnd);
     [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] static extern bool GetWindowBand(IntPtr hWnd, out uint pdwBand);
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct RECT { public int Left, Top, Right, Bottom; }
 
     // ---------- 菜单 / 托盘 ----------
 
@@ -2803,6 +3071,20 @@ public sealed class PetWindow : Form
     }
 
     public void RefreshMembers() => RefreshCats();
+
+    /// <summary>当前实际可见的桌宠窗口数（主角 + 远程成员）。只应在 UI 线程读取。</summary>
+    public int VisiblePetCount
+    {
+        get
+        {
+            int count = Visible ? 1 : 0;
+            foreach (var cat in _cats.Values)
+            {
+                if (!cat.IsDisposed && cat.Visible) count++;
+            }
+            return count;
+        }
+    }
 
     void RefreshCats()
     {

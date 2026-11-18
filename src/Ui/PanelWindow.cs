@@ -459,6 +459,9 @@ public sealed class PanelWindow : Form
             var env = await CoreWebView2Environment.CreateAsync(null, System.IO.Path.Combine(Paths.CacheDir, "webview"));
             await _web.EnsureCoreWebView2Async(env);
             var core = _web.CoreWebView2;
+            Log.Info("WebView2 Runtime 版本=" + (env.BrowserVersionString ?? "unknown"), "webview2");
+            core.ProcessFailed += (s, e) =>
+                Log.Warn($"WebView2 进程失败 kind={e.ProcessFailedKind} reason={e.Reason} exitCode={e.ExitCode} desc={e.ProcessDescription}", "webview2");
             core.Settings.AreDevToolsEnabled = true;
             core.Settings.IsStatusBarEnabled = false;
             core.Settings.AreDefaultContextMenusEnabled = false;
@@ -511,6 +514,7 @@ public sealed class PanelWindow : Form
         catch (Exception ex)
         {
             Log.Write("WebView2 初始化失败 " + ex);
+            Log.Exception("WebView2 初始化失败", ex);
             MessageBox.Show("WebView2 初始化失败：\n" + ex.Message, "Wuwatappo");
         }
     }
@@ -525,6 +529,71 @@ public sealed class PanelWindow : Form
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri) { UseShellExecute = true });
         }
         catch (Exception ex) { Log.Write("打开外部链接失败 " + uri + " " + ex.Message); }
+    }
+
+    /// <summary>合成日志用：按图鉴解析选中物品的名称/类型/稀有度，缺失字段留空。</summary>
+    List<ManualSynthesisAssetSnapshot> DescribeSynthesisAssets(List<long> ids)
+    {
+        var list = new List<ManualSynthesisAssetSnapshot>();
+        if (ids == null) return list;
+        foreach (long id in ids)
+        {
+            string type = null, name = null, rarity = null;
+            foreach (string candidate in new[] { "character_skin", "accessory", "emote" })
+            {
+                var entry = _app.Catalog.Find(candidate, id);
+                if (entry == null) continue;
+                type = candidate;
+                name = entry.Name;
+                rarity = entry.Rarity;
+                break;
+            }
+            if (string.IsNullOrEmpty(name) && _app.Catalog.Names.TryGetValue(id, out var catalogName))
+                name = catalogName;
+            if (string.IsNullOrEmpty(rarity) && _app.Catalog.Rarities.TryGetValue(id, out var catalogRarity))
+                rarity = catalogRarity;
+            list.Add(new ManualSynthesisAssetSnapshot
+            {
+                AssetId = id,
+                Name = name ?? "",
+                Type = type ?? "",
+                Rarity = rarity ?? "",
+            });
+        }
+        return list;
+    }
+
+    string ResolveCatalogAssetName(long id)
+    {
+        if (id <= 0) return "";
+        if (_app.Catalog.Names.TryGetValue(id, out var name) && !string.IsNullOrEmpty(name)) return name;
+        foreach (string type in new[] { "character_skin", "accessory", "emote" })
+        {
+            var entry = _app.Catalog.Find(type, id);
+            if (entry != null && !string.IsNullOrEmpty(entry.Name)) return entry.Name;
+        }
+        return "";
+    }
+
+    /// <summary>打开日志目录或选中当前 app 日志，不再假设存在旧的根目录 log.txt。</summary>
+    static void OpenLogLocation()
+    {
+        try
+        {
+            string current = Paths.CurrentAppLogFile;
+            if (File.Exists(current))
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                    "explorer.exe", "/select,\"" + current + "\""));
+            }
+            else
+            {
+                Directory.CreateDirectory(Paths.LogsDir);
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                    "explorer.exe", "\"" + Paths.LogsDir + "\""));
+            }
+        }
+        catch (Exception ex) { Log.Write("打开日志目录失败 " + ex.Message); }
     }
 
     string RecentChestScope => (_app.Cfg.ServerRegion == "global" ? "global" : "cn") + ":" + (_app.Auth.Cuid ?? "");
@@ -1644,16 +1713,61 @@ public sealed class PanelWindow : Form
                 if (data["ids"] is JsonArray arr) foreach (var n in arr) ids.Add(ApiClient.ReadLong(n));
                 bool same = ApiClient.ReadBool(data["sameLevel"]);
                 string path = same ? "api/frontend/assets/synthesis/same-level" : "api/frontend/assets/synthesis";
-                if (!await _app.TryBeginSynthesisAsync())
-                    throw new ApiException(-1, "正在进行其他合成操作，请稍候");
+                var watch = Stopwatch.StartNew();
+                var snapshot = SynthesisLog.StartManual(same, ids);
+                snapshot.Assets = DescribeSynthesisAssets(ids);
                 try
                 {
-                    var resp = await auth.Api.PostAsync(path, new { asset_ids = ids.ToArray() });
-                    return resp;
+                    if (!await _app.TryBeginSynthesisAsync())
+                        throw new ApiException(-1, "正在进行其他合成操作，请稍候");
+                    try
+                    {
+                        var resp = await auth.Api.PostAsync(path, new { asset_ids = ids.ToArray() });
+                        long resultId = ApiClient.ReadLong(resp?["asset_id"] ?? resp?["data"]?["asset_id"]);
+                        string resultType = ApiClient.ReadString(resp?["asset_type"]);
+                        if (string.IsNullOrEmpty(resultType))
+                            resultType = ApiClient.ReadString(resp?["data"]?["asset_type"]);
+                        string resultRarity = ApiClient.ReadString(resp?["rarity"]).ToLowerInvariant();
+                        if (string.IsNullOrEmpty(resultRarity))
+                            resultRarity = ApiClient.ReadString(resp?["data"]?["rarity"]).ToLowerInvariant();
+                        snapshot.Result.Success = true;
+                        snapshot.Result.ResponseAssetId = resultId;
+                        snapshot.Result.ResponseAssetType = resultType ?? "";
+                        snapshot.Result.ResponseRarity = resultRarity ?? "";
+                        snapshot.Result.ResponseName = ResolveCatalogAssetName(resultId);
+                        return resp;
+                    }
+                    finally
+                    {
+                        _app.ReleaseSynthesis();
+                    }
+                }
+                catch (ApiException ex)
+                {
+                    snapshot.Result.Success = false;
+                    snapshot.Result.Error = ex.Message;
+                    snapshot.Result.ApiException = new ApiExceptionSnapshot
+                    {
+                        Code = ex.Code,
+                        RequestId = ex.RequestId ?? "",
+                        Path = path,
+                    };
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    snapshot.Result.Success = false;
+                    snapshot.Result.Error = ex.ToString();
+                    throw;
                 }
                 finally
                 {
-                    _app.ReleaseSynthesis();
+                    snapshot.Result.ElapsedMs = watch.ElapsedMilliseconds;
+                    SynthesisLog.WriteManual(snapshot);
+                    Log.Info(
+                        $"op={snapshot.OperationId} trigger=manual mode={snapshot.Mode} result={(snapshot.Result.Success ? "success" : "fail")}"
+                        + $" ids={string.Join(",", ids)} asset={snapshot.Result.ResponseAssetId} elapsed={snapshot.Result.ElapsedMs}ms",
+                        "synth");
                 }
             }
 
@@ -1855,7 +1969,7 @@ public sealed class PanelWindow : Form
             }
 
             case "open.log":
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", "/select,\"" + Paths.LogFile + "\""));
+                OpenLogLocation();
                 return true;
         }
         throw new ApiException(-1, "未知命令 " + cmd);

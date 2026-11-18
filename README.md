@@ -99,11 +99,21 @@ Wuwatappo Native 是 WuwaTappo 1.0.2 的 Windows 原生实现，使用 C# / .NET
 ```text
 %LOCALAPPDATA%\WuwatappoNative\config.json
 %LOCALAPPDATA%\WuwatappoNative\state.json
-%LOCALAPPDATA%\WuwatappoNative\log.txt
+%LOCALAPPDATA%\WuwatappoNative\logs\app-YYYY-MM-DD.log
+%LOCALAPPDATA%\WuwatappoNative\logs\synth-YYYY-MM-DD.jsonl
+%LOCALAPPDATA%\WuwatappoNative\logs\diag-YYYY-MM-DD.log
 %LOCALAPPDATA%\WuwatappoNative\cache\
 ```
 
-`config.json` 保存登录状态、外观和设置；`state.json` 保存窗口位置、房间状态、成员位置和成员可见性；`log.txt` 保存运行日志；`cache\` 保存外观和图片缓存。
+`config.json` 保存登录状态、外观和设置；`state.json` 保存窗口位置、房间状态、成员位置和成员可见性；`cache\` 保存外观和图片缓存。
+
+日志目录说明：
+
+- `logs\app-YYYY-MM-DD.log`：普通运行日志，启动时记录版本/系统/屏幕 DPI/关键设置；`--verbose` 下额外输出 `DBG` 调试行。单文件超过 16MB 会生成 `app-YYYY-MM-DD.1.log` 分卷。
+- `logs\synth-YYYY-MM-DD.jsonl`：合成快照，一行一个 JSON 操作。每次真正发起自动/手动合成时记录操作 id、设置、初始背包素材、每轮消耗与响应、结果和耗时；自动空检查（没有发起合成）不写。单文件超过 32MB 分卷。
+- `logs\diag-YYYY-MM-DD.log`：诊断日志，包含 z-order/Issue #13 现场快照（顶层窗口顺序、桌宠 topmost/cloaked、`WindowFromPoint` 命中、上方外部窗口）、WebView2 故障等；单文件超过 16MB 分卷。
+- 三套日志都只保留最近 7 个自然日（含今天），按最后写入时间自动清理；旧版根目录 `log.txt` 会在启动时迁移到对应日期的 app 日志，超过 7 天则直接删除。
+- 所有日志都不会记录 token、Cookie、Authorization 等凭据。
 
 ## 用法与配置
 
