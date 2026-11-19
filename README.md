@@ -66,7 +66,7 @@ Wuwatappo Native 是 WuwaTappo 1.0.2 的 Windows 原生实现，使用 C# / .NET
 每次向 `main` 推送会进入测试包的源码、资源或构建脚本改动都会触发 GitHub Actions 的 `Beta build`，自动生成一个带测试版本号的测试版，并发布到 GitHub Releases 的 Pre-release。只修改文档、workflow、测试代码等不会重新生成测试包。
 
 - 测试版版本号格式：`<下个补丁版本>-beta.<run_number>`，例如 `0.3.3-beta.123`。
-- 测试版 Release 标题和说明会带上本次构建的发送时间（UTC），方便区分同一个滚动 Release 的多次更新。
+- 测试版 Release 标题和说明会带上本次构建的发送时间（UTC+8），方便区分同一个滚动 Release 的多次更新。
 - 下载方式一：打开 [GitHub Releases](https://github.com/DanielToyama/WuwaTappoNative/releases)，找到标记为 **Pre-release** 的 `v<下个补丁版本>-beta`（例如 `v0.3.3-beta`），下载对应测试版本号的 `WuwatappoNative-<测试版本号>-Setup.exe` 或 `WuwatappoNative-<测试版本号>-portable.zip`。
 - 下载方式二：打开 [Beta build Actions](https://github.com/DanielToyama/WuwaTappoNative/actions/workflows/beta.yml) 的最近一次运行，在页面底部 **Artifacts** 中下载 `WuwatappoNative-beta-<run_number>`，压缩包内包含 Setup 和便携版。
 - 测试版同时提供安装包和便携版；安装包与正式版一样支持选择“为所有用户安装”或“仅当前用户安装”，便携版解压后运行 `WuwatappoNative.exe`。测试版不提供自动更新，也不承诺稳定性和兼容性。

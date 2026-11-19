@@ -59,7 +59,7 @@ jobs:
           $next = "$($base.Major).$($base.Minor).$($base.Build + 1)"
           $display = "$next-beta.${{ github.run_number }}"
           $numeric = "$next.${{ github.run_number }}"
-          $builtAt = [DateTime]::UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'")
+          $builtAt = [DateTimeOffset]::UtcNow.ToOffset([TimeSpan]::FromHours(8)).ToString("yyyy-MM-dd HH:mm:ss") + " UTC+8"
           "base=$next" >> $env:GITHUB_OUTPUT
           "display=$display" >> $env:GITHUB_OUTPUT
           "numeric=$numeric" >> $env:GITHUB_OUTPUT
