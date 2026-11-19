@@ -55,6 +55,9 @@ public sealed class App : ApplicationContext
     int _autoSynthTicks;
     // 普通手动合成与自动升阶共用同一把锁，避免同时对同一批背包物资发请求。
     readonly SemaphoreSlim _synthesisGate = new(1, 1);
+    // 只读 bags/list 的跨入口串行门：前端刷新、自动升阶和面板加载共用，避免开箱后并发打服务端。
+    readonly SemaphoreSlim _bagGate = new(1, 1);
+    int _disposed;
     readonly object _autoSynthCancelGate = new();
     CancellationTokenSource _autoSynthCts;
     // 自动升阶连续失败后的冷却：1 → 2 → 5 → 10 → 30 分钟封顶；手动 synth.auto 不受影响。
@@ -800,7 +803,8 @@ public sealed class App : ApplicationContext
                 Pet.BeginInvoke(new Action(() => Pet.ShowPrize(type, id)));
             }
             Panel?.Push("chest", resp);
-            if (Cfg.AutoSynthUp) CheckAutoSynthNow();
+            // 刻意不在开箱路径立即触发自动升阶：此刻前端会刷新 bag.list，后台也在跑 user/me，
+            // 再叠加一次 bags/list 容易触发并发 403/10007。自动升阶交给 60 秒定时器即可。
             // 通知只是反馈：任何 UI 异常都不能让它把“已领取”当成失败，否则会重复重试并吃掉冷却。
             try
             {
@@ -1070,6 +1074,143 @@ public sealed class App : ApplicationContext
         _ = AutoSynthTickAsync();
     }
 
+    const string BagListPath = "api/frontend/bags/list";
+    // 自动升阶只等一小会儿，避免整个任务被别的背包请求长时间拖住；面板命令可以多等一点。
+    const int AutoBagGateWaitMs = 3000;
+    const int PanelBagGateWaitMs = 8000;
+
+    /// <summary>
+    /// 面板 bag.list 入口：与自动升阶共用串行门和只读重试策略，避免前端刷新与后台任务同时请求。
+    /// 失败时抛出带中文消息的 ApiException，保持原有命令错误通道。
+    /// </summary>
+    public async Task<JsonNode> LoadBagAsync(CancellationToken cancellationToken = default)
+    {
+        var auth = Auth;
+        if (!auth.IsLoggedIn) throw new ApiException(-1, "请先登录");
+        var session = auth.CaptureSession() ?? throw new ApiException(-1, "请先登录");
+        var outcome = await FetchBagAsync(session, PanelBagGateWaitMs, cancellationToken);
+        if (outcome.Success) return outcome.Items;
+        if (outcome.Cancelled) throw new OperationCanceledException(cancellationToken);
+        throw new ApiException(outcome.Code != 0 ? outcome.Code : -1, outcome.Error, outcome.RequestId, outcome.HttpStatus);
+    }
+
+    /// <summary>
+    /// 只读 bags/list：网络异常/连接重置/超时/10007/HTTP 403 最多重试 3 次（间隔 1s、2s）。
+    /// 合成 POST 非幂等，绝不在这里重试。门禁被占用时短等待后返回 Busy，不发起请求。
+    /// </summary>
+    async Task<BagFetchOutcome> FetchBagAsync(ApiClient session, int gateWaitMs, CancellationToken cancellationToken)
+    {
+        var outcome = new BagFetchOutcome { Path = BagListPath };
+        var total = Stopwatch.StartNew();
+        bool entered = false;
+        try
+        {
+            try { entered = await _bagGate.WaitAsync(gateWaitMs, cancellationToken); }
+            catch (OperationCanceledException)
+            {
+                outcome.Cancelled = true;
+                outcome.Error = "操作已取消";
+                outcome.ErrorDetail = "cancelled";
+                return outcome;
+            }
+            if (!entered)
+            {
+                outcome.Busy = true;
+                outcome.Error = "背包正在同步，请稍后再试";
+                outcome.ErrorDetail = "skipped=bag_gate_busy";
+                Log.Warn($"phase=bag_list attempt=0 path={BagListPath} skipped=bag_gate_busy elapsed={total.ElapsedMilliseconds}ms", "bag");
+                return outcome;
+            }
+
+            for (int attempt = 1; attempt <= BagFetchPolicy.MaxAttempts; attempt++)
+            {
+                outcome.Attempts = attempt;
+                var attemptWatch = Stopwatch.StartNew();
+                try
+                {
+                    var data = await session.PostAsync(BagListPath);
+                    if (data is JsonArray arr)
+                    {
+                        outcome.Success = true;
+                        outcome.Items = arr;
+                        // 重试后成功时清掉上一次失败的上下文，避免最终快照误报 code/request_id。
+                        outcome.Code = 0;
+                        outcome.HttpStatus = 0;
+                        outcome.RequestId = "";
+                        outcome.Error = "";
+                        outcome.ErrorDetail = "";
+                        if (attempt > 1)
+                            Log.Info($"phase=bag_list attempt={attempt} path={BagListPath} ok elapsed={attemptWatch.ElapsedMilliseconds}ms total={total.ElapsedMilliseconds}ms", "bag");
+                        else
+                            Log.Debug($"phase=bag_list attempt=1 path={BagListPath} ok elapsed={attemptWatch.ElapsedMilliseconds}ms", "bag");
+                        return outcome;
+                    }
+
+                    // 200 + 非数组属于格式错误，重试也不会变好；直接按失败返回，不能当空背包成功。
+                    outcome.FormatError = true;
+                    outcome.Code = 0;
+                    outcome.HttpStatus = 0;
+                    outcome.RequestId = "";
+                    outcome.Error = "背包数据格式异常，请稍后重试";
+                    string actualType = data == null ? "null" : data.GetType().Name;
+                    outcome.ErrorDetail = $"format_error actual={actualType} attempts={attempt} elapsed={attemptWatch.ElapsedMilliseconds}ms";
+                    Log.Warn($"phase=bag_list attempt={attempt} path={BagListPath} format_error actual={actualType} elapsed={attemptWatch.ElapsedMilliseconds}ms", "bag");
+                    return outcome;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    outcome.Cancelled = true;
+                    outcome.Error = "操作已取消";
+                    outcome.ErrorDetail = "cancelled";
+                    return outcome;
+                }
+                catch (Exception ex)
+                {
+                    FillBagError(outcome, ex);
+                    bool retry = BagFetchPolicy.IsRetryable(ex, attempt);
+                    Log.Warn(
+                        $"phase=bag_list attempt={attempt}/{BagFetchPolicy.MaxAttempts} path={BagListPath}"
+                        + $" exception={ex.GetType().Name} code={outcome.Code} http={outcome.HttpStatus}"
+                        + $" request_id={outcome.RequestId} elapsed={attemptWatch.ElapsedMilliseconds}ms retry={retry}",
+                        "bag");
+                    if (!retry) return outcome;
+                    try { await Task.Delay(BagFetchPolicy.RetryDelayMs(attempt), cancellationToken); }
+                    catch (OperationCanceledException)
+                    {
+                        outcome.Cancelled = true;
+                        outcome.Error = "操作已取消";
+                        outcome.ErrorDetail = "cancelled";
+                        return outcome;
+                    }
+                }
+            }
+            return outcome;
+        }
+        finally
+        {
+            outcome.ElapsedMs = total.ElapsedMilliseconds;
+            if (entered) _bagGate.Release();
+        }
+    }
+
+    static void FillBagError(BagFetchOutcome outcome, Exception ex)
+    {
+        if (ex is ApiException api)
+        {
+            outcome.Code = api.Code;
+            outcome.HttpStatus = api.HttpStatus;
+            outcome.RequestId = api.RequestId ?? "";
+            outcome.Error = string.IsNullOrWhiteSpace(api.Message) ? "背包请求失败，请稍后重试" : api.Message;
+            outcome.ErrorDetail = $"exception={ex.GetType().Name} code={api.Code} http={api.HttpStatus} request_id={api.RequestId ?? ""} message={api.Message}";
+            return;
+        }
+        outcome.Code = 0;
+        outcome.HttpStatus = 0;
+        outcome.RequestId = "";
+        outcome.Error = "背包请求失败，请检查网络后重试";
+        outcome.ErrorDetail = $"exception={ex.GetType().Name} message={ex.Message}";
+    }
+
     /// <summary>关闭自动升阶时取消正在运行的后台任务；手动“一键全部升阶”不调用此方法。</summary>
     public void CancelAutoSynth()
     {
@@ -1085,6 +1226,7 @@ public sealed class App : ApplicationContext
 
     async Task AutoSynthTickAsync(ApiClient session = null)
     {
+        if (Volatile.Read(ref _disposed) != 0) return;
         if (!Cfg.AutoSynthUp || !Auth.CanUseOnline || Cfg.AnyItemSynthesisEnabled) return;
         if (!string.IsNullOrEmpty(OnlineBlockedReason)) return;
         // 自动升阶网络失败后的冷却期内直接返回，不再消耗一次请求。
@@ -1092,14 +1234,8 @@ public sealed class App : ApplicationContext
         session ??= Auth.CaptureSession();
         if (session == null || !Auth.IsLoggedIn) return;
 
-        // 等待开箱/背包同步落一拍，再重新确认所有门禁和开关，避免等待期间状态变化。
-        await Task.Delay(500);
-        if (!Cfg.AutoSynthUp || !Auth.CanUseOnline || Cfg.AnyItemSynthesisEnabled) return;
-        if (!string.IsNullOrEmpty(OnlineBlockedReason)) return;
-        if (!Auth.IsLoggedIn || !ReferenceEquals(Auth.CaptureSession(), session)) return;
-        // 等待期间可能已有另一次自动检查失败并写入冷却，这里再确认一次。
-        if (_autoSynthBackoff.IsCoolingDown(Environment.TickCount64)) return;
-
+        // 先占用运行标志再等待：CancelAutoSynth 可以打断 500ms 延迟，
+        // 也避免多个触发源在延迟期间各自排队、之后同时发请求。
         CancellationTokenSource cts;
         lock (_autoSynthCancelGate)
         {
@@ -1108,6 +1244,17 @@ public sealed class App : ApplicationContext
         }
         try
         {
+            // 等待开箱/背包同步落一拍，再重新确认所有门禁和开关，避免等待期间状态变化。
+            try { await Task.Delay(500, cts.Token); }
+            catch (OperationCanceledException) { return; }
+
+            if (Volatile.Read(ref _disposed) != 0) return;
+            if (!Cfg.AutoSynthUp || !Auth.CanUseOnline || Cfg.AnyItemSynthesisEnabled) return;
+            if (!string.IsNullOrEmpty(OnlineBlockedReason)) return;
+            if (!Auth.IsLoggedIn || !ReferenceEquals(Auth.CaptureSession(), session)) return;
+            // 等待期间可能已有另一次自动检查失败并写入冷却，这里再确认一次。
+            if (_autoSynthBackoff.IsCoolingDown(Environment.TickCount64)) return;
+
             AutoSynthResult result;
             try
             {
@@ -1136,16 +1283,22 @@ public sealed class App : ApplicationContext
     void ApplyAutoSynthResult(AutoSynthResult result)
     {
         if (result == null) return;
-        if (result.Success)
+        switch (AutoSynthBackoffPolicy.Decide(result))
         {
-            int previous = _autoSynthBackoff.Failures;
-            _autoSynthBackoff.Reset();
-            if (previous > 0) Log.Info("auto synth recovered failures=" + previous, "synth");
-            return;
+            case AutoSynthBackoffAction.Reset:
+                int previous = _autoSynthBackoff.Failures;
+                _autoSynthBackoff.Reset();
+                if (previous > 0) Log.Info("auto synth recovered failures=" + previous, "synth");
+                break;
+            case AutoSynthBackoffAction.RecordFailure:
+                RecordAutoSynthFailure(result.Message);
+                break;
+            default:
+                // 空成功（背包空/无满足材料）不是“恢复”：保留失败计数和冷却，避免下一轮开箱又立即请求。
+                if (result.Success && result.NoWork)
+                    Log.Debug("auto synth no work; backoff unchanged", "synth");
+                break;
         }
-        // Busy/门禁拦截不是网络失败：不推进冷却，避免把“正在手动合成”误判成服务异常。
-        if (result.Busy || result.GateBlocked) return;
-        RecordAutoSynthFailure(result.Message);
     }
 
     void RecordAutoSynthFailure(string reason)
@@ -1246,7 +1399,7 @@ public sealed class App : ApplicationContext
     /// 自动升阶合成：拥有 10 件以上相同类型和稀有度的多余材料时自动进行升阶合成。
     /// 每种收集物至少保留 1 份底物不消耗；上锁只影响高级合成时是否保留最后 1 件，
     /// 不影响普通 10/5 件合成和本自动升阶（本功能始终使用普通升阶接口）。
-    /// 供后台定时/开箱后自动触发，也可供前端“一键全部升阶”主动调用。
+    /// 供后台定时/登录态恢复自动触发，也可供前端“一键全部升阶”主动调用；开箱路径不再立即触发。
     /// </summary>
     public async Task<AutoSynthResult> RunAutoSynthAsync(ApiClient session = null, bool manual = false, CancellationToken cancellationToken = default)
     {
@@ -1258,12 +1411,14 @@ public sealed class App : ApplicationContext
         string lastResultType = "";
         string errorMessage = null;
         bool cancelled = false;
+        string phase = "init";
+        string snapshotPath = "";
 
-        // 只有真正发过合成请求，或用户手动点“一键全部升阶”时才落盘；
+        // 只有真正发过合成请求、用户手动点“一键全部升阶”，或 bag_list 阶段失败时才落盘；
         // 自动空检查（processed == 0 且非 manual）不写文件。
-        void WriteSnapshot(AutoSynthResult result, string error)
+        void WriteSnapshot(AutoSynthResult result, string error, bool force = false)
         {
-            if (!manual && processed <= 0) return;
+            if (!manual && processed <= 0 && !force) return;
             snapshot.Result.Success = result.Success;
             snapshot.Result.Busy = result.Busy;
             snapshot.Result.Processed = processed;
@@ -1273,16 +1428,18 @@ public sealed class App : ApplicationContext
             snapshot.Result.ElapsedMs = totalSw.ElapsedMilliseconds;
             snapshot.Result.Cancelled = cancelled;
             snapshot.Result.Error = string.IsNullOrEmpty(error) && cancelled ? "操作已取消" : (error ?? "");
+            snapshot.Result.Phase = phase;
+            snapshot.Result.Path = snapshotPath;
             SynthesisLog.WriteAuto(snapshot);
             Log.Info(
                 $"op={snapshot.OperationId} trigger={snapshot.Trigger} result={(result.Success ? "success" : (result.Busy ? "busy" : "fail"))}"
-                + $" processed={processed} count={results.Count} assets={string.Join(",", results)} elapsed={snapshot.Result.ElapsedMs}ms",
+                + $" phase={phase} processed={processed} count={results.Count} assets={string.Join(",", results)} elapsed={snapshot.Result.ElapsedMs}ms",
                 "synth");
         }
 
-        AutoSynthResult Early(string message, bool success = false, bool busy = false, bool gate = false)
+        AutoSynthResult Early(string message, bool success = false, bool busy = false, bool gate = false, bool noWork = false)
         {
-            var result = new AutoSynthResult { Success = success, Busy = busy, GateBlocked = gate, Message = message };
+            var result = new AutoSynthResult { Success = success, Busy = busy, GateBlocked = gate, NoWork = noWork, Message = message };
             WriteSnapshot(result, message);
             return result;
         }
@@ -1306,9 +1463,41 @@ public sealed class App : ApplicationContext
 
         try
         {
-            var bagData = await session.PostAsync("api/frontend/bags/list");
-            if (bagData is not JsonArray bagArr || bagArr.Count == 0)
-                return Early("背包暂无收集物", success: true);
+            phase = "bag_list";
+            snapshotPath = BagListPath;
+            var bagOutcome = await FetchBagAsync(session, AutoBagGateWaitMs, cancellationToken);
+            snapshot.Result.Path = BagListPath;
+            snapshot.Result.Attempts = bagOutcome.Attempts;
+            snapshot.Result.HttpStatus = bagOutcome.HttpStatus;
+            snapshot.Result.Code = bagOutcome.Code;
+            snapshot.Result.RequestId = bagOutcome.RequestId ?? "";
+
+            if (!bagOutcome.Success)
+            {
+                if (bagOutcome.Cancelled)
+                {
+                    cancelled = true;
+                    var cancelledResult = new AutoSynthResult { Success = false, Cancelled = true, Message = "操作已取消" };
+                    WriteSnapshot(cancelledResult, "操作已取消", force: bagOutcome.Attempts > 0);
+                    return cancelledResult;
+                }
+                var failed = new AutoSynthResult
+                {
+                    Success = false,
+                    Busy = bagOutcome.Busy,
+                    Message = bagOutcome.Error,
+                };
+                // 自动任务在 bag_list 阶段失败也要留审计快照（包括 gate 忙、未发请求的情况）。
+                WriteSnapshot(failed, bagOutcome.ErrorDetail, force: true);
+                return failed;
+            }
+
+            var bagArr = bagOutcome.Items;
+            if (bagArr.Count == 0)
+                return Early("背包暂无收集物", success: true, noWork: true);
+
+            phase = "synthesis";
+            snapshotPath = "api/frontend/assets/synthesis";
 
             var maxRarityByType = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var type in SynthTypes) maxRarityByType[type] = MaxSynthRarity(type);
@@ -1527,23 +1716,36 @@ public sealed class App : ApplicationContext
             }
 
             if (results.Count > 0 || processed > 0)
-                PublishAutoSynthResults(results, lastResultType, processed, manual, errorMessage);
+                PublishAutoSynthResults(results, lastResultType, processed, manual, errorMessage ?? (cancelled ? "操作已取消" : null));
 
             bool emptyAfterProcessing = processed > 0 && results.Count == 0;
+            bool noWork = !cancelled && errorMessage == null && processed == 0 && results.Count == 0;
             var finalResult = new AutoSynthResult
             {
-                Success = errorMessage == null && !emptyAfterProcessing,
+                Success = !cancelled && errorMessage == null && !emptyAfterProcessing,
+                NoWork = noWork,
+                Cancelled = cancelled,
                 Count = results.Count,
                 Processed = processed,
                 AssetIds = results,
-                Message = errorMessage ?? (results.Count > 0
-                    ? ""
-                    : (emptyAfterProcessing
-                        ? "自动升阶合成未返回新物品，请刷新背包确认。"
-                        : "当前没有满足升阶条件的材料")),
+                Message = cancelled
+                    ? "操作已取消"
+                    : (errorMessage ?? (results.Count > 0
+                        ? ""
+                        : (emptyAfterProcessing
+                            ? "自动升阶合成未返回新物品，请刷新背包确认。"
+                            : "当前没有满足升阶条件的材料"))),
             };
             WriteSnapshot(finalResult, errorMessage);
             return finalResult;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            cancelled = true;
+            Log.Write("自动升阶合成已取消");
+            var cancelledResult = new AutoSynthResult { Success = false, Cancelled = true, Message = "操作已取消" };
+            WriteSnapshot(cancelledResult, "操作已取消", force: processed > 0);
+            return cancelledResult;
         }
         catch (Exception ex)
         {
@@ -1604,6 +1806,7 @@ public sealed class App : ApplicationContext
     {
         if (disposing)
         {
+            Interlocked.Exchange(ref _disposed, 1);
             try { CancelAutoSynth(); } catch { }
             try { _autoChestTimer?.Dispose(); } catch { }
             try { _autoBoostTimer?.Dispose(); } catch { }
@@ -1637,6 +1840,30 @@ public sealed class AutoSynthResult
     /// <summary>门禁/配置/登录态拦截；仅用于自动升阶退避判断，不进入前端 JSON。</summary>
     [JsonIgnore]
     internal bool GateBlocked { get; set; }
+    /// <summary>空扫描成功（背包空/无满足材料）：不能据此清零失败冷却，也不进入前端 JSON。</summary>
+    [JsonIgnore]
+    internal bool NoWork { get; set; }
+    /// <summary>取消/退出导致的中止：不推进失败冷却，也不进入前端 JSON。</summary>
+    [JsonIgnore]
+    internal bool Cancelled { get; set; }
+}
+
+/// <summary>bags/list 的只读请求结果；记录重试次数、耗时和错误上下文供快照审计。</summary>
+sealed class BagFetchOutcome
+{
+    public bool Success { get; set; }
+    public JsonArray Items { get; set; }
+    public bool Busy { get; set; }
+    public bool Cancelled { get; set; }
+    public bool FormatError { get; set; }
+    public string Error { get; set; } = "";
+    public string ErrorDetail { get; set; } = "";
+    public string Path { get; set; } = "";
+    public int Attempts { get; set; }
+    public long ElapsedMs { get; set; }
+    public int HttpStatus { get; set; }
+    public int Code { get; set; }
+    public string RequestId { get; set; } = "";
 }
 
 sealed class SynthCandidateItem

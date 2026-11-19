@@ -1985,7 +1985,8 @@ public sealed class PanelWindow : Form
     {
         var auth = _app.Auth;
         if (!auth.IsLoggedIn) throw new ApiException(-1, "请先登录");
-        var data = await auth.Api.PostAsync("api/frontend/bags/list");
+        // 与自动升阶共用 App._bagGate 和只读重试；前端 bagLoadChain 只串行 JS 自己的请求，原生侧还要跨入口。
+        var data = await _app.LoadBagAsync();
         _ownedAssets.Clear();
         var list = new List<object>();
         if (data is JsonArray arr)

@@ -48,6 +48,8 @@ internal static class Program
             CheckAnnouncementBoard();
             CheckAuthPauseDoesNotLeaveRoom();
             CheckAutoSynthResultPayload();
+            CheckAutoSynthBackoffPolicy();
+            CheckBagFetchPolicy();
             CheckRetryBackoff();
             CheckLogRetention();
             CheckLegacyLogMigration();
@@ -1716,6 +1718,7 @@ internal static class Program
         {
             (10001, "参数无效，请确认 UID 与验证码都是数字"),
             (10002, "登录已失效，请重新登录"),
+            (10007, "请求被服务器拒绝，请稍后重试"),
             (10034, "验证码已失效，请重新获取"),
             (10035, "验证码不正确或已过期"),
             (20017, "当前角色不能使用该表情"),
@@ -1765,6 +1768,17 @@ internal static class Program
             "Plain HTTP 403 must be classified as a transient forbidden failure.");
         Assert(!AuthService.IsForbiddenFailure(new ApiException(10002, "invalid token", null, 403)),
             "Business code 10002 must not be classified as transient forbidden.");
+        // 10007 是普通业务拒绝：可重试，但不能通知登录态监听者，更不能把账号判成 Invalid。
+        Assert(!ApiClient.ShouldRaiseRequestFailed(403, 10007, true),
+            "HTTP 403 with business code 10007 must not raise RequestFailed/login-invalid.");
+        Assert(ApiClient.ShouldRaiseRequestFailed(403, 0, false),
+            "Plain HTTP 403 must still let AuthService probe the session.");
+        Assert(ApiClient.ShouldRaiseRequestFailed(403, 10002, true),
+            "HTTP 403 with business code 10002 must still be an auth failure.");
+        Assert(ApiClient.ShouldRaiseRequestFailed(401, 0, false),
+            "HTTP 401 must always be an auth failure.");
+        Assert(!AuthService.IsDefinitiveInvalid(new ApiException(10007, "denied", null, 403)),
+            "Business code 10007 must never be treated as a definitive invalid credential.");
         Console.WriteLine("PASS: business error codes and HTTP statuses are mapped to user-facing Chinese.");
     }
 
@@ -1829,6 +1843,8 @@ internal static class Program
             Processed = 3,
             AssetIds = new List<long> { 101, 102 },
             Message = "ok",
+            NoWork = true,
+            Cancelled = true,
         };
         string json = JsonSerializer.Serialize(result);
         using var doc = JsonDocument.Parse(json);
@@ -1837,7 +1853,64 @@ internal static class Program
             Assert(root.TryGetProperty(name, out _), $"AutoSynthResult JSON must contain camelCase field '{name}': {json}");
         Assert(root.GetProperty("count").GetInt32() == 2 && root.GetProperty("processed").GetInt32() == 3,
             "AutoSynthResult count/processed values must survive bridge serialization.");
+        // 内部退避标志不能泄漏到桥接 JSON，否则前端 schema 会多出意外字段。
+        Assert(!root.TryGetProperty("noWork", out _), "AutoSynthResult JSON must not expose internal NoWork flag: " + json);
+        Assert(!root.TryGetProperty("cancelled", out _), "AutoSynthResult JSON must not expose internal Cancelled flag: " + json);
+        Assert(!root.TryGetProperty("gateBlocked", out _), "AutoSynthResult JSON must not expose internal GateBlocked flag: " + json);
+        Assert(result.NoWork && result.Cancelled, "Internal flags must still be usable by backoff decisions.");
         Console.WriteLine("PASS: AutoSynthResult bridge payload uses camelCase success/busy/count/processed/message/assetIds.");
+    }
+
+    /// <summary>空成功（NoWork）不能清失败冷却；Busy/门禁拦截/取消不推进冷却。</summary>
+    static void CheckAutoSynthBackoffPolicy()
+    {
+        Assert(AutoSynthBackoffPolicy.Decide(new WuwatappoNative.AutoSynthResult { Success = true }) == AutoSynthBackoffAction.Reset,
+            "A real successful auto-synth run must reset the failure backoff.");
+        Assert(AutoSynthBackoffPolicy.Decide(new WuwatappoNative.AutoSynthResult { Success = true, NoWork = true }) == AutoSynthBackoffAction.None,
+            "No-work success (empty bag or no materials) must not reset the failure backoff.");
+        Assert(AutoSynthBackoffPolicy.Decide(new WuwatappoNative.AutoSynthResult { Busy = true }) == AutoSynthBackoffAction.None,
+            "Busy result must not advance the failure backoff.");
+        Assert(AutoSynthBackoffPolicy.Decide(new WuwatappoNative.AutoSynthResult { GateBlocked = true }) == AutoSynthBackoffAction.None,
+            "Gate-blocked result must not advance the failure backoff.");
+        Assert(AutoSynthBackoffPolicy.Decide(new WuwatappoNative.AutoSynthResult { Cancelled = true }) == AutoSynthBackoffAction.None,
+            "Cancelled result must not advance the failure backoff.");
+        Assert(AutoSynthBackoffPolicy.Decide(new WuwatappoNative.AutoSynthResult { Message = "403" }) == AutoSynthBackoffAction.RecordFailure,
+            "A real failure must advance the failure backoff.");
+
+        // 失败后紧跟一次空成功：冷却必须保持，不能被“空扫描成功”清零。
+        long now = 7_000_000;
+        var state = new RetryBackoff(RetryBackoff.AutoSynthSchedule);
+        Assert(state.RecordFailure(now) == 60 && state.Failures == 1, "First auto-synth failure must start a 60s cooldown.");
+        Assert(state.IsCoolingDown(now + 59_999), "Auto-synth cooldown must survive a following no-work scan.");
+        Assert(AutoSynthBackoffPolicy.Decide(new WuwatappoNative.AutoSynthResult { Success = true, NoWork = true }) == AutoSynthBackoffAction.None,
+            "No-work scan must leave the 60s cooldown in place.");
+        Console.WriteLine("PASS: no-work auto-synth scans neither reset nor advance the failure backoff.");
+    }
+
+    /// <summary>bags/list 只读重试：最多 3 次、间隔 1s/2s；仅网络/超时/10007/HTTP403 可重试。</summary>
+    static void CheckBagFetchPolicy()
+    {
+        Assert(BagFetchPolicy.MaxAttempts == 3, "bags/list must retry at most 3 attempts total.");
+        Assert(BagFetchPolicy.RetryDelayMs(1) == 1000 && BagFetchPolicy.RetryDelayMs(2) == 2000 &&
+               BagFetchPolicy.RetryDelayMs(3) == 0,
+            "bags/list retry delays must be 1s then 2s.");
+
+        Assert(BagFetchPolicy.IsRetryable(new ApiException(10007, "denied", "rid-1", 403)),
+            "Business code 10007 must be retryable for the read-only bags/list request.");
+        Assert(BagFetchPolicy.IsRetryable(new ApiException(403, "forbidden", null, 403)),
+            "Plain HTTP 403 must be retryable for the read-only bags/list request.");
+        Assert(BagFetchPolicy.IsRetryable(new HttpRequestException("connection reset")),
+            "Connection reset must be retryable for bags/list.");
+        Assert(BagFetchPolicy.IsRetryable(new TaskCanceledException("timeout")),
+            "HttpClient timeout must be retryable for bags/list.");
+        Assert(!BagFetchPolicy.IsRetryable(new ApiException(10002, "invalid token", null, 403)),
+            "Login-invalid errors must not be retried by bags/list.");
+        Assert(!BagFetchPolicy.IsRetryable(new InvalidOperationException("bug")),
+            "Unknown exceptions must not be retried by bags/list.");
+        Assert(BagFetchPolicy.IsRetryable(new HttpRequestException("reset"), 1) &&
+               !BagFetchPolicy.IsRetryable(new HttpRequestException("reset"), 3),
+            "bags/list retries must stop after the third attempt.");
+        Console.WriteLine("PASS: bags/list read retry policy is 3 attempts with 1s/2s backoff and excludes auth errors.");
     }
 
     /// <summary>点击上报（30/60/120/300 封顶）与自动升阶（1/2/5/10/30 分钟封顶）退避档位及成功重置。</summary>
@@ -1995,6 +2068,13 @@ internal static class Program
         snapshot.Result.AssetIds = new List<long> { 2002 };
         snapshot.Result.Message = "ok";
         snapshot.Result.ElapsedMs = 456;
+        snapshot.Result.Phase = "bag_list";
+        snapshot.Result.Path = "api/frontend/bags/list";
+        snapshot.Result.Attempts = 3;
+        snapshot.Result.HttpStatus = 403;
+        snapshot.Result.Code = 10007;
+        snapshot.Result.RequestId = "req-10007";
+        snapshot.Result.Error = "phase=bag_list failed";
 
         string json = SynthesisLog.Serialize(snapshot);
         using var doc = JsonDocument.Parse(json);
@@ -2003,8 +2083,19 @@ internal static class Program
         Assert(root.GetProperty("operationId").GetString()?.Length > 0, "Snapshot must contain operationId.");
         Assert(root.GetProperty("trigger").GetString() == "auto", "Snapshot trigger must be auto.");
         Assert(root.GetProperty("rounds").GetArrayLength() == 1, "Snapshot must contain rounds.");
-        Assert(root.GetProperty("result").GetProperty("assetIds")[0].GetInt64() == 2002,
+        var resultElement = root.GetProperty("result");
+        Assert(resultElement.GetProperty("assetIds")[0].GetInt64() == 2002,
             "Snapshot result must contain result assetIds.");
+        Assert(resultElement.GetProperty("phase").GetString() == "bag_list" &&
+               resultElement.GetProperty("path").GetString() == "api/frontend/bags/list",
+            "Snapshot result must record the failed phase/path for bag_list.");
+        Assert(resultElement.GetProperty("attempts").GetInt32() == 3 &&
+               resultElement.GetProperty("httpStatus").GetInt32() == 403 &&
+               resultElement.GetProperty("code").GetInt32() == 10007 &&
+               resultElement.GetProperty("requestId").GetString() == "req-10007",
+            "Snapshot result must record attempts/httpStatus/code/requestId for bag_list failures.");
+        Assert(resultElement.GetProperty("error").GetString() == "phase=bag_list failed",
+            "Snapshot result must record Result.Error even when processed == 0.");
 
         var item = root.GetProperty("bag").GetProperty("items")[0];
         Assert(item.GetProperty("assetId").GetInt64() == 1001 &&

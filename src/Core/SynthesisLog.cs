@@ -161,6 +161,13 @@ public sealed class AutoSynthesisResultSnapshot
     public long ElapsedMs { get; set; }
     public bool Cancelled { get; set; }
     public string Error { get; set; } = "";
+    /// <summary>失败/结束所处阶段，例如 bag_list；用于审计未发起合成的失败。</summary>
+    public string Phase { get; set; } = "";
+    public string Path { get; set; } = "";
+    public int HttpStatus { get; set; }
+    public int Code { get; set; }
+    public string RequestId { get; set; } = "";
+    public int Attempts { get; set; }
 }
 
 public sealed class ManualSynthesisSnapshot

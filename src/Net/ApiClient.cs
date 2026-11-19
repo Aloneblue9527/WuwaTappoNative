@@ -156,7 +156,7 @@ public sealed class ApiClient : IDisposable
             Log.Write($"API HTTP 错误 status={status} code={httpCode} message={bizMessage ?? ""} request_id={httpRequestId ?? ""} path={path}");
             LogSlowRequest(requestWatch, method, path, status, httpRequestId);
             var failure = new ApiException(httpCode, httpMessage, httpRequestId, status);
-            if (!bypassGate && (IsAuthFailureCode(httpCode) || status == 401 || status == 403))
+            if (!bypassGate && ShouldRaiseRequestFailed(status, bizCode, hasBusinessCode))
                 RequestFailed?.Invoke(path, failure);
             throw failure;
         }
@@ -219,6 +219,17 @@ public sealed class ApiClient : IDisposable
         => code == 401 || code == 403 || code == 10002 || code == 10003 || code == 90002;
 
     /// <summary>
+    /// 非 2xx 响应是否要通知登录态监听者。普通 HTTP 403 仍按临时拒绝处理（由 AuthService 复用探针确认）；
+    /// 但带业务码的 403 必须看业务码：10007 只是“请求被服务器拒绝”，不能当成登录失效。
+    /// </summary>
+    internal static bool ShouldRaiseRequestFailed(int httpStatus, int businessCode, bool hasBusinessCode)
+    {
+        if (httpStatus == 401) return true;
+        if (hasBusinessCode) return IsAuthFailureCode(businessCode);
+        return httpStatus == 403;
+    }
+
+    /// <summary>
     /// 把服务器业务码统一映射成面向用户的中文。原始 message 仍会写入日志便于排查，
     /// 但不再直接出现在弹窗/房间错误里，避免 room is full / room not exist 之类的英文。
     /// </summary>
@@ -228,6 +239,7 @@ public sealed class ApiClient : IDisposable
         {
             10001 => "参数无效，请确认 UID 与验证码都是数字",
             10002 or 10003 => "登录已失效，请重新登录",
+            10007 => "请求被服务器拒绝，请稍后重试",
             10023 => "验证通道暂不可用，请改用游戏 UID 或继承官方客户端登录",
             10024 => "游戏登录失败，请检查账号或区服后重试",
             10025 => "查询不到该 UID 对应的游戏角色，请确认当前区服与 UID 正确",
