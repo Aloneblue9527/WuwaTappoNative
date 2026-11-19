@@ -1694,6 +1694,16 @@ internal static class Program
         try { api.GetAsync("api/frontend/user/me").GetAwaiter().GetResult(); }
         catch (ApiException ex) { blocked = ex.Message == "账号功能已暂停"; }
         Assert(blocked, "ApiClient gate must reject account requests before hitting the network.");
+        // 登录态失效必须马上推给面板；否则页面会保留旧 loggedIn 状态，点“重新登录”看起来没反应。
+        string appSource = ReadRepoSource("src", "App.cs");
+        int authStateStart = appSource.IndexOf("Auth.StateChanged +=", StringComparison.Ordinal);
+        int authStateEnd = appSource.IndexOf("Room.ClicksChanged +=", authStateStart, StringComparison.Ordinal);
+        Assert(authStateStart >= 0 && authStateEnd > authStateStart,
+            "Auth.StateChanged handler must be locatable.");
+        string authStateBody = appSource.Substring(authStateStart, authStateEnd - authStateStart);
+        Assert(authStateBody.Contains("PushAuth()", StringComparison.Ordinal) &&
+               authStateBody.Contains("PushRoom()", StringComparison.Ordinal),
+            "Auth.StateChanged must push auth and room state so the UI can leave the stale logged-in page.");
         Console.WriteLine("PASS: auth state basics and API gate reject account requests while paused.");
     }
 
@@ -1739,8 +1749,22 @@ internal static class Program
             "Unknown Chinese server messages should be preserved.");
         Assert(ApiClient.DescribeHttpStatus(401) == "登录已失效，请重新登录",
             "HTTP 401 must be mapped to Chinese.");
+        Assert(ApiClient.DescribeHttpStatus(403) == "服务器拒绝了请求，请稍后重试",
+            "HTTP 403 must not be mapped to a definitive login-invalid message.");
         Assert(ApiClient.DescribeHttpStatus(503) == "服务器暂时不可用，请稍后再试",
             "HTTP 503 must be mapped to Chinese.");
+
+        // 401/10002/10003 才是明确失效；HTTP 403 先按临时拒绝处理。
+        Assert(AuthService.IsDefinitiveInvalid(new ApiException(401, "unauthorized", null, 401)),
+            "HTTP 401 must be a definitive invalid credential.");
+        Assert(AuthService.IsDefinitiveInvalid(new ApiException(10002, "invalid token", null, 403)),
+            "Business code 10002 with HTTP 403 must still be definitive invalid.");
+        Assert(!AuthService.IsDefinitiveInvalid(new ApiException(403, "forbidden", null, 403)),
+            "Plain HTTP 403 must not be treated as a definitive invalid credential.");
+        Assert(AuthService.IsForbiddenFailure(new ApiException(403, "forbidden", null, 403)),
+            "Plain HTTP 403 must be classified as a transient forbidden failure.");
+        Assert(!AuthService.IsForbiddenFailure(new ApiException(10002, "invalid token", null, 403)),
+            "Business code 10002 must not be classified as transient forbidden.");
         Console.WriteLine("PASS: business error codes and HTTP statuses are mapped to user-facing Chinese.");
     }
 
@@ -2016,7 +2040,8 @@ internal static class Program
     }
 
     /// <summary>
-    /// 窗口层级兜底：主桌宠必须在所有联机桌宠上方，桌宠窗口必须全部置顶且连续。
+    /// 窗口层级兜底：主桌宠必须在所有联机桌宠上方，桌宠窗口必须全部置顶且连续；
+    /// 另外要识别“样式位还在但普通窗口压在桌宠组上方”的假置顶。
     /// </summary>
     static void CheckPetZOrderGuard()
     {
@@ -2024,6 +2049,8 @@ internal static class Program
         var r1 = new IntPtr(2);
         var r2 = new IntPtr(3);
         var other = new IntPtr(9);
+        var cloaked = new IntPtr(10);
+        var shell = new IntPtr(11);
         var pets = new[] { main, r1, r2 };
         bool topmost(IntPtr _) => true;
 
@@ -2048,7 +2075,64 @@ internal static class Program
 
         Assert(PetZOrderGuard.Check(pets, new[] { main, other, r1, r2 }, topmost, requireContiguous: false) == PetZOrderProblem.None,
             "When topmost is disabled, only main-above-remotes ordering is required.");
-        Console.WriteLine("PASS: pet z-order guard catches non-topmost, split and main-behind-remote states.");
+
+        // 假置顶：13 个桌宠全部带 WS_EX_TOPMOST、组内连续，但上方有一个普通（非 topmost）外部窗口，
+        // 例如 Photos / explorer / Photoshop 压在 topmost 桌宠组上方。
+        Func<IntPtr, bool> onlyPetsTopMost = h => h == main || h == r1 || h == r2;
+        var fakeTopmost = new[] { other, main, r1, r2 };
+        Assert(PetZOrderGuard.Check(pets, fakeTopmost, onlyPetsTopMost, requireContiguous: true,
+                isExemptWindow: _ => false, hasMainPet: true, isOwnWindow: _ => false)
+            == PetZOrderProblem.PetsBelowNonTopMost,
+            "A normal non-topmost window above a contiguous topmost pet group is fake topmost.");
+
+        // 上方只有 DWM cloaked 窗口（其它虚拟桌面/不可见 UWP）不应误报。
+        var cloakedAbove = new[] { cloaked, main, r1, r2 };
+        Assert(PetZOrderGuard.Check(pets, cloakedAbove, onlyPetsTopMost, requireContiguous: true,
+                isExemptWindow: h => h == cloaked, hasMainPet: true, isOwnWindow: _ => false)
+            == PetZOrderProblem.None,
+            "A cloaked window above the pet group must not be treated as fake topmost.");
+
+        // 上方只有任务栏/WorkerW 等 shell 窗口不应误报。
+        var shellAbove = new[] { shell, main, r1, r2 };
+        Assert(PetZOrderGuard.Check(pets, shellAbove, onlyPetsTopMost, requireContiguous: true,
+                isExemptWindow: h => h == shell, hasMainPet: true, isOwnWindow: _ => false)
+            == PetZOrderProblem.None,
+            "Shell/system windows above the pet group must not be treated as fake topmost.");
+
+        // 本进程自己的窗口（键盘 UI/面板）同样不算外部普通窗口。
+        Assert(PetZOrderGuard.Check(pets, fakeTopmost, onlyPetsTopMost, requireContiguous: true,
+                isExemptWindow: _ => false, hasMainPet: true, isOwnWindow: h => h == other)
+            == PetZOrderProblem.None,
+            "Own-process windows above the pet group must not be treated as fake topmost.");
+
+        // OBS 隐藏主桌宠时 pets 里没有 main，不能把第一个联机角色误当主桌宠。
+        var remotesOnly = new[] { r1, r2 };
+        Assert(PetZOrderGuard.Check(remotesOnly, new[] { r2, r1 }, topmost, requireContiguous: true,
+                hasMainPet: false) == PetZOrderProblem.None,
+            "Without a main pet, remote order must not be reported as MainNotAboveRemotes.");
+        Assert(PetZOrderGuard.Check(remotesOnly, new[] { r2, r1 }, topmost, requireContiguous: true,
+                hasMainPet: true) == PetZOrderProblem.MainNotAboveRemotes,
+            "With a main pet, the same order must still be reported as MainNotAboveRemotes.");
+
+        // 静态检查：RestackPetWindows 必须两段式摘除/恢复 TOPMOST，并把 hasMainPet 传给 Guard。
+        string petSource = ReadRepoSource("src", "Pet", "PetWindow.cs");
+        int restackStart = petSource.IndexOf("void RestackPetWindows(bool force)", StringComparison.Ordinal);
+        Assert(restackStart >= 0, "RestackPetWindows must exist.");
+        int restackEnd = petSource.IndexOf("static bool HasTopMostStyle", restackStart, StringComparison.Ordinal);
+        Assert(restackEnd > restackStart, "RestackPetWindows source segment must be locatable.");
+        string restackBody = petSource.Substring(restackStart, restackEnd - restackStart);
+        Assert(restackBody.Contains("SetWindowPos(hwnd, HwndNoTopMost", StringComparison.Ordinal)
+                && restackBody.Contains("SetWindowPos(hwnd, HwndTopMost", StringComparison.Ordinal),
+            "RestackPetWindows must use the two-phase HWND_NOTOPMOST -> HWND_TOPMOST repair.");
+        Assert(restackBody.Contains("hasMainPet: mainVisible", StringComparison.Ordinal),
+            "RestackPetWindows must pass hasMainPet from the actual main-window visibility.");
+        Assert(restackBody.Contains("IsWindowVisible(Handle)", StringComparison.Ordinal),
+            "RestackPetWindows must keep guarding remotes when the OBS-hidden main window is not visible.");
+        Assert(petSource.Contains("clickThrough = _cfg.ClickThrough", StringComparison.Ordinal)
+                && petSource.Contains("petsBelowNormalWindows", StringComparison.Ordinal),
+            "Z-order snapshot must expose clickThrough and petsBelowNormalWindows.");
+
+        Console.WriteLine("PASS: pet z-order guard catches non-topmost, split, main-behind-remote and fake-topmost states.");
     }
 
     /// <summary>

@@ -29,6 +29,7 @@ public sealed class AuthService
     string _stateMessage = "";
     long _lastCheckedAtMs;
     bool? _lastProbeCredentialValid;
+    long _lastRenewAttemptMs;
     public ApiClient Api { get; private set; }
     public event Action Changed;
     /// <summary>登录态（凭据是否有效、是否被其他客户端占用）变化。高频的用户资料刷新不会触发。</summary>
@@ -94,8 +95,10 @@ public sealed class AuthService
         api.Gate = AccountRequestBlockedReason;
         api.TokenRefreshed += refreshed => TryUseSession(api, () =>
         {
+            bool changed = !string.Equals(_cfg.Token, refreshed, StringComparison.Ordinal);
             _cfg.Token = refreshed;
             ConfigStore.Save(_cfg);
+            if (changed) Log.Info("token 已通过响应 cookie 更新 len=" + (refreshed?.Length ?? 0), "auth");
         });
         api.RequestFailed += (path, failure) => OnApiRequestFailed(api, path, failure);
         return api;
@@ -206,7 +209,7 @@ public sealed class AuthService
         try { Changed?.Invoke(); } catch { }
     }
 
-    enum ProbeResult { Valid, Invalid, Conflict, Network }
+    enum ProbeResult { Valid, Invalid, Conflict, Forbidden, Network }
 
     /// <summary>安全探针：user/me 不会踢掉其他设备，只用于判断当前 token 是否仍有效。</summary>
     async Task<ProbeResult> ProbeCoreAsync(ApiClient session, bool applyUserInfo)
@@ -225,9 +228,15 @@ public sealed class AuthService
         {
             return ProbeResult.Conflict;
         }
-        catch (ApiException ex) when (ex.Code == 401 || ex.Code == 403 || ex.Code == 10002 || ex.Code == 10003)
+        catch (ApiException ex) when (IsDefinitiveInvalid(ex))
         {
             return ProbeResult.Invalid;
+        }
+        catch (ApiException ex) when (IsForbiddenFailure(ex))
+        {
+            // HTTP 403 不一定是 token 失效：可能是风控、限流、WAF 或服务端短暂拒绝。
+            // 由调用方做短重试，只有明确的 401/10002/10003 才进入 Invalid。
+            return ProbeResult.Forbidden;
         }
         catch (OperationCanceledException) when (CaptureSession() != session)
         {
@@ -238,6 +247,34 @@ public sealed class AuthService
             Log.Write("登录态探针失败：" + ex.Message);
             return ProbeResult.Network;
         }
+    }
+
+    /// <summary>明确的凭据失效信号；HTTP 403 不算，必须再看响应业务码。</summary>
+    internal static bool IsDefinitiveInvalid(ApiException ex)
+        => ex != null && (ex.HttpStatus == 401 || ex.Code == 401 || ex.Code == 10002 || ex.Code == 10003);
+
+    /// <summary>HTTP 403/业务码 403：可能是临时拒绝，先用 user/me 短重试确认。</summary>
+    internal static bool IsForbiddenFailure(ApiException ex)
+        => ex != null && ex.Code == 403;
+
+    /// <summary>
+    /// 403 短重试：1 秒、2 秒两次，避免一次瞬时 WAF/限流把登录态打成 Invalid。
+    /// 401/10002/10003、90002 和网络结果立即返回，不重复打探针。
+    /// </summary>
+    async Task<ProbeResult> ProbeWithForbiddenRetryAsync(ApiClient session, bool applyUserInfo)
+    {
+        ProbeResult result = ProbeResult.Network;
+        for (int attempt = 1; attempt <= 3; attempt++)
+        {
+            result = await ProbeCoreAsync(session, applyUserInfo).ConfigureAwait(false);
+            if (result != ProbeResult.Forbidden) return result;
+            if (attempt < 3)
+            {
+                Log.Warn("user/me 返回 403，短暂重试 " + attempt + "/2", "auth");
+                await Task.Delay(1000 * attempt).ConfigureAwait(false);
+            }
+        }
+        return result;
     }
 
     /// <summary>
@@ -256,7 +293,7 @@ public sealed class AuthService
             SetState(sessionTakenOver ? AuthState.Conflict : AuthState.Checking,
                 sessionTakenOver ? "登录态正在其他客户端使用；正在确认登录凭据…" : "正在确认登录状态…");
             Log.Write("检测到登录异常：" + (detail ?? "") + "，开始 user/me 探针");
-            var result = await ProbeCoreAsync(session, applyUserInfo: false).ConfigureAwait(false);
+            var result = await ProbeWithForbiddenRetryAsync(session, applyUserInfo: false).ConfigureAwait(false);
             if (CaptureSession() != session) return;
             if (result == ProbeResult.Invalid)
             {
@@ -272,6 +309,8 @@ public sealed class AuthService
             }
             if (result == ProbeResult.Valid)
                 SetState(AuthState.Valid, "");
+            else if (result == ProbeResult.Forbidden)
+                SetState(AuthState.NetworkUnknown, "服务器暂时拒绝请求，正在自动重试…");
             else
                 SetState(AuthState.NetworkUnknown, "网络不可用，暂时无法确认登录状态。");
         }
@@ -300,7 +339,7 @@ public sealed class AuthService
         try
         {
             var previous = State;
-            var result = await ProbeCoreAsync(session, applyUserInfo: false).ConfigureAwait(false);
+            var result = await ProbeWithForbiddenRetryAsync(session, applyUserInfo: false).ConfigureAwait(false);
             if (CaptureSession() != session) return false;
             if (result == ProbeResult.Invalid)
             {
@@ -310,6 +349,14 @@ public sealed class AuthService
             if (result == ProbeResult.Conflict)
             {
                 SetState(AuthState.Conflict, "登录态正在其他客户端使用；账号功能已暂停，不会自动重新登录或重连。");
+                return false;
+            }
+            if (result == ProbeResult.Forbidden)
+            {
+                if (previous == AuthState.Conflict)
+                    SetState(AuthState.Conflict, "登录态正在其他客户端使用；服务器暂时拒绝请求，无法确认凭据。", credentialValid: LastProbeCredentialValid == true);
+                else
+                    SetState(AuthState.NetworkUnknown, "服务器暂时拒绝请求，正在自动重试…");
                 return false;
             }
             if (result == ProbeResult.Network)
@@ -352,7 +399,7 @@ public sealed class AuthService
         try
         {
             SetState(AuthState.Checking, "正在确认登录状态…");
-            var result = await ProbeCoreAsync(session, applyUserInfo: true).ConfigureAwait(false);
+            var result = await ProbeWithForbiddenRetryAsync(session, applyUserInfo: true).ConfigureAwait(false);
             if (CaptureSession() != session) return false;
             if (result == ProbeResult.Valid)
             {
@@ -367,6 +414,11 @@ public sealed class AuthService
             if (result == ProbeResult.Conflict)
             {
                 SetState(AuthState.Conflict, "登录态正在其他客户端使用；账号功能已暂停，不会自动重新登录或重连。");
+                return false;
+            }
+            if (result == ProbeResult.Forbidden)
+            {
+                SetState(AuthState.NetworkUnknown, "服务器暂时拒绝请求，正在自动重试…");
                 return false;
             }
             SetState(AuthState.NetworkUnknown, "网络不可用，暂时无法确认登录状态。");
@@ -387,7 +439,7 @@ public sealed class AuthService
         if (!await _probeGate.WaitAsync(0).ConfigureAwait(false)) return false;
         try
         {
-            var result = await ProbeCoreAsync(session, applyUserInfo: true).ConfigureAwait(false);
+            var result = await ProbeWithForbiddenRetryAsync(session, applyUserInfo: true).ConfigureAwait(false);
             if (CaptureSession() != session) return false;
             if (result == ProbeResult.Valid)
             {
@@ -398,6 +450,8 @@ public sealed class AuthService
                 SetState(AuthState.Invalid, "当前登录凭据已失效；请重新登录或重新继承官方登录。");
             else if (result == ProbeResult.Conflict)
                 SetState(AuthState.Conflict, "登录态正在其他客户端使用；账号功能已暂停，不会自动重新登录或重连。");
+            else if (result == ProbeResult.Forbidden)
+                SetState(AuthState.NetworkUnknown, "服务器暂时拒绝请求，正在自动重试…");
             else
                 SetState(AuthState.NetworkUnknown, "网络不可用，暂时无法确认登录状态。");
             return false;
@@ -432,7 +486,7 @@ public sealed class AuthService
             Log.Write("token 续期异常，继续用 user/me 确认：" + ex.Message);
         }
 
-        var result = await ProbeCoreAsync(session, applyUserInfo: true);
+        var result = await ProbeWithForbiddenRetryAsync(session, applyUserInfo: true);
         if (CaptureSession() != session) return false;
         if (result == ProbeResult.Valid)
         {
@@ -449,6 +503,12 @@ public sealed class AuthService
         {
             Log.Write("恢复登录失败：user/me 返回顶号信号");
             SetState(AuthState.Conflict, "登录态正在其他客户端使用；账号功能已暂停，不会自动重新登录或重连。");
+            return false;
+        }
+        if (result == ProbeResult.Forbidden)
+        {
+            Log.Write("恢复登录暂时被服务器拒绝：user/me 返回 403，保持可重试状态");
+            SetState(AuthState.NetworkUnknown, "服务器暂时拒绝请求，正在自动重试…");
             return false;
         }
         Log.Write("恢复登录失败：无法连接 user/me");
@@ -655,8 +715,32 @@ public sealed class AuthService
 
     public Task RenewAsync() => RenewAsync(CaptureSession());
 
+    /// <summary>
+    /// 运行期间的轻量续期：每 6 小时最多尝试一次。官方 token 的有效期字段可能为未知值，
+    /// 不能只依赖启动时续期；失败只记录，不改变当前有效状态。
+    /// </summary>
+    public async Task MaybeRenewAsync()
+    {
+        if (!CanUseOnline) return;
+        long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        long last = Interlocked.Read(ref _lastRenewAttemptMs);
+        if (last != 0 && now - last < 6L * 3600 * 1000) return;
+        if (Interlocked.CompareExchange(ref _lastRenewAttemptMs, now, last) != last) return;
+        var session = CaptureSession();
+        if (session == null) return;
+        try
+        {
+            await RenewAsync(session);
+        }
+        catch (Exception ex)
+        {
+            Log.Write("token 定期续期失败：" + ex.Message);
+        }
+    }
+
     async Task RenewAsync(ApiClient session)
     {
+        Interlocked.Exchange(ref _lastRenewAttemptMs, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         Task<JsonNode> request = null;
         if (!TryUseSession(session, () => request = session.GetAsync("api/frontend/user/renew-token"))) return;
         var data = await request;
@@ -666,7 +750,12 @@ public sealed class AuthService
             {
                 if (_cfg.TokenExpireMs > 0) _cfg.TokenExpireMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + 7L * 24 * 3600 * 1000;
                 ConfigStore.Save(_cfg);
+                Log.Info("token 续期成功", "auth");
             });
+        }
+        else
+        {
+            Log.Warn("token 续期未返回成功标记", "auth");
         }
     }
 

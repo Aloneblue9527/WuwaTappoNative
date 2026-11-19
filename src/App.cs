@@ -122,10 +122,22 @@ public sealed class App : ApplicationContext
             _clickUserId = Auth.UserId;
             Room.SyncServerClicks(Auth.TotalClickCount, Auth.TotalClickConsume);
         };
-        // 只在登录态真正变为可用时触发一次自动升阶；Auth.Changed 还会被每 30 秒的点击刷新触发。
+        // 登录态变化必须立刻推给面板。否则面板仍保留旧 loggedIn/onlineAvailable，
+        // 失效后点“重新登录”会继续按已登录页面渲染，看起来完全没有反应。
+        // StateChanged 可能来自探针线程，先切回 UI 线程再读取 Room/Members 并推送。
         Auth.StateChanged += () =>
         {
-            if (Cfg.AutoSynthUp && Auth.CanUseOnline) CheckAutoSynthNow();
+            try
+            {
+                Pet.BeginInvoke(new Action(() =>
+                {
+                    PushAuth();
+                    PushRoom();
+                    Pet.RefreshHud();
+                    if (Cfg.AutoSynthUp && Auth.CanUseOnline) CheckAutoSynthNow();
+                }));
+            }
+            catch { }
         };
         // 点击数变化很频繁（每次按键一次）。面板可能没开，开了也不能每次都走一趟
         // WebView2 序列化 + postMessage；这里合并成 100ms 一次。
@@ -416,6 +428,7 @@ public sealed class App : ApplicationContext
                 if (!await Auth.RetryNetworkAsync()) return;
             }
             if (!Auth.CanUseOnline) return;
+            await Auth.MaybeRenewAsync();
             if (!await Auth.RefreshClicksAsync(Auth.CaptureSession())) return;
             Pet.BeginInvoke(new Action(() => { Pet.RefreshHud(); }));
             try { if (Panel != null && Panel.IsHandleCreated) Panel.BeginInvoke(new Action(PushAuth)); } catch { }

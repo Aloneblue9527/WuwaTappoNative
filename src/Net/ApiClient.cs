@@ -18,10 +18,13 @@ public sealed class ApiException : Exception
 {
     public int Code { get; }
     public string RequestId { get; }
-    public ApiException(int code, string message, string requestId = null) : base(message ?? "请求失败")
+    /// <summary>非 2xx 响应时的原始 HTTP 状态码；业务错误通常为 0。</summary>
+    public int HttpStatus { get; }
+    public ApiException(int code, string message, string requestId = null, int httpStatus = 0) : base(message ?? "请求失败")
     {
         Code = code;
         RequestId = requestId;
+        HttpStatus = httpStatus;
     }
 }
 
@@ -128,10 +131,32 @@ public sealed class ApiClient : IDisposable
         }
         if (!resp.IsSuccessStatusCode)
         {
-            Log.Write($"API HTTP 错误 status={status} path={path}");
-            LogSlowRequest(requestWatch, method, path, status, ResponseRequestId(resp));
-            var failure = new ApiException(status, DescribeHttpStatus(status), null);
-            if (!bypassGate && IsAuthFailureCode(failure.Code))
+            // 非 2xx 响应也可能带业务 code（例如 403 + 10002）。先解析信封，
+            // 避免把“临时 403/风控”与真正的 10002/10003 登录失效混为一谈。
+            int bizCode = 0;
+            string bizMessage = null;
+            string bizRequestId = null;
+            try
+            {
+                if (JsonNode.Parse(text) is JsonObject error)
+                {
+                    bizCode = ReadInt(error["code"]);
+                    bizMessage = error["message"]?.GetValue<string>();
+                    bizRequestId = error["request_id"]?.GetValue<string>();
+                }
+            }
+            catch { }
+
+            bool hasBusinessCode = bizCode != 0 && bizCode != 200;
+            int httpCode = hasBusinessCode ? bizCode : status;
+            string httpMessage = hasBusinessCode
+                ? DescribeCode(bizCode, bizMessage)
+                : DescribeHttpStatus(status);
+            string httpRequestId = bizRequestId ?? ResponseRequestId(resp);
+            Log.Write($"API HTTP 错误 status={status} code={httpCode} message={bizMessage ?? ""} request_id={httpRequestId ?? ""} path={path}");
+            LogSlowRequest(requestWatch, method, path, status, httpRequestId);
+            var failure = new ApiException(httpCode, httpMessage, httpRequestId, status);
+            if (!bypassGate && (IsAuthFailureCode(httpCode) || status == 401 || status == 403))
                 RequestFailed?.Invoke(path, failure);
             throw failure;
         }
@@ -250,7 +275,8 @@ public sealed class ApiClient : IDisposable
         return status switch
         {
             400 => "请求参数有误，请稍后再试",
-            401 or 403 => "登录已失效，请重新登录",
+            401 => "登录已失效，请重新登录",
+            403 => "服务器拒绝了请求，请稍后重试",
             404 => "请求的服务不存在",
             408 => "请求超时，请检查网络后重试",
             429 => "请求过于频繁，请稍后再试",

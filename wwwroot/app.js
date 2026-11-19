@@ -198,7 +198,7 @@
       case 'checking': return '正在确认登录状态…';
       case 'conflict': return a.credentialValid ? '凭据有效 · 账号功能仍暂停' : '未登录 · 登录态正在其他客户端使用';
       case 'invalid': return a.credentialValid ? '凭据已恢复有效 · 账号功能仍暂停' : '未登录 · 当前登录凭据已失效';
-      case 'network': return '网络不可用，暂时无法确认登录状态';
+      case 'network': return a.stateMessage || '网络不可用，暂时无法确认登录状态';
       case 'valid': return '正常';
       default: return '未登录';
     }
@@ -4631,7 +4631,7 @@
     const noticeTitle = s === 'invalid' && a.credentialValid ? '登录凭据已恢复有效' : meta.title;
     const noticeText = s === 'invalid' && a.credentialValid
       ? '账号功能仍暂停；点击“重新连接”后再恢复联机。'
-      : meta.text;
+      : (s === 'network' && a.stateMessage ? a.stateMessage : meta.text);
     const actions = [];
     if (s !== 'checking') actions.push('<button class="btn ghost" data-auth-recheck>重新检测</button>');
     if (s === 'conflict') actions.push('<button class="btn danger" data-auth-reconnect>重新连接</button>');

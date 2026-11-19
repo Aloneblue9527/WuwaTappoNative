@@ -1524,10 +1524,11 @@ public sealed class PetWindow : Form
     /// <summary>
     /// 兜底层级检测。正常时只做一次很轻量的 z-order/ex-style 检查；
     /// 发现主桌宠/联机桌宠被普通窗口拆开、丢失置顶或主桌宠被联机桌宠压住时才重排。
+    /// 主窗口可能被 OBS 停止渲染（Hide），此时联机桌宠仍需要守护，不能在这里一票否决。
     /// </summary>
     void EnsurePetZOrder()
     {
-        if (!IsHandleCreated || IsDisposed || !Visible || _hiddenByHotkey) return;
+        if (!IsHandleCreated || IsDisposed) return;
         RestackPetWindows(force: false);
     }
 
@@ -1546,13 +1547,21 @@ public sealed class PetWindow : Form
 
     void RestackPetWindows(bool force)
     {
-        if (!IsHandleCreated || IsDisposed || !Visible || _hiddenByHotkey || _zOrderRepairing) return;
+        if (!IsHandleCreated || IsDisposed || _zOrderRepairing) return;
 
         var remotes = _cats.Values
             .Where(c => c != null && !c.IsDisposed && c.Visible && c.IsHandleCreated && IsWindowVisible(c.Handle))
             .OrderBy(c => c.MemberId)
             .ToList();
-        var pets = new List<IntPtr>(remotes.Count + 1) { Handle };
+
+        // OBS 的 CaptureStopRenderingMain 会把主窗口 Hide()；此时联机桌宠仍可能可见，
+        // 不能因为主窗口不可见就跳过整个守护流程。
+        bool mainVisible = !IsDisposed && IsHandleCreated && Visible && !_hiddenByHotkey
+            && IsWindowVisible(Handle);
+        if (remotes.Count == 0 && !mainVisible) return;
+
+        var pets = new List<IntPtr>(remotes.Count + 1);
+        if (mainVisible) pets.Add(Handle);
         foreach (var cat in remotes) pets.Add(cat.Handle);
 
         bool topmost = _cfg.Topmost;
@@ -1562,7 +1571,10 @@ public sealed class PetWindow : Form
             pets,
             topLevel,
             topmost ? HasTopMostStyle : null,
-            requireContiguous: topmost);
+            requireContiguous: topmost,
+            isExemptWindow: IsShellOrSystemZOrderWindow,
+            hasMainPet: mainVisible,
+            isOwnWindow: IsOwnProcessWindow);
         if (!force && problem == PetZOrderProblem.None) return;
 
         // 只记录现场，不改变重排行为。同一原因 30 秒内最多一条快照。
@@ -1572,16 +1584,30 @@ public sealed class PetWindow : Form
         _zOrderRepairing = true;
         try
         {
-            uint flags = 0x0001 | 0x0002 | 0x0010; // NOSIZE | NOMOVE | NOACTIVATE
+            uint flags = SwpNoSize | SwpNoMove | SwpNoActivate;
             if (topmost)
             {
-                // 先把所有联机桌宠放回顶层，再把主角放到顶层最前，最后按成员顺序把联机桌宠插到主角下方。
-                foreach (var cat in remotes)
-                    SetWindowPos(cat.Handle, HwndTopMost, 0, 0, 0, 0, flags);
-                SetWindowPos(Handle, HwndTopMost, 0, 0, 0, 0, flags);
+                // 两段式恢复置顶：先用 NOTOPMOST 把窗口摘出 topmost band，再 TOPMOST 放回 band 顶部。
+                // 只改样式位（ApplyWindowStyles）无法修复“样式位还在、实际 z-order 已掉到普通窗口下方”
+                // 的假置顶，必须真正重进一次 band。
+                // 顺序：最底层远程 → 最上层远程 → 主桌宠，后一个调用位于 band 更上方。
+                void ForceTopMost(IntPtr hwnd)
+                {
+                    SetWindowPos(hwnd, HwndNoTopMost, 0, 0, 0, 0, flags);
+                    SetWindowPos(hwnd, HwndTopMost, 0, 0, 0, 0, flags);
+                    // 暂不加 SWP_FRAMECHANGED：它会触发非客户区重算，实测前先避免闪烁。
+                }
+
+                for (int i = remotes.Count - 1; i >= 0; i--)
+                    ForceTopMost(remotes[i].Handle);
+                if (mainVisible) ForceTopMost(Handle);
             }
-            for (int i = remotes.Count - 1; i >= 0; i--)
-                SetWindowPos(remotes[i].Handle, Handle, 0, 0, 0, 0, flags);
+            else if (mainVisible)
+            {
+                // 未开启置顶：只恢复“联机桌宠在主桌宠下方”的相对顺序，不引入 TOPMOST。
+                for (int i = remotes.Count - 1; i >= 0; i--)
+                    SetWindowPos(remotes[i].Handle, Handle, 0, 0, 0, 0, flags);
+            }
         }
         finally { _zOrderRepairing = false; }
 
@@ -1591,10 +1617,74 @@ public sealed class PetWindow : Form
             Interlocked.Exchange(ref _lastZOrderRepairLogMs, now);
             Log.Write($"窗口层级兜底：{problem}，已重排主桌宠与 {remotes.Count} 个联机桌宠");
         }
+
+        // 重排后补一条快照，便于确认假置顶是否真的被修复（同一原因 30 秒内只记一次）。
+        if (problem != PetZOrderProblem.None)
+            LogZOrderSnapshot("restack-after", problem.ToString());
     }
 
     static bool HasTopMostStyle(IntPtr hwnd)
         => (GetWindowLongPtr(hwnd, -20).ToInt64() & 0x00000008L) != 0;
+
+    /// <summary>本进程窗口（键盘 UI、面板、提示层等）不参与假置顶判定。</summary>
+    static bool IsOwnProcessWindow(IntPtr hwnd)
+        => hwnd != IntPtr.Zero && HwndProcessId(hwnd) == (uint)Environment.ProcessId;
+
+    /// <summary>
+    /// 桌面/任务栏/开始菜单/输入法等 shell 或系统窗口允许留在桌宠组上方，
+    /// 不参与“普通窗口压住 topmost 桌宠”的判定。窗口类名为主；
+    /// 进程名只用于区分同样使用 Windows.UI.Core.CoreWindow 的系统宿主与普通 UWP 应用。
+    /// </summary>
+    static bool IsShellOrSystemZOrderWindow(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return true;
+        if (GetDwmCloaked(hwnd) == 1) return true; // 其它虚拟桌面/不可见 UWP 窗口
+        Rectangle rect = GetWindowRectOrEmpty(hwnd);
+        if (rect.IsEmpty || rect.Width <= 0 || rect.Height <= 0) return true;
+
+        string cls = WindowClassName(hwnd);
+        if (string.IsNullOrEmpty(cls)) return true;
+        if (ShellZOrderWindowClasses.Contains(cls)) return true;
+
+        // CoreWindow 也被普通 UWP 应用使用；只有系统宿主进程才豁免，
+        // 否则会把 Photos 之类真实的普通窗口放过，漏掉假置顶。
+        if (cls.Equals("Windows.UI.Core.CoreWindow", StringComparison.OrdinalIgnoreCase))
+            return ShellHostProcesses.Contains(ProcessName(HwndProcessId(hwnd)));
+
+        return false;
+    }
+
+    /// <summary>无需参与假置顶判定的 shell/系统窗口类名。</summary>
+    static readonly HashSet<string> ShellZOrderWindowClasses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Progman",
+        "WorkerW",
+        "Shell_TrayWnd",
+        "Shell_SecondaryTrayWnd",
+        "NotifyIconOverflowWindow",
+        "TaskSwitcherWnd",
+        "TaskListThumbnailWnd",
+        "MultitaskingViewFrame",
+        "ForegroundStaging",
+        "XamlExplorerHostIslandWindow",
+        "ApplicationManager_DesktopShellWindow",
+        "Windows.Internal.Shell.TabProxyWindow",
+        "Shell_InputSwitchTopLevelWindow",
+        "DV2ControlHost",
+        "SysShadow",
+    };
+
+    /// <summary>使用 Windows.UI.Core.CoreWindow 的系统宿主进程（开始菜单/搜索/输入法等）。</summary>
+    static readonly HashSet<string> ShellHostProcesses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "StartMenuExperienceHost",
+        "SearchHost",
+        "ShellExperienceHost",
+        "TextInputHost",
+        "ShellHost",
+        "LockApp",
+        "LogonUI",
+    };
 
     static List<IntPtr> VisibleTopLevelZOrder()
     {
@@ -1642,18 +1732,26 @@ public sealed class PetWindow : Form
             var petRows = new List<object>();
             var petRects = new List<Rectangle>();
             var petIndexes = new List<int>();
+            var petGroupIndexes = new List<int>();
 
-            void AddPet(string tag, IntPtr hwnd, Rectangle bodyRect, bool visible)
+            void AddPet(string tag, IntPtr hwnd, Rectangle bodyRect, bool visible, bool partOfPetGroup = true)
             {
                 if (hwnd == IntPtr.Zero) return;
                 if (visible && !bodyRect.IsEmpty) petRects.Add(bodyRect);
-                if (indexByHwnd.TryGetValue(hwnd, out int pos)) petIndexes.Add(pos);
+                if (indexByHwnd.TryGetValue(hwnd, out int pos))
+                {
+                    petIndexes.Add(pos);
+                    if (partOfPetGroup) petGroupIndexes.Add(pos);
+                }
 
+                // ClickThrough=true 时 WS_EX_TRANSPARENT 会让 WindowFromPoint 穿透到下层窗口，
+                // 命中结果必然不是自己；这种 false 会误导排查，因此直接标记为不可测。
+                bool hitTestable = !_cfg.ClickThrough && visible && !bodyRect.IsEmpty;
                 IntPtr hit = IntPtr.Zero;
-                bool hitOwn = false;
+                bool? hitOwn = null;
                 int hitPid = 0;
                 object point = null;
-                if (visible && !bodyRect.IsEmpty)
+                if (hitTestable)
                 {
                     var center = new Point(bodyRect.Left + bodyRect.Width / 2, bodyRect.Top + bodyRect.Height / 2);
                     hit = WindowFromPoint(new POINT { X = center.X, Y = center.Y });
@@ -1676,6 +1774,8 @@ public sealed class PetWindow : Form
                     cloaked = GetDwmCloaked(hwnd),
                     rect = RectDto(GetWindowRectOrEmpty(hwnd)),
                     bodyRect = RectDto(bodyRect),
+                    hitTest = !_cfg.ClickThrough ? (hitTestable ? "window-from-point" : "skipped-not-visible")
+                                                 : "not-testable-click-through",
                     hitPoint = point,
                     hitHwnd = hit == IntPtr.Zero ? "" : HwndText(hit),
                     hitPid,
@@ -1697,10 +1797,26 @@ public sealed class PetWindow : Form
             if (keyboard != null && !keyboard.IsDisposed && keyboard.IsHandleCreated)
             {
                 bool visible = keyboard.Visible && IsWindowVisible(keyboard.Handle);
-                AddPet("Keyboard", keyboard.Handle, visible ? keyboard.Bounds : Rectangle.Empty, visible);
+                AddPet("Keyboard", keyboard.Handle, visible ? keyboard.Bounds : Rectangle.Empty, visible,
+                    partOfPetGroup: false);
             }
 
             int groupTop = petIndexes.Count > 0 ? petIndexes.Min() : -1;
+            int petGroupTop = petGroupIndexes.Count > 0 ? petGroupIndexes.Min() : -1;
+            bool petsBelowNormalWindows = false;
+            if (_cfg.Topmost && petGroupTop > 0)
+            {
+                // 与 PetZOrderGuard 相同规则：只看桌宠组上方是否存在可见、非本进程、
+                // 非 shell/系统、非 cloaked、非空矩形的普通（非 topmost）窗口。
+                for (int i = 0; i < petGroupTop; i++)
+                {
+                    IntPtr hwnd = order[i];
+                    if (IsOwnProcessWindow(hwnd) || IsShellOrSystemZOrderWindow(hwnd)) continue;
+                    if (HasTopMostStyle(hwnd)) continue;
+                    petsBelowNormalWindows = true;
+                    break;
+                }
+            }
             var above = new List<object>();
             if (groupTop > 0)
             {
@@ -1726,6 +1842,8 @@ public sealed class PetWindow : Form
                 informationalVersion = typeof(PetWindow).Assembly
                     .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "",
                 topmostConfigured = _cfg.Topmost,
+                clickThrough = _cfg.ClickThrough,
+                petsBelowNormalWindows,
                 elevated = Elevation.IsElevated,
                 foreground = HwndText(GetForegroundWindow()),
                 topLevel,
@@ -1839,6 +1957,10 @@ public sealed class PetWindow : Form
     static readonly IntPtr HwndTopMost = new(-1);
     static readonly IntPtr HwndNoTopMost = new(-2);
     const uint GwHwndNext = 2;
+    // SetWindowPos 标志：不改变尺寸/位置，也不激活窗口；不包含 SWP_FRAMECHANGED，避免重排时闪烁。
+    const uint SwpNoSize = 0x0001;
+    const uint SwpNoMove = 0x0002;
+    const uint SwpNoActivate = 0x0010;
 
     public bool IsDragging => _dragging;
 
