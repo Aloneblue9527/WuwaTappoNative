@@ -18,6 +18,8 @@ Wuwatappo Native 是 WuwaTappo 1.0.2 的 Windows 原生实现，使用 C# / .NET
 - ✅ 支持主桌宠与远程角色底栏分别隐藏，可用单键或双键快捷键切换
 - ✅ 支持面板最大化、八方向边缘缩放，并记住面板大小与最大化状态
 - ✅ 支持 F8 多屏切换：默认位置成员、仅主角、全部成员三种策略，跨分辨率按比例映射
+- ✅ 支持联机桌宠 Ctrl 多选、Ctrl+A 全选、整组拖动贴边和点击空白退出选中
+- ✅ 支持在设置页查看服务器当前下发的全部公告（含已读状态）
 - ✅ 支持刷 Key 数量（一键 +10000），支持在不足1000的时候自动补齐
 - ✅ 支持自动升阶合成与一键全部升阶
 - ✅ 支持正式版 / 测试版更新通道
@@ -236,14 +238,14 @@ dotnet run --project tests/SqliteChecks/SqliteChecks.csproj -c Release
 需要 PowerShell 7 和 Inno Setup 6.7 或更高版本。
 
 ```powershell
-pwsh -File .\installer\build.ps1 -Version 0.3.2
+pwsh -File .\installer\build.ps1 -Version 0.3.3
 ```
 
 输出：
 
 ```text
-dist/WuwatappoNative-0.3.2-Setup.exe
-dist/WuwatappoNative-0.3.2-portable.zip
+dist/WuwatappoNative-0.3.3-Setup.exe
+dist/WuwatappoNative-0.3.3-portable.zip
 dist/WuwatappoTokenExtractor-1.1.2-x64.zip
 ```
 
