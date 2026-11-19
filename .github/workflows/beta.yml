@@ -3,6 +3,23 @@ name: Beta build
 on:
   push:
     branches: [ main ]
+    # 只有会进入测试包的源码/资源/构建脚本变化才触发；文档、workflow、测试代码不重新打包。
+    paths:
+      - 'src/**'
+      - 'wwwroot/**'
+      - 'assets/**'
+      - 'data/**'
+      - 'installer/**'
+      - 'launcher/**'
+      - 'token-extractor/**'
+      - 'WuwatappoNative.csproj'
+      - 'app.manifest'
+      - 'Directory.Build.*'
+      - 'global.json'
+      - '!**/*.md'
+      - '!docs/**'
+      - '!tests/**'
+      - '!out/**'
   workflow_dispatch:
 
 permissions:
@@ -42,9 +59,11 @@ jobs:
           $next = "$($base.Major).$($base.Minor).$($base.Build + 1)"
           $display = "$next-beta.${{ github.run_number }}"
           $numeric = "$next.${{ github.run_number }}"
+          $builtAt = [DateTime]::UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'")
           "base=$next" >> $env:GITHUB_OUTPUT
           "display=$display" >> $env:GITHUB_OUTPUT
           "numeric=$numeric" >> $env:GITHUB_OUTPUT
+          "built_at=$builtAt" >> $env:GITHUB_OUTPUT
 
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
@@ -69,6 +88,8 @@ jobs:
         run: |
           $tag = "v${{ steps.ver.outputs.base }}-beta"
           $version = "${{ steps.ver.outputs.display }}"
+          $builtAt = "${{ steps.ver.outputs.built_at }}"
+          $title = "Wuwatappo Native $version（测试版 · $builtAt）"
           $setup = "dist/WuwatappoNative-$version-Setup.exe"
           $portable = "dist/WuwatappoNative-$version-portable.zip"
           $notes = Join-Path $env:RUNNER_TEMP "beta-notes.md"
@@ -80,6 +101,7 @@ jobs:
           ## 测试版说明
 
           - 测试版本号：$version
+          - 发送时间：$builtAt
           - 这是自动构建的测试版，提供安装包与便携版，不保证稳定性。
           - 反馈请附上测试版本号、复现步骤和相关日志；不要上传 token、账号凭据或含凭据的截图。
           - 正式版请从 Releases 中的非 Pre-release 版本下载。
@@ -97,8 +119,8 @@ jobs:
                 gh release delete-asset $tag $name --yes
               }
             }
-            gh release edit $tag --title "Wuwatappo Native $version（测试版）" --notes-file $notes --prerelease
+            gh release edit $tag --title $title --notes-file $notes --prerelease
             gh release upload $tag $setup $portable --clobber
           } else {
-            gh release create $tag --title "Wuwatappo Native $version（测试版）" --notes-file $notes --prerelease $setup $portable
+            gh release create $tag --title $title --notes-file $notes --prerelease $setup $portable
           }
