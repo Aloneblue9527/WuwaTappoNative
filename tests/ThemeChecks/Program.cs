@@ -51,12 +51,14 @@ internal static class Program
             CheckAutoSynthBackoffPolicy();
             CheckBagFetchPolicy();
             CheckRetryBackoff();
+            CheckChestCooldownPolicy();
             CheckLogRetention();
             CheckLegacyLogMigration();
             CheckSynthesisSnapshotSerialization();
             CheckPetZOrderGuard();
             CheckCatOrderScreenSelection();
             CheckPetMultiSelectBehavior();
+            CheckRoomProtocol105();
             if (args.Length > 0 && File.Exists(args[0])) CheckExternalPresetFile(args[0]);
 
             Console.WriteLine($"PASS: {_checks} assertions.");
@@ -1548,28 +1550,36 @@ internal static class Program
 
     static void CheckOfficialBaseline()
     {
-        var official = new OfficialVersionInfo
+        var current = new OfficialVersionInfo
         {
             Available = true,
             Version = "1.0.5",
             ForceManualDownload = false,
         };
+        Assert(OfficialVersionChecker.Evaluate(current).State == "verified",
+            "The compiled 1.0.5 baseline must cover the current official version.");
+        var official = new OfficialVersionInfo
+        {
+            Available = true,
+            Version = "1.0.6",
+            ForceManualDownload = false,
+        };
         Assert(OfficialVersionChecker.Evaluate(official).State == "unverified",
-            "New official version without a remote baseline must remain unverified.");
-        var verified = OfficialVersionChecker.Evaluate(official, "1.0.5");
+            "A newer official version without a remote baseline must remain unverified.");
+        var verified = OfficialVersionChecker.Evaluate(official, "1.0.6");
         Assert(verified.State == "verified",
             "Remote protocol.testedOfficial must be able to mark the current official version verified.");
-        Assert(verified.TestedVersion == "1.0.5",
+        Assert(verified.TestedVersion == "1.0.6",
             "Remote baseline must be reflected in the effective tested version.");
-        var stale = OfficialVersionChecker.Evaluate(official, "1.0.3");
+        var stale = OfficialVersionChecker.Evaluate(official, "1.0.4");
         Assert(stale.State == "unverified",
             "A remote baseline below the compiled floor must not downgrade compatibility.");
         var forced = OfficialVersionChecker.Evaluate(new OfficialVersionInfo
         {
             Available = true,
-            Version = "1.0.6",
+            Version = "1.0.7",
             ForceManualDownload = true,
-        }, "1.0.5");
+        }, "1.0.6");
         Assert(forced.State == "forced",
             "A newer forced official version must still block after a remote baseline update.");
         Console.WriteLine("PASS: remote TESTED BASELINE can verify a new official version without lowering the compiled floor.");
@@ -1738,6 +1748,8 @@ internal static class Program
             (80010, "加入房间失败，请稍后再试"),
             (80018, "离开房间失败，请稍后再试"),
             (80022, "点击数据异常，请刷新后重试"),
+            (80025, "暂无可加入的公开房间，请稍后再试"),
+            (80026, "加入房间过于频繁，请稍后再试"),
             (90002, "账号已在其他设备登录"),
         };
         foreach (var (code, expected) in cases)
@@ -1943,6 +1955,22 @@ internal static class Program
         Assert(state.Failures == 0, "Success reset must clear the failure count.");
         Assert(!state.IsCoolingDown(now + 30_000), "Success reset must clear the cooldown.");
         Console.WriteLine("PASS: retry backoff click 30/60/120/300 cap, auto-synth 1/2/5/10/30min cap, reset clears state.");
+    }
+
+    static void CheckChestCooldownPolicy()
+    {
+        long now = 1_000_000_000;
+        Assert(ChestCooldownPolicy.Compute(now, 0) == TimeSpan.FromMinutes(30),
+            "Chest cooldown must be at least 30 minutes when no server timestamp is available.");
+        Assert(ChestCooldownPolicy.Compute(now, now + 10 * 60_000) == TimeSpan.FromMinutes(30),
+            "Chest cooldown must not be shorter than 30 minutes.");
+        Assert(ChestCooldownPolicy.Compute(now, now + 45 * 60_000) == TimeSpan.FromMinutes(45) + TimeSpan.FromSeconds(5),
+            "Chest cooldown must follow a longer server timestamp plus the safety margin.");
+        Assert(ChestCooldownPolicy.Compute(0, now + 45 * 60_000) == TimeSpan.FromMinutes(30),
+            "Invalid server time must fall back to 30 minutes.");
+        Assert(ChestCooldownPolicy.Compute(now, now + 99 * 60 * 60_000) == TimeSpan.FromHours(6),
+            "Chest cooldown must be capped to avoid a bad server timestamp blocking forever.");
+        Console.WriteLine("PASS: chest 70006 cooldown is 30min floor, follows server timestamp and caps at 6h.");
     }
 
     /// <summary>
@@ -2157,6 +2185,26 @@ internal static class Program
         Assert(PetZOrderGuard.Check(pets, split, topmost, requireContiguous: true) == PetZOrderProblem.NotContiguous,
             "A third-party window between pet windows must trigger a restack.");
 
+        // 任务栏/输入法/托盘等豁免窗口夹在桌宠中间不应触发 NotContiguous。
+        var exemptBetween = new[] { main, shell, r1, r2 };
+        Assert(PetZOrderGuard.Check(pets, exemptBetween, topmost, requireContiguous: true,
+                isExemptWindow: h => h == shell, hasMainPet: true, isOwnWindow: _ => false)
+            == PetZOrderProblem.None,
+            "Exempt shell/IME windows between pets must not trigger NotContiguous.");
+
+        // 本进程窗口（键盘 UI/面板）夹在桌宠中间同样不应触发。
+        var ownBetween = new[] { main, other, r1, r2 };
+        Assert(PetZOrderGuard.Check(pets, ownBetween, topmost, requireContiguous: true,
+                isExemptWindow: _ => false, hasMainPet: true, isOwnWindow: h => h == other)
+            == PetZOrderProblem.None,
+            "Own-process windows between pets must not trigger NotContiguous.");
+
+        // 非豁免的第三方窗口夹在中间仍然必须重排。
+        Assert(PetZOrderGuard.Check(pets, split, topmost, requireContiguous: true,
+                isExemptWindow: _ => false, hasMainPet: true, isOwnWindow: _ => false)
+            == PetZOrderProblem.NotContiguous,
+            "A non-exempt third-party window between pets must still trigger NotContiguous.");
+
         Assert(PetZOrderGuard.Check(pets, healthy, _ => false, requireContiguous: true) == PetZOrderProblem.NotTopMost,
             "A pet that lost WS_EX_TOPMOST must trigger a restack.");
 
@@ -2222,6 +2270,13 @@ internal static class Program
         Assert(petSource.Contains("clickThrough = _cfg.ClickThrough", StringComparison.Ordinal)
                 && petSource.Contains("petsBelowNormalWindows", StringComparison.Ordinal),
             "Z-order snapshot must expose clickThrough and petsBelowNormalWindows.");
+
+        Assert(restackBody.Contains("IsPetDragActive", StringComparison.Ordinal)
+                && restackBody.Contains("_zOrderRestackPending", StringComparison.Ordinal),
+            "RestackPetWindows must defer repairs while a pet drag is active.");
+        Assert(petSource.Contains("FlushPendingZOrderRestack()", StringComparison.Ordinal)
+                && petSource.Contains("_zOrderRestackTimer", StringComparison.Ordinal),
+            "Pet drag end must flush pending z-order repairs through the debounce timer.");
 
         Console.WriteLine("PASS: pet z-order guard catches non-topmost, split, main-behind-remote and fake-topmost states.");
     }
@@ -2339,6 +2394,44 @@ internal static class Program
     {
         Assert(delta.X == expectedX && delta.Y == expectedY,
             $"Group snap {description} expected ({expectedX},{expectedY}) but got ({delta.X},{delta.Y}).");
+    }
+
+    static void CheckRoomProtocol105()
+    {
+        string room = ReadRepoSource("src", "Net", "RoomManager.cs");
+        Assert(room.Contains("RandomJoinAsync", StringComparison.Ordinal)
+                && room.Contains("api/frontend/rooms/random-join", StringComparison.Ordinal),
+            "1.0.5 random-join must be implemented.");
+        Assert(room.Contains("SetRoomPublicAsync", StringComparison.Ordinal)
+                && room.Contains("api/frontend/rooms/public", StringComparison.Ordinal),
+            "1.0.5 rooms/public must be implemented.");
+        Assert(room.Contains("case \"rk\"", StringComparison.Ordinal)
+                && room.Contains("case \"rt\"", StringComparison.Ordinal),
+            "1.0.5 rk/rt socket events must be handled.");
+        Assert(room.Contains("RoomIsPublic", StringComparison.Ordinal)
+                && room.Contains("data[\"p\"] is JsonValue", StringComparison.Ordinal),
+            "1.0.5 rm.d.p must populate nullable RoomIsPublic.");
+        Assert(room.Contains("EmitAsync(\"rk\", new JsonObject { [\"u\"] = memberId }", StringComparison.Ordinal)
+                && room.Contains("EmitAsync(\"rt\", new JsonObject { [\"u\"] = memberId }", StringComparison.Ordinal),
+            "Outbound rk/rt must send a single u id, not an array.");
+        Assert(room.Contains("HandleSelfKickedAsync", StringComparison.Ordinal)
+                && room.Contains("你已被移出房间", StringComparison.Ordinal),
+            "Self-kick must clear room state and notice the user.");
+
+        string panel = ReadRepoSource("src", "Ui", "PanelWindow.cs");
+        foreach (string command in new[] { "room.randomJoin", "room.setPublic", "room.kick", "room.transferOwner" })
+            Assert(panel.Contains(command, StringComparison.Ordinal), $"Panel command {command} is missing.");
+
+        string app = ReadRepoSource("src", "App.cs");
+        Assert(app.Contains("roomIsPublic = Room.RoomIsPublic", StringComparison.Ordinal)
+                && app.Contains("canSetRoomPublic", StringComparison.Ordinal),
+            "RoomState must expose roomIsPublic/canSetRoomPublic.");
+
+        string web = ReadRepoSource("wwwroot", "app.js");
+        foreach (string token in new[] { "room.randomJoin", "room.setPublic", "room.kick", "room.transferOwner", "roomIsPublic" })
+            Assert(web.Contains(token, StringComparison.Ordinal), $"Web room UI token {token} is missing.");
+
+        Console.WriteLine("PASS: 1.0.5 random-join/rooms-public/rk/rt/rm.p protocol and UI wiring.");
     }
 
     static string ReadRepoSource(params string[] relativeParts)

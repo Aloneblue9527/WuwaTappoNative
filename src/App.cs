@@ -703,33 +703,59 @@ public sealed class App : ApplicationContext
             if (Cfg.AutoClickBoost && Room.AvailableClicks < 1000)
                 TryAutoBoostClicks();
 
-            await TryOpenChestAsync(session, "left", left, now, false);
+            // 同一 tick 只尝试一侧；左右都到点时下一轮再处理另一侧，避免连续两次请求。
+            if (await TryOpenChestAsync(session, "left", left, now, false)) return;
             await TryOpenChestAsync(session, "right", right, now, true);
         }
         catch (Exception ex) { Log.Write("自动宝箱失败 " + ex.Message); }
         finally { Interlocked.Exchange(ref _autoChestTickBusy, 0); }
     }
 
-    async Task TryOpenChestAsync(ApiClient session, string place, long unlockAt, long now, bool right)
+    async Task<bool> TryOpenChestAsync(ApiClient session, string place, long unlockAt, long now, bool right)
     {
         var next = right ? _nextRightAttempt : _nextLeftAttempt;
-        if (unlockAt <= 0 || now < unlockAt + 5000 || DateTime.UtcNow < next) return;
+        if (unlockAt <= 0 || now < unlockAt + 5000 || DateTime.UtcNow < next) return false;
         Log.Write("自动宝箱尝试 " + place + " available=" + Room.AvailableClicks);
         try
         {
             await OpenChestAsync(place, true, session);
+            return true;
         }
         catch (Exception ex)
         {
-            Log.Write("自动宝箱 " + place + " 未成功：" + ex.Message);
+            if (ex is ApiException apiLog)
+                Log.Write($"自动宝箱 {place} 未成功 code={apiLog.Code} http={apiLog.HttpStatus} request_id={apiLog.RequestId} unlock={unlockAt} server_now={now} offset={session.ServerTimeOffsetMs} msg={apiLog.Message}");
+            else
+                Log.Write("自动宝箱 " + place + " 未成功：" + ex.Message);
             bool insufficient = ex is ApiException api && (api.Message ?? "").Contains("可用点击数不足");
-            Auth.TryUseSession(session, () =>
+            bool cooldown = ex is ApiException cooldownApi && cooldownApi.Code == 70006;
+            if (cooldown)
             {
-                if (right) _nextRightAttempt = DateTime.UtcNow.AddSeconds(insufficient && Cfg.AutoClickBoost ? 2 : 60);
-                else _nextLeftAttempt = DateTime.UtcNow.AddSeconds(insufficient && Cfg.AutoClickBoost ? 2 : 60);
-            });
+                // 70006 是服务器冷却：刷新 user/me，按该侧真实时间戳重新排期。
+                try { await Auth.RefreshClicksAsync(session); }
+                catch (Exception refreshEx) { Log.Write("70006 后刷新账号失败：" + refreshEx.Message); }
+                long unlock = 0;
+                if (Auth.UserInfo is JsonObject fresh)
+                    unlock = ApiClient.ReadLong(fresh[right ? "right_treasure_chest" : "left_treasure_chest"]);
+                SetChestCooldown(place, ChestCooldownPolicy.Compute(session.ServerNowMs, unlock));
+                try { Pet.BeginInvoke(new Action(Pet.RefreshHud)); } catch { }
+            }
+            else
+            {
+                Auth.TryUseSession(session, () =>
+                    SetChestCooldown(place, TimeSpan.FromSeconds(insufficient && Cfg.AutoClickBoost ? 2 : 60)));
+            }
             if (insufficient && Cfg.AutoClickBoost) TryAutoBoostClicks();
+            return true;
         }
+    }
+
+    /// <summary>按左右箱分别设置本地冷却；成功 30 分钟，70006 取服务端时间戳与 30 分钟中的较大值。</summary>
+    void SetChestCooldown(string place, TimeSpan delay)
+    {
+        var until = DateTime.UtcNow.Add(delay);
+        if (string.Equals(place, "left", StringComparison.OrdinalIgnoreCase)) _nextLeftAttempt = until;
+        else if (string.Equals(place, "right", StringComparison.OrdinalIgnoreCase)) _nextRightAttempt = until;
     }
 
     async Task OpenChestSafeAsync(string place)
@@ -784,6 +810,8 @@ public sealed class App : ApplicationContext
                 {
                     Room.CompleteChestClicks(sent, consume);
                     Auth.MarkChestOpened(place);
+                    // 与官方一致：成功后该侧立即进入 30 分钟本地冷却，避免 5 秒定时器或并发 tick 再次开箱。
+                    SetChestCooldown(place, TimeSpan.FromMilliseconds(ChestCooldownPolicy.MinimumMs));
                 })) return null;
             }
             finally { Room.ExitClickUpload(); }
@@ -1055,6 +1083,9 @@ public sealed class App : ApplicationContext
             authMessage = Auth.StateMessage,
             ownerRoomNo = ownerRoomMatches ? Cfg.OwnerRoomNo : "",
             selfIsOwner = Room.SelfIsOwner || ownerRoomMatches,
+            roomIsPublic = Room.RoomIsPublic,
+            canSetRoomPublic = Room.SelfIsOwner && Room.RoomIsPublic.HasValue
+                && Room.State == "joined" && Room.RoomReady,
             connected = Room.IsConnected,
             ready = Room.RoomReady,
             lastError = Room.LastError,

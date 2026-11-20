@@ -93,6 +93,7 @@ public sealed class PanelWindow : Form
         app.Room.RosterChanged += QueuePushRoom;
         // 拒绝/强制断开/断线以前只进托盘；面板房间页也要立即显示持久错误和重试入口。
         app.Room.JoinRejected += OnRoomJoinRejected;
+        app.Room.RoomNotice += OnRoomNotice;
         app.Room.ForcedDisconnect += OnRoomForcedDisconnect;
         app.Room.SocketClosed += OnRoomSocketClosed;
         app.Auth.Changed += OnAuthChanged;
@@ -101,6 +102,13 @@ public sealed class PanelWindow : Form
     void OnRoomJoinRejected(string message) => Safe(() =>
     {
         Push("room.error", new { kind = "rejected", message });
+        Push("room", _app.RoomState());
+    });
+
+    void OnRoomNotice(string message) => Safe(() =>
+    {
+        if (string.IsNullOrWhiteSpace(message)) return;
+        Push("toast", new { text = message, kind = "info" });
         Push("room", _app.RoomState());
     });
 
@@ -138,6 +146,7 @@ public sealed class PanelWindow : Form
         try { _app.Room.MemberRemoved -= OnMemberListChanged; } catch { }
         try { _app.Room.RosterChanged -= QueuePushRoom; } catch { }
         try { _app.Room.JoinRejected -= OnRoomJoinRejected; } catch { }
+        try { _app.Room.RoomNotice -= OnRoomNotice; } catch { }
         try { _app.Room.ForcedDisconnect -= OnRoomForcedDisconnect; } catch { }
         try { _app.Room.SocketClosed -= OnRoomSocketClosed; } catch { }
         try { _app.Auth.Changed -= OnAuthChanged; } catch { }
@@ -1243,6 +1252,18 @@ public sealed class PanelWindow : Form
                 return _app.RoomState();
             case "room.leave":
                 await _app.Room.LeaveAsync(ownerConfirmed: ApiClient.ReadBool(data["ownerConfirmed"]));
+                return _app.RoomState();
+            case "room.randomJoin":
+                await _app.Room.RandomJoinAsync();
+                return _app.RoomState();
+            case "room.setPublic":
+                await _app.Room.SetRoomPublicAsync(ApiClient.ReadBool(data["isPublic"]));
+                return _app.RoomState();
+            case "room.kick":
+                await _app.Room.KickMemberAsync(ApiClient.ReadLong(data["id"]));
+                return _app.RoomState();
+            case "room.transferOwner":
+                await _app.Room.TransferOwnerAsync(ApiClient.ReadLong(data["id"]));
                 return _app.RoomState();
             case "room.state":
                 return _app.RoomState();

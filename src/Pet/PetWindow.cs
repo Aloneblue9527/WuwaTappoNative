@@ -57,6 +57,9 @@ public sealed class PetWindow : Form
     bool _dragging, _moved;
     bool _handIsLeft;
     long _lastGeometryMs;
+    // 高回报率鼠标每秒可产生上千条 WM_MOUSEMOVE；窗口移动按显示刷新节拍限频。
+    long _lastDragMoveMs;
+    long _lastGroupDragMs;
     // 渲染 OOM 后暂停重绘的时间点（Environment.TickCount64）；避免异常风暴。
     long _renderBlockedUntilMs;
     Point _dragCursor, _dragOrigin;
@@ -66,8 +69,14 @@ public sealed class PetWindow : Form
     readonly EmoteWheelLayer _wheel = new();
     System.Windows.Forms.Timer _blink, _blinkOff, _moveReset, _handReset, _countdownTimer, _wheelCloseTimer, _wheelShowTimer, _hoverFadeTimer, _loadingTimer, _hoverFadeAnimTimer, _hoverPollTimer;
     System.Windows.Forms.Timer _zOrderWatchdog;
+    System.Windows.Forms.Timer _zOrderRestackTimer;
     bool _zOrderRepairing;
     bool _zOrderRestackQueued;
+    bool _zOrderRestackTimerForce;
+    // 拖动期间只记下需要重排，等松手后再执行，避免看门狗/成员更新在拖动中插入 60~130ms 冻结。
+    bool _zOrderRestackPending;
+    bool _zOrderRestackPendingForce;
+    RemoteCatWindow _draggingCat;
     long _lastZOrderRepairLogMs;
     readonly object _zOrderDiagGate = new();
     readonly Dictionary<string, long> _lastZOrderSnapshotMs = new();
@@ -584,6 +593,8 @@ public sealed class PetWindow : Form
     void PollHover()
     {
         if (!IsHandleCreated || IsDisposed) return;
+        // 拖动时不更新悬停淡出/轮盘状态，避免 16ms 的 UpdateLayeredWindow 和拖动抢 UI 线程。
+        if (IsPetDragActive) return;
         var p = Cursor.Position;
         bool visible = Visible && !_hiddenByHotkey;
         SetHovering(visible && ContainsPetPoint(p), visible && ContainsCatPoint(p));
@@ -677,6 +688,7 @@ public sealed class PetWindow : Form
         _groupDragging = true;
         _groupDragOwner = ownerId;
         _groupDragCursor = cursor;
+        _lastGroupDragMs = 0;
         _groupDragOrigins.Clear();
         if (_selfSelected) _groupDragOrigins[SelfSelectionId] = Location;
         foreach (var id in _selectedCatIds)
@@ -726,9 +738,14 @@ public sealed class PetWindow : Form
         ClearSelection();
     }
 
-    void UpdateGroupDrag(Point cursor)
+    void UpdateGroupDrag(Point cursor, bool force = false)
     {
         if (!_groupDragging) return;
+        // 整组拖动每次要移动 N 个窗口，必须按显示刷新节拍限频；否则 1000Hz 鼠标会把
+        // 19 个窗口放大成每秒上万次 SetWindowPos。force 用于松手时补齐最后一帧。
+        long now = AnimationTimer.NowMs();
+        if (!force && now - _lastGroupDragMs < 16) return;
+        _lastGroupDragMs = now;
         int dx = cursor.X - _groupDragCursor.X, dy = cursor.Y - _groupDragCursor.Y;
         foreach (var pair in _groupDragOrigins)
         {
@@ -769,6 +786,7 @@ public sealed class PetWindow : Form
         }
         CompleteMultiSelectClick(moved);
         _groupDragOrigins.Clear();
+        FlushPendingZOrderRestack();
     }
 
     /// <summary>整组松手贴边：先求所有选中角色可见矩形的并集，再按同一偏移移动。</summary>
@@ -825,6 +843,7 @@ public sealed class PetWindow : Form
 
     void OnCatDragStarted(RemoteCatWindow cat)
     {
+        _draggingCat = cat;
         _multiSelectClickPending = false;
         bool ctrl = (Control.ModifierKeys & Keys.Control) != 0;
         // 按住 Ctrl 时先由主窗口接管，哪怕点中的是选中框而不是猫体，也不能让
@@ -864,23 +883,32 @@ public sealed class PetWindow : Form
 
     void OnCatDragEnded(RemoteCatWindow cat, bool moved)
     {
-        // pending 未启动说明还在死区内：RemoteCatWindow 的 moved 只按 >2px 判断，
-        // 比我们的阈值更敏感，不能让它把一次 Ctrl+单击误判成拖动。
-        if (_groupDragPending && _groupDragPendingOwner == cat.MemberId && !_groupDragging)
+        if (ReferenceEquals(_draggingCat, cat)) _draggingCat = null;
+        try
         {
-            CancelPendingGroupDrag();
+            // pending 未启动说明还在死区内：RemoteCatWindow 的 moved 只按 >2px 判断，
+            // 比我们的阈值更敏感，不能让它把一次 Ctrl+单击误判成拖动。
+            if (_groupDragPending && _groupDragPendingOwner == cat.MemberId && !_groupDragging)
+            {
+                CancelPendingGroupDrag();
+                cat.ExternalDrag = false;
+                CompleteMultiSelectClick(false);
+                return;
+            }
+            if (_groupDragging && _groupDragOwner == cat.MemberId)
+            {
+                cat.ExternalDrag = false;
+                UpdateGroupDrag(Cursor.Position, force: true);
+                EndGroupDrag(true);
+                return;
+            }
             cat.ExternalDrag = false;
-            CompleteMultiSelectClick(false);
-            return;
+            CompleteMultiSelectClick(moved);
         }
-        if (_groupDragging && _groupDragOwner == cat.MemberId)
+        finally
         {
-            cat.ExternalDrag = false;
-            EndGroupDrag(true);
-            return;
+            FlushPendingZOrderRestack();
         }
-        cat.ExternalDrag = false;
-        CompleteMultiSelectClick(moved);
     }
 
     void StartHoverFade(bool on)
@@ -894,6 +922,20 @@ public sealed class PetWindow : Form
         }
         _hoverFadeTarget = on;
         if (!_hoverFadeAnimTimer.Enabled) _hoverFadeAnimTimer.Start();
+    }
+
+    /// <summary>
+    /// 拖动开始时取消悬停淡出。鼠标按住角色后 500ms 的淡出计时器仍会触发，
+    /// 随后 16ms 一次的 UpdateLayeredWindow 正好落在拖动中，表现为半秒后顿一下。
+    /// </summary>
+    void CancelHoverFadeForDrag()
+    {
+        _hoverFadeTimer?.Stop();
+        _hoverFadeAnimTimer?.Stop();
+        _hoverFadeTarget = false;
+        if (_hoverFadeAmount <= 0.001) return;
+        _hoverFadeAmount = 0;
+        ApplyOpacityOnly();
     }
 
     // ---------- 动画 ----------
@@ -977,6 +1019,22 @@ public sealed class PetWindow : Form
         _zOrderWatchdog = new System.Windows.Forms.Timer { Interval = 1000 };
         _zOrderWatchdog.Tick += (s, e) => EnsurePetZOrder();
         _zOrderWatchdog.Start();
+        // 成员更新/新建窗口会在短时间内连续触发重排；合并成一次，避免 2N 次 SetWindowPos 风暴。
+        _zOrderRestackTimer = new System.Windows.Forms.Timer { Interval = 200 };
+        _zOrderRestackTimer.Tick += (s, e) =>
+        {
+            _zOrderRestackTimer.Stop();
+            _zOrderRestackQueued = false;
+            bool force = _zOrderRestackTimerForce;
+            _zOrderRestackTimerForce = false;
+            if (IsPetDragActive)
+            {
+                _zOrderRestackPending = true;
+                _zOrderRestackPendingForce |= force;
+                return;
+            }
+            RestackPetWindows(force);
+        };
         _loadingTimer = new System.Windows.Forms.Timer { Interval = 80 };
         _loadingTimer.Tick += (s, e) =>
         {
@@ -1116,6 +1174,7 @@ public sealed class PetWindow : Form
         bool ctrl = (Control.ModifierKeys & Keys.Control) != 0;
         if (ctrl)
         {
+            CancelHoverFadeForDrag();
             bool wasSelected = _selfSelected;
             if (!wasSelected) SetSelected(SelfSelectionId, true);
             _multiSelectClickPending = true;
@@ -1126,6 +1185,7 @@ public sealed class PetWindow : Form
             _dragCursor = Cursor.Position;
             _lastDragCursorX = _dragCursor.X;
             _dragOrigin = Location;
+            _lastDragMoveMs = 0;
             Capture = true;
             BeginPendingGroupDrag(SelfSelectionId, Cursor.Position);
             return;
@@ -1138,6 +1198,7 @@ public sealed class PetWindow : Form
             _room.AddClicks(1);
             _room.NotifyLocalAction();
         }
+        CancelHoverFadeForDrag();
         HandDown();
         Compose();
         _dragging = true;
@@ -1145,6 +1206,7 @@ public sealed class PetWindow : Form
         _dragCursor = Cursor.Position;
         _lastDragCursorX = _dragCursor.X;
         _dragOrigin = Location;
+        _lastDragMoveMs = 0;
         Capture = true;
     }
 
@@ -1178,9 +1240,15 @@ public sealed class PetWindow : Form
             return;
         }
 
-        // 拖动过程中纯 1:1 硬件级跟随，不执行贴边吸附，彻底消除边缘拖拽粘滞感与阻力
+        // 拖动过程中纯 1:1 硬件级跟随，不执行贴边吸附，彻底消除边缘拖拽粘滞感与阻力。
+        // 高回报率鼠标按 8ms（约 125Hz）节流；否则每秒上千次 SetWindowPos 会占满 UI 线程。
         Point target = new Point(_dragOrigin.X + dx, _dragOrigin.Y + dy);
-        if (target != Location) Location = target;
+        long moveNow = AnimationTimer.NowMs();
+        if (target != Location && moveNow - _lastDragMoveMs >= 8)
+        {
+            _lastDragMoveMs = moveNow;
+            Location = target;
+        }
 
         // 转向死区（移动超过 15 像素才切换朝向），避免高频抖动狂刷 Compose 重绘
         int stepDx = now.X - _lastDragCursorX;
@@ -1244,17 +1312,24 @@ public sealed class PetWindow : Form
                 CancelPendingGroupDrag();
                 _dragging = false;
                 CompleteMultiSelectClick(false);
+                FlushPendingZOrderRestack();
                 return;
             }
             if (_groupDragging && _groupDragOwner == SelfSelectionId)
             {
                 bool moved = _moved;
+                if (moved) UpdateGroupDrag(Cursor.Position, force: true);
                 _dragging = false;
                 EndGroupDrag(moved);
                 return;
             }
             if (_moved)
             {
+                // 8ms 节流可能丢掉最后一帧；松手前按当前光标补一次最终位置，避免落点偏移。
+                var finalTarget = new Point(
+                    _dragOrigin.X + (Cursor.Position.X - _dragCursor.X),
+                    _dragOrigin.Y + (Cursor.Position.Y - _dragCursor.Y));
+                if (finalTarget != Location) Location = finalTarget;
                 Location = SnapToWorkingArea(Location, Cursor.Position);
                 _moveReset.Stop();
                 SetBody(1);
@@ -1266,6 +1341,7 @@ public sealed class PetWindow : Form
             GeometryChanged?.Invoke();
             if (!_cfg.AllowOverlap) ResolveOverlaps();
             CompleteMultiSelectClick(_moved);
+            FlushPendingZOrderRestack();
         }
     }
 
@@ -1532,17 +1608,60 @@ public sealed class PetWindow : Form
         RestackPetWindows(force: false);
     }
 
+    /// <summary>主宠、整组或联机角色正在拖动时，所有层级修复都应延后，避免插入 UI 线程造成冻结。</summary>
+    bool IsPetDragActive => _dragging || _groupDragging || _draggingCat != null;
+
     void QueueRestackPetWindows()
     {
+        if (IsPetDragActive)
+        {
+            _zOrderRestackPending = true;
+            _zOrderRestackPendingForce = true;
+            return;
+        }
         if (_zOrderRestackQueued) return;
         _zOrderRestackQueued = true;
+        _zOrderRestackTimerForce = true;
         try
         {
             if (IsHandleCreated && !IsDisposed)
-                BeginInvoke(new Action(() => { _zOrderRestackQueued = false; RestackPetWindows(force: true); }));
-            else _zOrderRestackQueued = false;
+            {
+                _zOrderRestackTimer.Stop();
+                _zOrderRestackTimer.Start();
+            }
+            else
+            {
+                _zOrderRestackQueued = false;
+                _zOrderRestackTimerForce = false;
+            }
         }
-        catch { _zOrderRestackQueued = false; }
+        catch
+        {
+            _zOrderRestackQueued = false;
+            _zOrderRestackTimerForce = false;
+        }
+    }
+
+    /// <summary>拖动结束后把期间积压的层级修复合并成一次，稍微延后执行，先让松手逻辑走完。</summary>
+    void FlushPendingZOrderRestack()
+    {
+        if (!_zOrderRestackPending || IsPetDragActive) return;
+        _zOrderRestackPending = false;
+        bool force = _zOrderRestackPendingForce;
+        _zOrderRestackPendingForce = false;
+        if (!IsHandleCreated || IsDisposed) return;
+        _zOrderRestackQueued = true;
+        _zOrderRestackTimerForce |= force;
+        try
+        {
+            _zOrderRestackTimer.Stop();
+            _zOrderRestackTimer.Start();
+        }
+        catch
+        {
+            _zOrderRestackQueued = false;
+            _zOrderRestackTimerForce = false;
+        }
     }
 
     void RestackPetWindows(bool force)
@@ -1576,6 +1695,15 @@ public sealed class PetWindow : Form
             hasMainPet: mainVisible,
             isOwnWindow: IsOwnProcessWindow);
         if (!force && problem == PetZOrderProblem.None) return;
+
+        // 拖动中不要做全量重排：2N 次 SetWindowPos + 快照会让鼠标跟手出现明显顿挫。
+        // 先记下请求，等松手后由 FlushPendingZOrderRestack 合并执行一次。
+        if (IsPetDragActive)
+        {
+            _zOrderRestackPending = true;
+            _zOrderRestackPendingForce |= force;
+            return;
+        }
 
         // 只记录现场，不改变重排行为。同一原因 30 秒内最多一条快照。
         if (problem != PetZOrderProblem.None)
@@ -1672,6 +1800,11 @@ public sealed class PetWindow : Form
         "Shell_InputSwitchTopLevelWindow",
         "DV2ControlHost",
         "SysShadow",
+        // 输入法候选窗/皮肤条、安全软件托盘等 topmost 小窗口；它们经常夹在
+        // 桌宠 z-order 中间，但不会遮住猫体，不能触发全量重排。
+        "LibImeWindow",
+        "MoqiSogouSkinStatusBar",
+        "HRNETFLOWTRAY",
     };
 
     /// <summary>使用 Windows.UI.Core.CoreWindow 的系统宿主进程（开始菜单/搜索/输入法等）。</summary>
@@ -1995,7 +2128,7 @@ public sealed class PetWindow : Form
 
     void ShowWheel()
     {
-        if (_hiddenByHotkey || _wheel.Open) return;
+        if (_hiddenByHotkey || _wheel.Open || IsPetDragActive) return;
         Log.Write("DBG wheel open");
         var wheelImages = new Dictionary<long, Image>();
         var wheelLoading = new HashSet<long>();
@@ -2686,13 +2819,14 @@ public sealed class PetWindow : Form
             if (_cats.TryGetValue(id, out var existing))
             {
                 existing.SetScale(RemoteScaleFactor);
-                existing.SetWindowOptions(EffectiveRemoteOpacity, _cfg.HoverFade, _cfg.ClickThrough, _cfg.Topmost, _cfg.HoverFadeOpacity);
+                bool topmostChanged = existing.SetWindowOptions(EffectiveRemoteOpacity, _cfg.HoverFade, _cfg.ClickThrough, _cfg.Topmost, _cfg.HoverFadeOpacity);
                 existing.SetRemoteStyle(EffectiveRemoteScale, EffectiveRemoteOpacity, _cfg.RemoteNameScale);
                 existing.SetBarVisible(!_cfg.HideRemoteBars);
                 var theme = ThemeBarColors();
                 existing.SetTheme(theme.bar, theme.text);
                 existing.RefreshMember();
-                QueueRestackPetWindows();
+                // 普通成员更新（动作、昵称、房间快照）不改变 z-order，不再触发 2N 次重排。
+                if (topmostChanged) QueueRestackPetWindows();
             }
             else
             {
@@ -3120,18 +3254,20 @@ public sealed class PetWindow : Form
     void UpdateCatScales()
     {
         float s = RemoteScaleFactor;
+        bool topmostChanged = false;
         foreach (var pair in _cats)
         {
             var c = pair.Value;
             int oldWidth = c.Width;
             c.SetScale(s);
-            c.SetWindowOptions(EffectiveRemoteOpacity, _cfg.HoverFade, _cfg.ClickThrough, _cfg.Topmost, _cfg.HoverFadeOpacity);
+            topmostChanged |= c.SetWindowOptions(EffectiveRemoteOpacity, _cfg.HoverFade, _cfg.ClickThrough, _cfg.Topmost, _cfg.HoverFadeOpacity);
             c.SetRemoteStyle(EffectiveRemoteScale, EffectiveRemoteOpacity, _cfg.RemoteNameScale);
             c.SetBarVisible(!_cfg.HideRemoteBars);
             // 缩放后窗口从左上角变大，贴边排列的成员会被顶出屏幕；按可见猫体修正回工作区。
             if (c.Width != oldWidth) ClampCatToScreen(pair.Key, c);
         }
-        QueueRestackPetWindows();
+        // 缩放/透明度本身不改变层级，只有置顶状态真正切换时才需要重排。
+        if (topmostChanged) QueueRestackPetWindows();
     }
 
     void ClampCatToScreen(long id, RemoteCatWindow cat)
@@ -3183,12 +3319,14 @@ public sealed class PetWindow : Form
     {
         if (_cats.TryGetValue(id, out var cat))
         {
+            if (ReferenceEquals(_draggingCat, cat)) _draggingCat = null;
             _cats.Remove(id);
             _selectedCatIds.Remove(id);
             _groupDragOrigins.Remove(id);
             cat.Close();
             cat.Dispose();
-            QueueRestackPetWindows();
+            // 删除窗口不会在剩余桌宠之间留下 z-order 空洞，不需要重排。
+            FlushPendingZOrderRestack();
         }
     }
 
@@ -3247,7 +3385,7 @@ public sealed class PetWindow : Form
         _captureFrame?.Dispose();
         _captureFrame = null;
         _capture = null;
-        foreach (var t in new[] { _blink, _blinkOff, _moveReset, _handReset, _countdownTimer, _wheelCloseTimer, _wheelShowTimer, _hoverFadeTimer, _hoverFadeAnimTimer, _hoverPollTimer, _loadingTimer, _zOrderWatchdog }) { try { t?.Stop(); t?.Dispose(); } catch { } }
+        foreach (var t in new[] { _blink, _blinkOff, _moveReset, _handReset, _countdownTimer, _wheelCloseTimer, _wheelShowTimer, _hoverFadeTimer, _hoverFadeAnimTimer, _hoverPollTimer, _loadingTimer, _zOrderWatchdog, _zOrderRestackTimer }) { try { t?.Stop(); t?.Dispose(); } catch { } }
         foreach (var c in _cats.Values.ToList()) { try { c.Close(); c.Dispose(); } catch { } }
         _cats.Clear();
         _composeTimer.Dispose();

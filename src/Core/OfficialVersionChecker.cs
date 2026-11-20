@@ -44,7 +44,7 @@ public sealed class OfficialCheckStatus
 public static class OfficialVersionChecker
 {
     /// <summary>发布 Native 时已经实际验证过的官方客户端版本；作为最低兜底基线。</summary>
-    public const string TestedOfficialVersion = "1.0.4";
+    public const string TestedOfficialVersion = "1.0.5";
 
     const string CnHost = "https://mc-wuwatappo.kurogames-global.com";
     const string GlobalHost = "https://wutheringwaves-wuwatappo.kurogames-global.com";

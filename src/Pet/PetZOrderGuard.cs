@@ -78,8 +78,22 @@ internal static class PetZOrderGuard
             }
         }
 
-        if (requireContiguous && max - min + 1 != pets.Count)
-            return PetZOrderProblem.NotContiguous;
+        if (requireContiguous)
+        {
+            // 桌宠组内部必须连续，但任务栏/输入法/托盘等豁免窗口允许夹在中间。
+            // 旧逻辑只比较 max-min+1，会把 Shell_TrayWnd、HRNETFLOWTRAY、
+            // MoqiSogouSkinStatusBar、LibImeWindow 这类 topmost 系统窗口误判成
+            // “桌宠被拆开”，进而每秒触发一次全量重排。
+            var petSet = new HashSet<IntPtr>(pets);
+            for (int i = min; i <= max; i++)
+            {
+                IntPtr hwnd = visibleTopLevelOrder[i];
+                if (hwnd == IntPtr.Zero || petSet.Contains(hwnd)) continue;
+                if (isOwnWindow != null && isOwnWindow(hwnd)) continue;
+                if (isExemptWindow != null && isExemptWindow(hwnd)) continue;
+                return PetZOrderProblem.NotContiguous;
+            }
+        }
 
         // 置顶模式下的“假置顶”检查：topmost band 内不应夹着普通窗口。
         // 外部 topmost 窗口允许在桌宠上方（例如任务栏、输入法状态条），这里只挑

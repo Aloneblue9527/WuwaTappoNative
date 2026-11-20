@@ -43,6 +43,7 @@ public sealed class RemoteCatWindow : Form
     bool _dragging;
     Point _dragCursor, _dragOrigin;
     bool _movedDuringDrag;
+    long _lastDragMoveMs;
     bool _selected;
     bool _barVisible = true;
     Color _pillColor = PetComposer.Cream;
@@ -181,7 +182,8 @@ public sealed class RemoteCatWindow : Form
     /// 与主桌宠保持一致的窗口选项：不透明度 / 悬停淡出 / 鼠标穿透 / 置顶。
     /// 原版里这些是全局设置，联机成员的窗口也必须跟着变，否则会出现“只有主角能穿透”的割裂感。
     /// </summary>
-    public void SetWindowOptions(double opacity, bool hoverFade, bool clickThrough, bool topmost, double hoverFadeOpacity = 0.4)
+    /// <returns>是否切换了置顶状态；只有这种情况才需要重新排列 z-order。</returns>
+    public bool SetWindowOptions(double opacity, bool hoverFade, bool clickThrough, bool topmost, double hoverFadeOpacity = 0.4)
     {
         _opacityBase = Math.Clamp(opacity, 0.1, 1.0);
         _hoverFadeOpacity = Math.Clamp(hoverFadeOpacity, 0.1, 1.0);
@@ -200,11 +202,13 @@ public sealed class RemoteCatWindow : Form
             _hoverFadeTimer.Stop();
             _hoverFadeTimer.Start();
         }
-        bool stylesChanged = clickThrough != _clickThrough || topmost != _topmost;
+        bool topmostChanged = topmost != _topmost;
+        bool stylesChanged = clickThrough != _clickThrough || topmostChanged;
         _clickThrough = clickThrough;
         _topmost = topmost;
         if (stylesChanged && IsHandleCreated) ApplyWindowStyles();
         UpdateHoverOpacity();
+        return topmostChanged;
     }
 
     /// <summary>鼠标进入/离开：停留 500ms 后才淡出，离开时平滑恢复。</summary>
@@ -234,6 +238,17 @@ public sealed class RemoteCatWindow : Form
     {
         _hoverFadeOn = on;
         if (!_hoverFadeAnimTimer.Enabled) _hoverFadeAnimTimer.Start();
+    }
+
+    /// <summary>拖动开始时取消悬停淡出，避免 500ms 后启动的 16ms 透明度动画卡住拖动。</summary>
+    void CancelHoverFadeForDrag()
+    {
+        _hoverFadeTimer?.Stop();
+        _hoverFadeAnimTimer?.Stop();
+        _hoverFadeOn = false;
+        if (_hoverFadeAmount <= 0.001) return;
+        _hoverFadeAmount = 0;
+        UpdateHoverOpacity();
     }
 
     void UpdateHoverOpacity()
@@ -566,10 +581,12 @@ public sealed class RemoteCatWindow : Form
     {
         base.OnMouseDown(e);
         if (e.Button != MouseButtons.Left) return;
+        CancelHoverFadeForDrag();
         _dragging = true;
         _movedDuringDrag = false;
         _dragCursor = Cursor.Position;
         _dragOrigin = Location;
+        _lastDragMoveMs = 0;
         Capture = true;
         DragStarted?.Invoke(this);
     }
@@ -587,8 +604,14 @@ public sealed class RemoteCatWindow : Form
             DragMoved?.Invoke(this, p);
             return;
         }
+        // 与主桌宠一致：高回报率鼠标按 8ms（约 125Hz）节流，避免每秒上千次 SetWindowPos。
         Point target = new Point(_dragOrigin.X + dx, _dragOrigin.Y + dy);
-        if (target != Location) Location = target;
+        long moveNow = AnimationTimer.NowMs();
+        if (target != Location && moveNow - _lastDragMoveMs >= 8)
+        {
+            _lastDragMoveMs = moveNow;
+            Location = target;
+        }
     }
 
     /// <summary>联机成员桌宠与主角一样，拖到屏幕/任务栏边缘附近时自动贴边。</summary>
@@ -627,8 +650,16 @@ public sealed class RemoteCatWindow : Form
             DragEnded?.Invoke(this, moved);
             return;
         }
-        if (moved) Location = SnapToWorkingArea(Location, Cursor.Position);
-        if (moved) Moved?.Invoke(Location);
+        if (moved)
+        {
+            // 8ms 节流可能丢掉最后一帧，松手前补齐。
+            var finalTarget = new Point(
+                _dragOrigin.X + (Cursor.Position.X - _dragCursor.X),
+                _dragOrigin.Y + (Cursor.Position.Y - _dragCursor.Y));
+            if (finalTarget != Location) Location = finalTarget;
+            Location = SnapToWorkingArea(Location, Cursor.Position);
+            Moved?.Invoke(Location);
+        }
         DragEnded?.Invoke(this, moved);
     }
 

@@ -161,6 +161,20 @@
     });
   }
 
+  function confirmRoomAction(title, message, confirmText, onConfirm) {
+    modal(`<div class="about">
+      <div class="about-title">${esc(title)}</div>
+      <div class="about-note about-note--warn"><p>${esc(message)}</p></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
+        <button class="btn ghost" id="roomActionCancel">取消</button>
+        <button class="btn danger" id="roomActionContinue">${esc(confirmText)}</button>
+      </div>
+    </div>`, host => {
+      host.querySelector('#roomActionCancel').onclick = closeModal;
+      host.querySelector('#roomActionContinue').onclick = () => { closeModal(); onConfirm(); };
+    });
+  }
+
   function rarityClass(r) { return 'rarity-' + (r || 'common'); }
   function effRarity(r) { return (r || 'common').toLowerCase(); }
 
@@ -4073,7 +4087,8 @@
     const ms = (room.members || [])
       .map(m => `${m.id}:${m.nickname || ''}:${m.online ? 1 : 0}:${m.visible ? 1 : 0}:${m.owner ? 1 : 0}`)
       .join('|');
-    return `${room.state}|${room.roomNo || ''}|${room.connected ? 1 : 0}|${room.serviceUnavailable ? 1 : 0}|${room.hiddenAll ? 1 : 0}|${room.lastError || ''}|${(room.history || []).join(',')}|${ms}`;
+    const pub = room.roomIsPublic == null ? 'n' : (room.roomIsPublic ? 1 : 0);
+    return `${room.state}|${room.roomNo || ''}|${room.connected ? 1 : 0}|${room.ready ? 1 : 0}|${room.serviceUnavailable ? 1 : 0}|${room.hiddenAll ? 1 : 0}|${room.selfIsOwner ? 1 : 0}|${room.canSetRoomPublic ? 1 : 0}|${pub}|${room.lastError || ''}|${(room.history || []).join(',')}|${ms}`;
   }
 
   function renderRoom() {
@@ -4131,8 +4146,14 @@
             <div class="room-no">${joined ? esc(room.roomNo) : '——'}<span class="copy" id="copyRoom" ${joined ? '' : 'style="display:none"'}>复制</span></div>
             <div class="detail-row" style="margin-top:8px"><span>可用点击数</span><span data-click-avail>${auth.clicks ?? 0}</span></div>
             <div class="detail-row"><span>累计点击数</span><span data-click-total>${auth.clickTotal ?? auth.clicks ?? 0}</span></div>
-            <div style="display:flex;gap:10px;margin-top:14px">
-              <button class="btn" id="roomCreate" ${joined || authPaused ? 'disabled' : ''}>创建房间</button>
+            ${joined && room.canSetRoomPublic ? `
+            <div class="setting-item" style="margin-top:10px;padding:6px 4px;background:transparent">
+              <div><div class="setting-title">公开房间</div><div class="setting-sub">允许其他玩家通过“随机加入房间”匹配到本房间</div></div>
+              <div class="switch ${room.roomIsPublic ? 'on' : ''}" id="roomPublic"></div>
+            </div>` : ''}
+            <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+              <button class="btn" id="roomCreate" ${joined || authPaused || blocked ? 'disabled' : ''}>创建房间</button>
+              ${!joined ? `<button class="btn ghost" id="roomRandomJoin" ${authPaused || blocked ? 'disabled' : ''}>随机加入</button>` : ''}
               <button class="btn danger" id="roomLeave" ${!joined || authPaused ? 'disabled' : ''}>离开房间</button>
             </div>
           </div>
@@ -4175,6 +4196,9 @@
                     ${m.owner ? '<span class="m-role">房主</span>' : ''}
                     ${m.self ? '<span class="m-role">我</span>' : ''}
                     ${!m.online ? '<span class="m-role">离线</span>' : ''}
+                    ${selfIsOwner && !m.self ? `
+                      <button class="chip" style="padding:2px 8px" data-transfer="${m.id}" ${room.ready ? '' : 'disabled'}>转让</button>
+                      <button class="chip" style="padding:2px 8px" data-kick="${m.id}" ${room.ready ? '' : 'disabled'}>移出</button>` : ''}
                     ${!m.self ? (room.hiddenAll
                       ? '<span class="m-role" title="已开启“隐藏其他成员桌宠”">已隐藏</span>'
                       : `<button class="chip" style="padding:2px 10px" data-hide="${m.id}" data-visible="${m.visible ? 1 : 0}">${m.visible ? '隐藏' : '显示'}</button>`) : ''}
@@ -4212,6 +4236,54 @@
         toast(r?.connected ? '房间已创建' : '正在创建房间，等待房间确认…');
       } catch (e) { state.roomError = { message: e?.message || '创建房间失败' }; renderRoom(); }
     };
+    document.getElementById('roomRandomJoin')?.addEventListener('click', async () => {
+      if (authPaused) return toast(authMessage, 'err');
+      try {
+        const r = await tryCall('room.randomJoin');
+        state.boot.room = r;
+        state.roomError = null;
+        renderRoom();
+        toast(r?.connected ? '已加入随机房间' : '正在进入随机房间，等待房间确认…');
+      } catch (e) { state.roomError = { message: e?.message || '随机加入房间失败' }; renderRoom(); }
+    });
+    document.getElementById('roomPublic')?.addEventListener('click', async () => {
+      if (authPaused) return toast(authMessage, 'err');
+      const next = !room.roomIsPublic;
+      try {
+        const r = await tryCall('room.setPublic', { isPublic: next });
+        state.boot.room = r;
+        renderRoom();
+        toast(next ? '已设为公开房间' : '已设为私有房间');
+      } catch (e) { toast(e?.message || '修改房间公开状态失败', 'err'); }
+    });
+    document.querySelectorAll('[data-kick]').forEach(b => {
+      b.onclick = () => {
+        const id = Number(b.dataset.kick);
+        confirmRoomAction('移出成员', '是否确认将该玩家移出房间？', '移出', async () => {
+          try {
+            const r = await tryCall('room.kick', { id });
+            state.boot.room = r;
+            state.roomError = null;
+            renderRoom();
+            toast('移出请求已发送');
+          } catch (e) { state.roomError = { message: e?.message || '移出成员失败' }; renderRoom(); }
+        });
+      };
+    });
+    document.querySelectorAll('[data-transfer]').forEach(b => {
+      b.onclick = () => {
+        const id = Number(b.dataset.transfer);
+        confirmRoomAction('转让房主', '是否转让房主给该玩家？', '转让', async () => {
+          try {
+            const r = await tryCall('room.transferOwner', { id });
+            state.boot.room = r;
+            state.roomError = null;
+            renderRoom();
+            toast('转让请求已发送');
+          } catch (e) { state.roomError = { message: e?.message || '转让房主失败' }; renderRoom(); }
+        });
+      };
+    });
     const leaveRoom = async (ownerConfirmed = false) => {
       if (authPaused) return toast(authMessage, 'err');
       try {

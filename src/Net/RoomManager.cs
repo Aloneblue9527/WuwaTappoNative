@@ -93,6 +93,8 @@ public sealed class RoomManager : IDisposable
     public bool IsLeavingIntentionally => _leavingIntentionally;
     /// <summary>服务器成员快照中自己的房主标记。</summary>
     public bool SelfIsOwner { get; private set; }
+    /// <summary>当前房间是否公开；null 表示服务器未返回 d.p，UI 不显示开关。</summary>
+    public bool? RoomIsPublic { get; private set; }
     public readonly ConcurrentDictionary<long, RoomMember> Members = new();
 
     public event Action StateChanged;
@@ -110,6 +112,8 @@ public sealed class RoomManager : IDisposable
     public event Action<string> SocketClosed;
     /// <summary>服务器拒绝进入房间（例如房间不存在/已解散），UI 可提示用户。</summary>
     public event Action<string> JoinRejected;
+    /// <summary>房间内的一次性提示（被移出房间、成为新房主等），由面板转成 toast。</summary>
+    public event Action<string> RoomNotice;
 
     public RoomManager(AuthService auth, Settings cfg, Func<string> blockedReason = null)
     {
@@ -143,6 +147,8 @@ public sealed class RoomManager : IDisposable
             State = "idle";
             _roomReady = false;
             _awaitingSnapshot = false;
+            SelfIsOwner = false;
+            RoomIsPublic = null;
             Members.Clear();
             StateChanged?.Invoke();
         }
@@ -195,6 +201,49 @@ public sealed class RoomManager : IDisposable
             var data = await _auth.Api.PostAsync("api/frontend/rooms", new { });
             string no = ApiClient.ReadString(data?["room_no"]);
             if (string.IsNullOrEmpty(no)) throw new ApiException(-1, "创建房间失败：未返回房间号");
+            await EnterAsync(no);
+            await WaitForRoomReadyAsync(TimeSpan.FromSeconds(8));
+        }
+        catch (Exception ex)
+        {
+            SetLastError(ex.Message);
+            throw;
+        }
+        finally { Interlocked.Exchange(ref _busy, 0); }
+    }
+
+    /// <summary>
+    /// 1.0.5 随机加入公开房间。服务端在 random-join 时已经把用户登记进房间，
+    /// 成功后直接连房间 socket 并拉 rm 快照，不能再调用 rooms/join。
+    /// </summary>
+    public async Task RandomJoinAsync()
+    {
+        EnsureNetworkAllowed();
+        if (Interlocked.Exchange(ref _busy, 1) == 1) return;
+        _reconnectSuppressed = false;
+        ClearLastError();
+        try
+        {
+            if (State == "joined")
+                throw new ApiException(-1, "请先离开当前房间");
+            await EnsureLobbyAsync();
+            JsonNode data;
+            try
+            {
+                data = await _auth.Api.PostAsync("api/frontend/rooms/random-join", new { });
+            }
+            catch (ApiException ex) when (ex.Code == 80003)
+            {
+                // 服务器认为仍在旧房间：按官方逻辑读取 user/me.room_no 后直接回原房间。
+                await _auth.WhoAmIAsync();
+                string current = ApiClient.ReadString(_auth.UserInfo?["room_no"]).Trim();
+                if (string.IsNullOrEmpty(current)) throw;
+                await EnterAsync(current);
+                await WaitForRoomReadyAsync(TimeSpan.FromSeconds(8));
+                return;
+            }
+            string no = ApiClient.ReadString(data?["room_no"]).Trim();
+            if (string.IsNullOrEmpty(no)) throw new ApiException(-1, "随机加入房间失败：未返回房间号");
             await EnterAsync(no);
             await WaitForRoomReadyAsync(TimeSpan.FromSeconds(8));
         }
@@ -271,6 +320,68 @@ public sealed class RoomManager : IDisposable
         finally { Interlocked.Exchange(ref _busy, 0); }
     }
 
+    /// <summary>1.0.5 房主切换当前房间的公开状态。is_public 是 boolean，不是 0/1。</summary>
+    public async Task SetRoomPublicAsync(bool isPublic)
+    {
+        EnsureNetworkAllowed();
+        if (State != "joined" || string.IsNullOrEmpty(RoomNo))
+            throw new ApiException(-1, "当前不在房间中");
+        if (!RoomReady)
+            throw new ApiException(-1, "房间尚未就绪，请稍后再试");
+        if (!SelfIsOwner)
+            throw new ApiException(-1, "只有房主可以修改公开状态");
+        if (!RoomIsPublic.HasValue)
+            throw new ApiException(-1, "服务器未返回公开状态，暂时无法修改");
+        await _auth.Api.PostAsync("api/frontend/rooms/public", new { room_no = RoomNo, is_public = isPublic });
+        RoomIsPublic = isPublic;
+        StateChanged?.Invoke();
+    }
+
+    /// <summary>1.0.5 房主移出成员。出站 rk 的 u 是单个成员 id，和入站数组不同。</summary>
+    public async Task KickMemberAsync(long memberId)
+    {
+        EnsureNetworkAllowed();
+        EnsureCanManageMember(memberId, "移出成员");
+        var ack = await _socket.EmitAsync("rk", new JsonObject { ["u"] = memberId }, 8000);
+        EnsureSocketAck(ack, "移出成员");
+    }
+
+    /// <summary>1.0.5 房主转让。官方不在本地先改 owner，等服务端 rt 广播。</summary>
+    public async Task TransferOwnerAsync(long memberId)
+    {
+        EnsureNetworkAllowed();
+        EnsureCanManageMember(memberId, "转让房主");
+        var ack = await _socket.EmitAsync("rt", new JsonObject { ["u"] = memberId }, 8000);
+        EnsureSocketAck(ack, "转让房主");
+    }
+
+    void EnsureCanManageMember(long memberId, string action)
+    {
+        if (State != "joined" || !RoomReady)
+            throw new ApiException(-1, "房间尚未就绪，请稍后再试");
+        if (!SelfIsOwner)
+            throw new ApiException(-1, "只有房主可以" + action);
+        if (memberId <= 0 || memberId == SelfId)
+            throw new ApiException(-1, "不能对自己执行该操作");
+        if (!Members.ContainsKey(memberId))
+            throw new ApiException(-1, "该成员已不在房间");
+        if (_socket?.Connected != true)
+            throw new ApiException(-1, "房间连接已断开");
+    }
+
+    static void EnsureSocketAck(JsonNode ack, string action)
+    {
+        if (ack is not JsonObject o)
+            throw new ApiException(-1, action + "超时，请稍后重试");
+        if (o["c"] == null)
+            throw new ApiException(-1, action + "响应异常，请稍后重试");
+        int code = ApiClient.ReadInt(o["c"]);
+        if (code == 0 || code == 200) return;
+        string message = ApiClient.ReadString(o["message"]);
+        string requestId = ApiClient.ReadString(o["request_id"]);
+        throw new ApiException(code, ApiClient.DescribeCode(code, message), requestId);
+    }
+
     /// <param name="reconnectLobby">
     /// 退房后是否立刻回到大厅。切换区服时必须传 false：否则会用旧区服的 token/BaseUrl
     /// 重连旧大厅，随后登录新区服时 EnsureLobbyAsync 看到旧 socket 仍连接，就不会建立新连接。
@@ -290,6 +401,8 @@ public sealed class RoomManager : IDisposable
             ClearLastError();
             State = "idle";
             RoomNo = "";
+            SelfIsOwner = false;
+            RoomIsPublic = null;
             _cfg.RoomNo = "";
             if (!string.IsNullOrEmpty(leavingRoom) && string.Equals(_cfg.OwnerRoomNo, leavingRoom, StringComparison.Ordinal))
             {
@@ -474,6 +587,7 @@ public sealed class RoomManager : IDisposable
         State = "joined";
         _roomReady = false;
         _awaitingSnapshot = false;
+        RoomIsPublic = null;
         // 重启/切设备时先把持久化的房主房间视为受保护，等待 rm 快照再确认。
         SelfIsOwner = !string.IsNullOrEmpty(_cfg.OwnerRoomNo)
             && string.Equals(_cfg.OwnerRoomCuid, _auth.Cuid, StringComparison.Ordinal)
@@ -619,6 +733,7 @@ public sealed class RoomManager : IDisposable
         _roomReady = false;
         _awaitingSnapshot = false;
         SelfIsOwner = false;
+        RoomIsPublic = null;
         SetLastError(message);
         string rejectedRoom = RoomNo;
         State = "idle";
@@ -652,6 +767,14 @@ public sealed class RoomManager : IDisposable
         }
         var list = data["m"] as JsonArray;
         if (list == null) return false;
+        // 1.0.5 新增 d.p：公开房间 0/1。缺失或非法值按 null 处理，不能默认成私有。
+        bool? previousPublic = RoomIsPublic;
+        if (data["p"] is JsonValue)
+        {
+            int p = ApiClient.ReadInt(data["p"]);
+            RoomIsPublic = p == 0 ? false : p == 1 ? true : (bool?)null;
+        }
+        else RoomIsPublic = null;
         var seen = new HashSet<long>();
         bool touched = false;
         bool selfSeen = false;
@@ -687,6 +810,7 @@ public sealed class RoomManager : IDisposable
         else if (selfSeen || Members.Values.Any(m => m.IsOwner))
             ClearOwnerRoom(RoomNo);
         if (touched) RosterChanged?.Invoke();
+        if (RoomIsPublic != previousPublic) StateChanged?.Invoke();
         return true;
     }
 
@@ -724,7 +848,7 @@ public sealed class RoomManager : IDisposable
                     break;
                 }
                 case "rs":
-                    _ = _socket?.EmitAsync("rm", new JsonObject { ["r"] = RoomNo }, 8000).ContinueWith(t => ApplyMemberSnapshot(t.Result));
+                    _ = RefreshMemberSnapshotAsync();
                     break;
                 case "rd":
                     ApplyAppearanceSnapshot(payload);
@@ -739,6 +863,31 @@ public sealed class RoomManager : IDisposable
                     if (id > 0 && id != SelfId) MemberEmote?.Invoke(id, emote);
                     break;
                 }
+                case "rk":
+                {
+                    // 1.0.5 入站 rk 的 u 是数组；兼容旧服务端的单值形态。
+                    var ids = ParseIdArray(payload?["u"]);
+                    if (ids.Count == 0) return;
+                    if (ids.Contains(SelfId))
+                    {
+                        _ = HandleSelfKickedAsync();
+                        return;
+                    }
+                    bool removed = false;
+                    foreach (long id in ids)
+                    {
+                        if (Members.TryRemove(id, out _))
+                        {
+                            MemberRemoved?.Invoke(id);
+                            removed = true;
+                        }
+                    }
+                    if (removed) RosterChanged?.Invoke();
+                    break;
+                }
+                case "rt":
+                    ApplyOwnerTransfer(payload);
+                    break;
                 case "fd":
                 {
                     int code = ApiClient.ReadInt(payload?["c"]);
@@ -759,6 +908,97 @@ public sealed class RoomManager : IDisposable
             }
         }
         catch (Exception ex) { Log.Write("房间事件处理失败 " + name + " " + ex.Message); }
+    }
+
+    static List<long> ParseIdArray(JsonNode node)
+    {
+        var result = new List<long>();
+        if (node is JsonArray arr)
+        {
+            foreach (var item in arr)
+            {
+                long id = ParseId(item);
+                if (id > 0 && !result.Contains(id)) result.Add(id);
+            }
+        }
+        else
+        {
+            long id = ParseId(node);
+            if (id > 0) result.Add(id);
+        }
+        return result;
+    }
+
+    /// <summary>1.0.5 rt：房主转让增量。只改 owner 标记，成员列表本身不重建。</summary>
+    void ApplyOwnerTransfer(JsonNode payload)
+    {
+        if (payload is not JsonObject o) return;
+        long oldOwner = ParseId(o["a"]);
+        long newOwner = ParseId(o["o"]);
+        if (oldOwner <= 0 || newOwner <= 0 || oldOwner == newOwner) return;
+
+        bool wasOwner = SelfIsOwner;
+        foreach (var member in Members.Values)
+            member.IsOwner = member.Id == newOwner;
+        SelfIsOwner = SelfId == newOwner;
+        if (SelfIsOwner)
+        {
+            RememberOwnerRoom(RoomNo);
+            if (!wasOwner)
+            {
+                // 新房主需要重新读取 d.p；官方此时只刷新公开状态，不重放整份成员快照。
+                RoomIsPublic = null;
+                RoomNotice?.Invoke("你已成为房主");
+                _ = RefreshMemberSnapshotAsync();
+            }
+        }
+        else if (wasOwner)
+        {
+            ClearOwnerRoom(RoomNo);
+        }
+        RosterChanged?.Invoke();
+        StateChanged?.Invoke();
+    }
+
+    async Task RefreshMemberSnapshotAsync()
+    {
+        try
+        {
+            var socket = _socket;
+            if (socket?.Connected != true || string.IsNullOrEmpty(RoomNo)) return;
+            var snap = await socket.EmitAsync("rm", new JsonObject { ["r"] = RoomNo }, 8000);
+            if (snap != null) ApplyMemberSnapshot(snap);
+        }
+        catch (Exception ex) { Log.Write("刷新房间快照失败 " + ex.Message); }
+    }
+
+    /// <summary>1.0.5 rk 命中自己：本地清房间状态并回大厅，不发 rl、不调用 REST leave。</summary>
+    async Task HandleSelfKickedAsync()
+    {
+        string oldRoom = RoomNo;
+        _roomReady = false;
+        _awaitingSnapshot = false;
+        SelfIsOwner = false;
+        RoomIsPublic = null;
+        State = "idle";
+        RoomNo = "";
+        _cfg.RoomNo = "";
+        if (!string.IsNullOrEmpty(oldRoom) && string.Equals(_cfg.OwnerRoomNo, oldRoom, StringComparison.Ordinal))
+        {
+            _cfg.OwnerRoomNo = "";
+            _cfg.OwnerRoomCuid = "";
+        }
+        ConfigStore.Save(_cfg);
+        Members.Clear();
+        ClearLastError();
+        Log.Info($"room kicked room={oldRoom}", "room");
+        StateChanged?.Invoke();
+        RoomNotice?.Invoke("你已被移出房间");
+        _leavingIntentionally = true;
+        try { await CloseSocketAsync(); }
+        finally { _leavingIntentionally = false; }
+        try { await EnsureLobbyAsync(); }
+        catch (Exception ex) { Log.Write("被移出房间后重连大厅失败 " + ex.Message); }
     }
 
     void ApplyAppearanceSnapshot(JsonNode payload)
