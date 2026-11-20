@@ -759,14 +759,17 @@ public sealed class AuthService
         }
     }
 
-    /// <summary>开箱响应成功后先本地把该侧宝箱时间戳清零，让 UI 立即消失；随后 user/me 会用真实冷却时间修正。</summary>
+    /// <summary>
+    /// 开箱成功后按官方 1.0.5 立刻建立该侧 30 分钟本地冷却；
+    /// 后续 user/me 只允许把时间戳往前推，不能用旧值把它拉回去。
+    /// </summary>
     public void MarkChestOpened(string place)
     {
         if (UserInfo is not JsonObject me) return;
         string key = string.Equals(place, "left", StringComparison.OrdinalIgnoreCase)
             ? "left_treasure_chest"
             : "right_treasure_chest";
-        me[key] = 0;
+        me[key] = ServerNowMs + 30L * 60 * 1000;
     }
 
     /// <summary>轻量刷新：只同步点击数、宝箱时间戳等运行时字段，不回写本地外观。</summary>
@@ -774,6 +777,7 @@ public sealed class AuthService
 
     internal Task<bool> RefreshClicksAsync(ApiClient session) => ReadUserAsync(session, me =>
     {
+        MergeChestTimestamps(me);
         UserInfo = me;
         TotalClickCount = ApiClient.ReadLong(me["total_click_count"]);
         TotalClickConsume = ApiClient.ReadLong(me["total_click_consume"]);
@@ -803,9 +807,11 @@ public sealed class AuthService
 
     void ApplyUserInfo(JsonObject me)
     {
-        UserInfo = me;
         string serverCuid = ApiClient.ReadString(me["cuid"]);
         bool accountChanged = !string.IsNullOrEmpty(_cfg.Cuid) && !string.IsNullOrEmpty(serverCuid) && _cfg.Cuid != serverCuid;
+        // 同一账号的 user/me 可能比本地开箱冷却慢一拍；只允许时间戳前进。
+        if (!accountChanged) MergeChestTimestamps(me);
+        UserInfo = me;
         if (accountChanged)
         {
             _cfg.LocalAppearance = false;
@@ -850,6 +856,17 @@ public sealed class AuthService
         if (!_cfg.LocalEmoteSlots && emotes.Any(x => x > 0)) _cfg.EmoteAssetIds = emotes;
         ConfigStore.Save(_cfg);
         Changed?.Invoke();
+    }
+
+    void MergeChestTimestamps(JsonObject fresh)
+    {
+        if (fresh == null || UserInfo is not JsonObject previous) return;
+        foreach (string key in new[] { "left_treasure_chest", "right_treasure_chest" })
+        {
+            long oldValue = ApiClient.ReadLong(previous[key]);
+            long newValue = ApiClient.ReadLong(fresh[key]);
+            if (oldValue > newValue) fresh[key] = oldValue;
+        }
     }
 
     public async Task LogoutAsync()

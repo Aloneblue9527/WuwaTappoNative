@@ -102,13 +102,14 @@ Wuwatappo Native 是 WuwaTappo 1.0.2 的 Windows 原生实现，使用 C# / .NET
 ```text
 %LOCALAPPDATA%\WuwatappoNative\config.json
 %LOCALAPPDATA%\WuwatappoNative\state.json
+%LOCALAPPDATA%\WuwatappoNative\click_ledger.json
 %LOCALAPPDATA%\WuwatappoNative\logs\app-YYYY-MM-DD.log
 %LOCALAPPDATA%\WuwatappoNative\logs\synth-YYYY-MM-DD.jsonl
 %LOCALAPPDATA%\WuwatappoNative\logs\diag-YYYY-MM-DD.log
 %LOCALAPPDATA%\WuwatappoNative\cache\
 ```
 
-`config.json` 保存登录状态、外观和设置；`state.json` 保存窗口位置、房间状态、成员位置和成员可见性；`cache\` 保存外观和图片缓存。
+`config.json` 保存登录状态、外观和设置；`state.json` 保存窗口位置、房间状态、成员位置和成员可见性；`click_ledger.json` 按账号/区服保存累计点击和待上报点击；`cache\` 保存外观和图片缓存。
 
 日志目录说明：
 
@@ -160,7 +161,7 @@ Wuwatappo Native 是 WuwaTappo 1.0.2 的 Windows 原生实现，使用 C# / .NET
 | `联机` 页面 | 创建/加入/切换房间、历史房间、成员显示、快捷表情 |
 | `设置 → 自动化` | 自动表情、自动敲击、自动敲击频率和虚拟敲击动画 |
 | `设置 → 通知` | 宝箱领取通知、快捷键操作通知 |
-| `设置 → 其他` | 开机自动启动、管理员权限启动、游戏模式规则、更新通道、更新下载源、HTTP 代理、检查更新 |
+| `设置 → 其他` | 开机自动启动、管理员权限启动、全屏自动游戏模式、游戏模式规则、更新通道、更新下载源、HTTP 代理、检查更新 |
 
 自动表情的来源可选快捷栏随机、指定表情或表情库随机，发送频率上限为 1–20 次/秒。自动敲击频率为 1–10 次/秒，是否显示虚拟敲击动画可单独设置。
 
@@ -238,14 +239,14 @@ dotnet run --project tests/SqliteChecks/SqliteChecks.csproj -c Release
 需要 PowerShell 7 和 Inno Setup 6.7 或更高版本。
 
 ```powershell
-pwsh -File .\installer\build.ps1 -Version 0.3.4
+pwsh -File .\installer\build.ps1 -Version 0.3.5
 ```
 
 输出：
 
 ```text
-dist/WuwatappoNative-0.3.4-Setup.exe
-dist/WuwatappoNative-0.3.4-portable.zip
+dist/WuwatappoNative-0.3.5-Setup.exe
+dist/WuwatappoNative-0.3.5-portable.zip
 dist/WuwatappoTokenExtractor-1.1.2-x64.zip
 ```
 

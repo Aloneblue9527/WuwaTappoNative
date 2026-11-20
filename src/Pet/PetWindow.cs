@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -88,7 +89,7 @@ public sealed class PetWindow : Form
     Image _chestBtnArt, _chestBgArt;
     ContextMenuStrip _menu;
     NotifyIcon _tray;
-    ToolStripMenuItem _topmostItem, _passthroughItem, _passthroughOffItem, _hoverItem, _scaleMenuItem, _opacityMenuItem;
+    ToolStripMenuItem _topmostItem, _passthroughItem, _passthroughOffItem, _hoverItem, _scaleMenuItem, _opacityMenuItem, _mirrorItem;
     ToolStripMenuItem _layoutHorizontalItem, _layoutVerticalItem;
     Icon _icon;
 
@@ -329,6 +330,7 @@ public sealed class PetWindow : Form
             ChestRightTs = rightTs,
             NowMs = now,
             Selected = _selfSelected,
+            Mirror = _cfg.MainMirrored,
             ShowBar = !_cfg.HideMainBar,
             AccOffsetX = accTransform.X,
             AccOffsetY = accTransform.Y,
@@ -1016,7 +1018,7 @@ public sealed class PetWindow : Form
         _hoverPollTimer.Start();
         // 兜底检测：Windows/DWM 或其它置顶窗口偶尔会把桌宠层级拆开；
         // 每秒检查一次主桌宠 + 全部可见联机桌宠是否仍在顶层且主桌宠在最上方。
-        _zOrderWatchdog = new System.Windows.Forms.Timer { Interval = 1000 };
+        _zOrderWatchdog = new System.Windows.Forms.Timer { Interval = 2000 };
         _zOrderWatchdog.Tick += (s, e) => EnsurePetZOrder();
         _zOrderWatchdog.Start();
         // 成员更新/新建窗口会在短时间内连续触发重排；合并成一次，避免 2N 次 SetWindowPos 风暴。
@@ -1374,6 +1376,31 @@ public sealed class PetWindow : Form
         NotifySettingsChanged();
     }
 
+    /// <summary>主桌宠镜像：只翻转角色皮肤/头饰，底栏保持正方向。</summary>
+    public void SetMainMirrored(bool mirrored)
+    {
+        if (_cfg.MainMirrored == mirrored) return;
+        _cfg.MainMirrored = mirrored;
+        Save();
+        Compose();
+        NotifySettingsChanged();
+    }
+
+    /// <summary>联机成员镜像：按成员 id 持久化，只影响该角色。</summary>
+    public void SetMemberMirrored(long id, bool mirrored)
+    {
+        _cfg.MemberMirrored ??= new Dictionary<string, bool>();
+        string key = CatKey(id);
+        if (mirrored) _cfg.MemberMirrored[key] = true;
+        else _cfg.MemberMirrored.Remove(key);
+        Save();
+        if (_cats.TryGetValue(id, out var cat)) cat.SetMirrored(mirrored);
+        NotifySettingsChanged();
+    }
+
+    bool IsMemberMirrored(long id)
+        => _cfg.MemberMirrored != null && _cfg.MemberMirrored.TryGetValue(CatKey(id), out bool mirrored) && mirrored;
+
     public void ApplySettings()
     {
         _themePreview = null;
@@ -1400,6 +1427,7 @@ public sealed class PetWindow : Form
         ApplyBarVisibility();
         ApplyThemeToCats();
         UpdateCatScales();
+        foreach (var cat in _cats.Values) cat.SetMirrored(IsMemberMirrored(cat.MemberId));
         ApplyCaptureMode();
         if (!_cfg.AllowOverlap) ResolveOverlaps();
         RefreshMenu();
@@ -1605,6 +1633,8 @@ public sealed class PetWindow : Form
     void EnsurePetZOrder()
     {
         if (!IsHandleCreated || IsDisposed) return;
+        // 已有合并重排在排队时不要再用 watchdog 插入一次全量重排/快照。
+        if (_zOrderRestackQueued || _zOrderRestackTimer?.Enabled == true) return;
         RestackPetWindows(force: false);
     }
 
@@ -2026,10 +2056,23 @@ public sealed class PetWindow : Form
         return pid;
     }
 
+    static readonly ConcurrentDictionary<uint, (string Name, long ExpiresMs)> ProcessNameCache = new();
+
     static string ProcessName(uint pid)
     {
-        try { return pid == 0 ? "" : Process.GetProcessById((int)pid).ProcessName; }
-        catch { return ""; }
+        if (pid == 0) return "";
+        long now = Environment.TickCount64;
+        if (ProcessNameCache.TryGetValue(pid, out var cached) && now < cached.ExpiresMs)
+            return cached.Name;
+        string name = "";
+        try
+        {
+            using var process = Process.GetProcessById((int)pid);
+            name = process.ProcessName;
+        }
+        catch { }
+        ProcessNameCache[pid] = (name, now + 60_000);
+        return name;
     }
 
     static string WindowClassName(IntPtr hwnd)
@@ -2605,6 +2648,13 @@ public sealed class PetWindow : Form
         _topmostItem = new ToolStripMenuItem("窗口置顶") { Checked = _cfg.Topmost };
         _topmostItem.Click += (s, e) => { _cfg.Topmost = _topmostItem.Checked = !_cfg.Topmost; Save(); ApplySettings(); NotifySettingsChanged(); };
         _menu.Items.Add(_topmostItem);
+        _mirrorItem = new ToolStripMenuItem("镜像角色") { Checked = _cfg.MainMirrored };
+        _mirrorItem.Click += (s, e) =>
+        {
+            SetMainMirrored(!_cfg.MainMirrored);
+            _mirrorItem.Checked = _cfg.MainMirrored;
+        };
+        _menu.Items.Add(_mirrorItem);
         _hoverItem = new ToolStripMenuItem("鼠标悬停时半透明") { Checked = _cfg.HoverFade };
         _hoverItem.Click += (s, e) => { _cfg.HoverFade = _hoverItem.Checked = !_hoverItem.Checked; Save(); ApplySettings(); NotifySettingsChanged(); };
         _menu.Items.Add(_hoverItem);
@@ -2687,6 +2737,7 @@ public sealed class PetWindow : Form
     {
         if (_menu == null) return;
         _topmostItem.Checked = _cfg.Topmost;
+        _mirrorItem.Checked = _cfg.MainMirrored;
         _hoverItem.Checked = _cfg.HoverFade;
         _passthroughOffItem.Visible = _cfg.ClickThrough;
         _passthroughItem.Enabled = !_cfg.ClickThrough;
@@ -2819,6 +2870,7 @@ public sealed class PetWindow : Form
             if (_cats.TryGetValue(id, out var existing))
             {
                 existing.SetScale(RemoteScaleFactor);
+                existing.SetMirrored(IsMemberMirrored(id));
                 bool topmostChanged = existing.SetWindowOptions(EffectiveRemoteOpacity, _cfg.HoverFade, _cfg.ClickThrough, _cfg.Topmost, _cfg.HoverFadeOpacity);
                 existing.SetRemoteStyle(EffectiveRemoteScale, EffectiveRemoteOpacity, _cfg.RemoteNameScale);
                 existing.SetBarVisible(!_cfg.HideRemoteBars);
@@ -2832,6 +2884,7 @@ public sealed class PetWindow : Form
             {
                 var cat = new RemoteCatWindow(m, _loader, _catalog, _store);
                 cat.SetScale(RemoteScaleFactor);
+                cat.SetMirrored(IsMemberMirrored(id));
                 cat.SetWindowOptions(EffectiveRemoteOpacity, _cfg.HoverFade, _cfg.ClickThrough, _cfg.Topmost, _cfg.HoverFadeOpacity);
                 cat.SetRemoteStyle(EffectiveRemoteScale, EffectiveRemoteOpacity, _cfg.RemoteNameScale);
                 cat.SetBarVisible(!_cfg.HideRemoteBars);
@@ -2840,6 +2893,7 @@ public sealed class PetWindow : Form
                 cat.RemoteScaleRequested += ApplyRemoteScale;
                 cat.RemoteOpacityRequested += ApplyRemoteOpacity;
                 cat.HideRequested += OnCatHideRequested;
+                cat.MirrorRequested += (id, mirrored) => SetMemberMirrored(id, mirrored);
                 cat.Location = PlaceNewCat(id);
                 cat.DragStarted += OnCatDragStarted;
                 cat.DragMoved += OnCatDragMoved;
@@ -2857,6 +2911,10 @@ public sealed class PetWindow : Form
                 if (!_hiddenByHotkey)
                 {
                     cat.Show();
+                    // 新远程窗口默认是 topmost，会先插到主宠上方；先把它放到主宠后面，
+                    // 避免 2 秒 watchdog 在这个窗口期误判 MainNotAboveRemotes 并拍全量快照。
+                    if (Visible && IsWindowVisible(Handle))
+                        SetWindowPos(cat.Handle, Handle, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
                     QueueRestackPetWindows();
                 }
             }

@@ -26,6 +26,8 @@ public static class Paths
     public static string ThemePresetFile => Path.Combine(Root, "theme_presets.json");
     /// <summary>高级合成的锁定物资，单独存 JSON，避免状态/配置迁移时丢失。</summary>
     public static string LocksFile => Path.Combine(Root, "locks.json");
+    /// <summary>按账号/区服隔离的点击账本，避免重启后未上报点击丢失。</summary>
+    public static string ClickLedgerFile => Path.Combine(Root, "click_ledger.json");
     /// <summary>面板关闭期间领取到的宝箱奖励；下次打开面板时补进「最近获得」。</summary>
     public static string RecentChestFile => Path.Combine(Root, "recent_chests.json");
     public static string UpdatesDir => Path.Combine(Root, "updates");

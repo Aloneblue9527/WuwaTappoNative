@@ -25,7 +25,7 @@ public sealed class RemoteCatWindow : Form
     PetFrames _frames;
     readonly EmoteBubbleLayer _bubbles = new(6);
     ContextMenuStrip _menu;
-    ToolStripMenuItem _scaleMenu, _opacityMenu;
+    ToolStripMenuItem _scaleMenu, _opacityMenu, _mirrorItem;
     double _remoteScale = 1.0, _remoteOpacity = 1.0, _remoteNameScale = 1.0;
     public event Action<double> RemoteScaleRequested;
     public event Action<double> RemoteOpacityRequested;
@@ -35,16 +35,18 @@ public sealed class RemoteCatWindow : Form
     long _lastSkin = -1, _lastPart = -1;
     string _lastNickname;
     readonly LayeredSurface _surface = new();
-    Bitmap _baseFrame;
+    // Body1/2/3 各缓存一张已合成的底图；按键动作只切换缓存，不再重建整只角色。
+    readonly Bitmap[] _baseFrames = new Bitmap[4];
     // 渲染 OOM 后 10 秒内不重试，避免 CatPainter 连续调度造成异常风暴。
     long _renderBlockedUntilMs;
-    (Size Size, Image Head, Image Body, Image Accessory, double X, double Y, float Scale, double NameScale, bool BarVisible, string Nickname, bool Selected, Color PillColor, Color PillTextColor) _baseFrameKey;
+    (Size Size, Image Head, Image Body1, Image Body2, Image Body3, Image Accessory, double X, double Y, float Scale, double NameScale, bool BarVisible, string Nickname, bool Selected, bool Mirror, Color PillColor, Color PillTextColor) _baseFrameKey;
     float _scale = 1f;
     bool _dragging;
     Point _dragCursor, _dragOrigin;
     bool _movedDuringDrag;
     long _lastDragMoveMs;
     bool _selected;
+    bool _mirrored;
     bool _barVisible = true;
     Color _pillColor = PetComposer.Cream;
     Color _pillTextColor = PetComposer.InkStrong;
@@ -55,6 +57,8 @@ public sealed class RemoteCatWindow : Form
     public event Action<RemoteCatWindow, bool> DragEnded;
     /// <summary>右键菜单请求隐藏该成员。</summary>
     public event Action<long> HideRequested;
+    /// <summary>右键菜单请求切换该成员镜像。</summary>
+    public event Action<long, bool> MirrorRequested;
 
     /// <summary>由主窗口接管本次拖动（多选批量移动）时，远程窗口自身不再移动。</summary>
     public bool ExternalDrag { get; set; }
@@ -64,6 +68,16 @@ public sealed class RemoteCatWindow : Form
     {
         if (_selected == selected) return;
         _selected = selected;
+        if (IsHandleCreated && !IsDisposed) Compose();
+    }
+
+    /// <summary>只水平翻转角色皮肤/头饰，昵称条和选中框保持正方向。</summary>
+    public void SetMirrored(bool mirrored)
+    {
+        if (_mirrored == mirrored) return;
+        _mirrored = mirrored;
+        RefreshRemoteMenu();
+        _baseFrameKey = default;
         if (IsHandleCreated && !IsDisposed) Compose();
     }
 
@@ -122,6 +136,9 @@ public sealed class RemoteCatWindow : Form
         var hideItem = new ToolStripMenuItem("隐藏该角色");
         hideItem.Click += (s, e) => HideRequested?.Invoke(MemberId);
         _menu.Items.Add(hideItem);
+        _mirrorItem = new ToolStripMenuItem("镜像角色") { Checked = _mirrored };
+        _mirrorItem.Click += (s, e) => MirrorRequested?.Invoke(MemberId, !_mirrored);
+        _menu.Items.Add(_mirrorItem);
         _menu.Items.Add(new ToolStripSeparator());
 
         _scaleMenu = new ToolStripMenuItem("联机角色大小");
@@ -160,6 +177,11 @@ public sealed class RemoteCatWindow : Form
     void RefreshRemoteMenu()
     {
         if (_menu == null) return;
+        if (_mirrorItem != null)
+        {
+            _mirrorItem.Checked = _mirrored;
+            _mirrorItem.Text = _mirrored ? "取消镜像" : "镜像角色";
+        }
         _scaleMenu.Text = $"联机角色大小（{(int)Math.Round(_remoteScale * 100)}%）";
         _opacityMenu.Text = $"联机角色透明度（{(int)Math.Round(_remoteOpacity * 100)}%）";
         foreach (ToolStripItem sub in _scaleMenu.DropDownItems)
@@ -452,34 +474,44 @@ public sealed class RemoteCatWindow : Form
         {
             // 释放本窗口的离屏缓冲，下一次重试时重新分配；异常不能抛回 CatPainter/UI 线程。
             _renderBlockedUntilMs = Environment.TickCount64 + RuntimeDiagnostics.RenderRetrySeconds * 1000L;
-            try { _baseFrame?.Dispose(); } catch { }
-            _baseFrame = null;
+            DisposeBaseFrames();
             _baseFrameKey = default;
             try { _surface.Dispose(); } catch { }
             RuntimeDiagnostics.LogRenderOom("remote-cat", MemberId, ex);
         }
     }
 
+    void DisposeBaseFrames()
+    {
+        for (int i = 0; i < _baseFrames.Length; i++)
+        {
+            try { _baseFrames[i]?.Dispose(); } catch { }
+            _baseFrames[i] = null;
+        }
+    }
+
     internal void ComposeInto(Bitmap surface)
     {
         bool ready = _frames != null && _frames.Ready;
-        Image selectedBody = _frames == null ? null : _bodyFrame switch
-        {
-            2 => _frames.Body2 ?? _frames.Body1,
-            3 => _frames.Body3 ?? _frames.Body1,
-            _ => _frames.Body1
-        };
-        var key = (surface.Size, _frames?.Head1, selectedBody, _frames?.Accessory,
+        int bodyIndex = _bodyFrame is 2 or 3 ? _bodyFrame : 1;
+        var key = (surface.Size, _frames?.Head1, _frames?.Body1, _frames?.Body2, _frames?.Body3, _frames?.Accessory,
             _frames?.AccOffsetX ?? 0, _frames?.AccOffsetY ?? 0, _scale, _remoteNameScale, _barVisible,
-            _member.Nickname, _selected, _pillColor, _pillTextColor);
-        if (ready && (_baseFrame == null || _baseFrameKey != key))
+            _member.Nickname, _selected, _mirrored, _pillColor, _pillTextColor);
+        if (ready && (_baseFrameKey != key || _baseFrames[bodyIndex] == null))
         {
-            if (_baseFrame == null || _baseFrame.Size != surface.Size)
+            if (_baseFrameKey != key)
             {
-                _baseFrame?.Dispose();
-                _baseFrame = new Bitmap(surface.Width, surface.Height, PixelFormat.Format32bppPArgb);
+                DisposeBaseFrames();
+                _baseFrameKey = key;
             }
-            using (var g = Graphics.FromImage(_baseFrame))
+            var frame = _baseFrames[bodyIndex];
+            if (frame == null || frame.Size != surface.Size)
+            {
+                frame?.Dispose();
+                frame = new Bitmap(surface.Width, surface.Height, PixelFormat.Format32bppPArgb);
+                _baseFrames[bodyIndex] = frame;
+            }
+            using (var g = Graphics.FromImage(frame))
             {
                 g.Clear(Color.Transparent);
                 g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -488,16 +520,41 @@ public sealed class RemoteCatWindow : Form
                 float s = _scale;
                 float top = Headroom * s;
                 float cat = CatSize * s;
-                if (_frames.Head1 != null) g.DrawImage(_frames.Head1, 0, top, cat, cat);
-                Image body = _bodyFrame switch
+                void DrawCharacter(Action draw)
+                {
+                    var state = g.Save();
+                    try
+                    {
+                        if (_mirrored)
+                        {
+                            float cx = cat / 2f;
+                            g.TranslateTransform(cx, 0);
+                            g.ScaleTransform(-1, 1);
+                            g.TranslateTransform(-cx, 0);
+                        }
+                        draw();
+                    }
+                    finally { g.Restore(state); }
+                }
+                DrawCharacter(() =>
+                {
+                    if (_frames.Head1 != null) g.DrawImage(_frames.Head1, 0, top, cat, cat);
+                    Image body = bodyIndex switch
+                    {
+                        2 => _frames.Body2 ?? _frames.Body1,
+                        3 => _frames.Body3 ?? _frames.Body1,
+                        _ => _frames.Body1
+                    };
+                    if (body != null) g.DrawImage(body, 0, top, cat, cat);
+                    if (_frames.Accessory != null)
+                        g.DrawImage(_frames.Accessory, (float)(_frames.AccOffsetX * s), (float)(_frames.AccOffsetY * s) + top, cat, cat);
+                });
+                Image body = bodyIndex switch
                 {
                     2 => _frames.Body2 ?? _frames.Body1,
                     3 => _frames.Body3 ?? _frames.Body1,
                     _ => _frames.Body1
                 };
-                if (body != null) g.DrawImage(body, 0, top, cat, cat);
-                if (_frames.Accessory != null)
-                    g.DrawImage(_frames.Accessory, (float)(_frames.AccOffsetX * s), (float)(_frames.AccOffsetY * s) + top, cat, cat);
                 if (_selected)
                     PetComposer.DrawSelection(g, new RectangleF(0, top, cat, cat), s);
 
@@ -522,7 +579,7 @@ public sealed class RemoteCatWindow : Form
                         {
                             using var clip = PetComposer.Rounded(pill, 16 * s);
                             g.SetClip(clip, CombineMode.Intersect);
-                            g.DrawImage(body, 0, top, cat, cat);
+                            DrawCharacter(() => g.DrawImage(body, 0, top, cat, cat));
                         }
                         finally { g.Restore(state); }
                     }
@@ -538,7 +595,7 @@ public sealed class RemoteCatWindow : Form
             target.SmoothingMode = SmoothingMode.AntiAlias;
             target.InterpolationMode = InterpolationMode.HighQualityBicubic;
             target.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-            target.DrawImageUnscaled(_baseFrame, 0, 0);
+            target.DrawImageUnscaled(_baseFrames[bodyIndex], 0, 0);
             _bubbles.Draw(target, _scale, 100 * _scale, (Headroom + 100) * _scale);
         }
     }
@@ -673,7 +730,7 @@ public sealed class RemoteCatWindow : Form
         _handReset.Dispose();
         _hoverFadeTimer.Dispose();
         _hoverFadeAnimTimer.Dispose();
-        _baseFrame?.Dispose();
+        DisposeBaseFrames();
         _surface.Dispose();
         base.OnClosed(e);
     }

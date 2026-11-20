@@ -432,9 +432,11 @@ body.panel-maximized #maxBtn .icon-restore { display: block; }
 .member.owner { background: var(--cream-3); }
 .member .dot { flex: 0 0 9px; width: 9px; height: 9px; border-radius: 50%; background: #8dc878; }
 .member .dot.off { background: #c9beb9; }
-.member .m-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; color: var(--ink-strong); }
+.member .m-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; color: var(--ink-strong); }
 .member .m-actions { flex: 0 0 auto; margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .member .m-role { flex: 0 0 auto; font-size: 12px; color: var(--ink-dim); }
+/* “我/房主”紧跟名字，只留约 6px 间距；操作按钮仍由 m-actions 推到右侧。 */
+.member .m-role-name { margin-left: -4px; }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; }
 .chip { padding: 6px 12px; border-radius: 10px; background: var(--cream-4); border: 1.5px solid var(--border); font-size: 13px; cursor: pointer; }
 .chip:hover { background: var(--active); }

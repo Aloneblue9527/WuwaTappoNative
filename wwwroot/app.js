@@ -4085,7 +4085,7 @@
   function roomSignature(room) {
     if (!room) return '';
     const ms = (room.members || [])
-      .map(m => `${m.id}:${m.nickname || ''}:${m.online ? 1 : 0}:${m.visible ? 1 : 0}:${m.owner ? 1 : 0}`)
+      .map(m => `${m.id}:${m.nickname || ''}:${m.online ? 1 : 0}:${m.visible ? 1 : 0}:${m.owner ? 1 : 0}:${m.mirrored ? 1 : 0}`)
       .join('|');
     const pub = room.roomIsPublic == null ? 'n' : (room.roomIsPublic ? 1 : 0);
     return `${room.state}|${room.roomNo || ''}|${room.connected ? 1 : 0}|${room.ready ? 1 : 0}|${room.serviceUnavailable ? 1 : 0}|${room.hiddenAll ? 1 : 0}|${room.selfIsOwner ? 1 : 0}|${room.canSetRoomPublic ? 1 : 0}|${pub}|${room.lastError || ''}|${(room.history || []).join(',')}|${ms}`;
@@ -4192,10 +4192,11 @@
                 <div class="member ${m.owner ? 'owner' : ''}">
                   <span class="dot ${m.online ? '' : 'off'}"></span>
                   <span class="m-name">${esc(m.nickname || '漂泊者')}</span>
+                  ${m.owner ? '<span class="m-role m-role-name">房主</span>' : ''}
+                  ${m.self ? '<span class="m-role m-role-name">我</span>' : ''}
+                  ${!m.online ? '<span class="m-role m-role-name">离线</span>' : ''}
                   <span class="m-actions">
-                    ${m.owner ? '<span class="m-role">房主</span>' : ''}
-                    ${m.self ? '<span class="m-role">我</span>' : ''}
-                    ${!m.online ? '<span class="m-role">离线</span>' : ''}
+                    <button class="chip" style="padding:2px 8px" data-mirror="${m.id}" data-mirrored="${m.mirrored ? 1 : 0}" title="水平翻转角色，底栏保持正方向">${m.mirrored ? '取消镜像' : '镜像'}</button>
                     ${selfIsOwner && !m.self ? `
                       <button class="chip" style="padding:2px 8px" data-transfer="${m.id}" ${room.ready ? '' : 'disabled'}>转让</button>
                       <button class="chip" style="padding:2px 8px" data-kick="${m.id}" ${room.ready ? '' : 'disabled'}>移出</button>` : ''}
@@ -4357,6 +4358,18 @@
         state.boot.room = r; renderRoom();
       } catch { }
     };
+    document.querySelectorAll('[data-mirror]').forEach(b => {
+      b.onclick = async () => {
+        const id = Number(b.dataset.mirror);
+        const mirrored = b.dataset.mirrored !== '1';
+        try {
+          const r = await tryCall('room.mirror', { id, mirrored });
+          state.boot.room = r;
+          renderRoom();
+          toast(mirrored ? '已开启镜像' : '已关闭镜像');
+        } catch (e) { toast(e?.message || '切换镜像失败', 'err'); }
+      };
+    });
     document.querySelectorAll('[data-hide]').forEach(b => b.onclick = async () => {
       const id = Number(b.dataset.hide);
       const hide = b.dataset.visible === '1';
@@ -5519,6 +5532,10 @@
           <div class="setting-item">
             <div><div class="setting-title">游戏模式（鼠标穿透）</div><div class="setting-sub">开启后桌宠不响应鼠标，可从托盘菜单恢复</div></div>
             <div class="switch ${s.clickThrough ? 'on' : ''}" data-switch="clickThrough"></div>
+          </div>
+          <div class="setting-item">
+            <div><div class="setting-title">全屏自动游戏模式</div><div class="setting-sub">检测到前台窗口全屏时自动开启鼠标穿透，退出全屏后恢复</div></div>
+            <div class="switch ${s.autoGameModeOnFullscreen !== false ? 'on' : ''}" data-switch="autoGameModeOnFullscreen"></div>
           </div>
           <div class="setting-item">
             <div><div class="setting-title">鼠标悬停时半透明</div><div class="setting-sub">便于看清桌宠后的内容</div></div>
@@ -7234,7 +7251,7 @@
           const r = await tryCall('clicks.boost', { delta: 10000 });
           if (r?.accepted) {
             applyClicks(r);
-            toast('点击数 +10000');
+            toast('已加入待上报，联网后自动同步');
           } else {
             toast('操作太快，请稍后再试', 'err');
           }
@@ -7412,6 +7429,7 @@
         serverRegion: 'cn',
         forcedOnlineAcceptedVersion: '',
         gameModeRules: [],
+        autoGameModeOnFullscreen: true,
         hotkeys: {},
         ...previewThemeSettings(),
       },

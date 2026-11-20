@@ -52,6 +52,8 @@ public sealed class RoomManager : IDisposable
     // 连续被拒后的指数退避：30s → 60s → 120s → 300s 封顶。
     readonly RetryBackoff _clickBackoff = new(RetryBackoff.ClickRejectSchedule);
     int _lastClickBackoffSeconds;
+    System.Threading.Timer _clickLedgerTimer;
+    string _clickLedgerKey;
     int _connectionFailures;
     volatile bool _serviceUnavailable;
     volatile string _lastError = "";
@@ -73,6 +75,12 @@ public sealed class RoomManager : IDisposable
     public long ServerConsume
     {
         get { lock (_clicksLock) { return _serverConsume; } }
+    }
+
+    /// <summary>尚未上报到服务器的本地点击；+10000 在 ack 前会留在这里。</summary>
+    public long PendingClicks
+    {
+        get { lock (_clicksLock) { return _pendingClicks; } }
     }
     public event Action ClicksChanged;
     /// <summary>每次本地产生一次敲击（真实或自动）时触发，用于自动表情等本地联动。</summary>
@@ -125,6 +133,7 @@ public sealed class RoomManager : IDisposable
         _reportTimer = new System.Threading.Timer(_ => _ = FlushClicksAsync(), null, 30000, 30000);
         // Socket 断开或首次连接失败后，不能只等一次重试；后台每 5 秒检查并恢复房间连接。
         _reconnectTimer = new System.Threading.Timer(_ => _ = AutoReconnectTickAsync(), null, 3000, 5000);
+        RestoreClickLedger();
     }
 
     void OnAuthStateChanged()
@@ -683,6 +692,7 @@ public sealed class RoomManager : IDisposable
             {
                 _awaitingSnapshot = false;
                 _ = ConfirmLobbyConnectionAsync(_generation);
+                _ = FlushClicksAsync();
                 StateChanged?.Invoke();
                 return;
             }
@@ -714,6 +724,7 @@ public sealed class RoomManager : IDisposable
             _roomReady = true;
             ClearLastError();
             MarkConnectionSuccess();
+            _ = FlushClicksAsync();
             StateChanged?.Invoke();
             var appearanceSnap = await socket.EmitAsync("rd", new JsonObject { ["r"] = RoomNo }, 8000);
             ApplyAppearanceSnapshot(appearanceSnap);
@@ -1143,12 +1154,69 @@ public sealed class RoomManager : IDisposable
         });
     }
 
+    /// <summary>按当前账号/区服恢复本地点击账本；切换账号时重置旧账本。</summary>
+    void RestoreClickLedger()
+    {
+        string cuid = (_auth.Cuid ?? "").Trim();
+        string region = string.Equals((_cfg.ServerRegion ?? "").Trim(), "global", StringComparison.OrdinalIgnoreCase)
+            ? "global" : "cn";
+        if (string.IsNullOrEmpty(cuid)) return;
+        string key = region + ":" + cuid;
+        lock (_clicksLock)
+        {
+            if (string.Equals(_clickLedgerKey, key, StringComparison.Ordinal)) return;
+            _clickEpoch++;
+            _baseClicks = 0;
+            _pendingClicks = 0;
+            _inflightClicks = 0;
+            _serverConsume = 0;
+            _clickLedgerKey = key;
+        }
+        var ledger = ClickLedgerStore.Load(cuid, region);
+        lock (_clicksLock)
+        {
+            _baseClicks = Math.Max(_baseClicks, ledger.Cumulative);
+            _pendingClicks = Math.Max(_pendingClicks, ledger.Pending);
+        }
+        ClicksChanged?.Invoke();
+    }
+
+    void ScheduleClickLedgerSave()
+    {
+        _clickLedgerTimer ??= new System.Threading.Timer(
+            _ => SaveClickLedger(), null, Timeout.Infinite, Timeout.Infinite);
+        _clickLedgerTimer.Change(500, Timeout.Infinite);
+    }
+
+    /// <summary>把当前账号的累计 gross 与未上报点击落盘；不记录 token。</summary>
+    void SaveClickLedger()
+    {
+        long cumulative, pending;
+        lock (_clicksLock)
+        {
+            cumulative = _baseClicks;
+            pending = _pendingClicks;
+        }
+        string cuid = (_auth.Cuid ?? "").Trim();
+        if (string.IsNullOrEmpty(cuid)) return;
+        ClickLedgerStore.Save(new ClickLedger
+        {
+            Cuid = cuid,
+            Region = _cfg.ServerRegion,
+            Cumulative = cumulative,
+            Pending = pending,
+            UpdatedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+        });
+    }
+
     public void AddClicks(long n)
     {
         if (n <= 0) return;
+        RestoreClickLedger();
         lock (_clicksLock) { _pendingClicks += n; }
         ClicksChanged?.Invoke();
         LocalClick?.Invoke();
+        ScheduleClickLedgerSave();
     }
 
     /// <summary>
@@ -1158,6 +1226,7 @@ public sealed class RoomManager : IDisposable
     public bool BoostLocalClicks(long delta)
     {
         if (delta != 10000) return false;
+        RestoreClickLedger();
         long now = Environment.TickCount64;
         long previous = Interlocked.Read(ref _lastBoostMs);
         if (previous != 0 && now - previous < 500) return false;
@@ -1165,6 +1234,8 @@ public sealed class RoomManager : IDisposable
 
         lock (_clicksLock) { _pendingClicks += delta; }
         ClicksChanged?.Invoke();
+        // 先落盘：即使 cr 失败或马上重启，+10000 也不会凭空消失。
+        SaveClickLedger();
         // 与原版一致：按钮不等待服务器回包，避免网络慢时把设置页卡住。
         _ = FlushClicksAsync();
         return true;
@@ -1176,6 +1247,7 @@ public sealed class RoomManager : IDisposable
     /// </summary>
     public void SyncServerClicks(long total, long consume)
     {
+        RestoreClickLedger();
         lock (_clicksLock)
         {
             total = Math.Max(0, total);
@@ -1189,8 +1261,10 @@ public sealed class RoomManager : IDisposable
                     _inflightClicks = 0;
                 _baseClicks = total;
             }
-            _serverConsume = consume;
+            // 开箱成功后本地已加过消耗；旧的 user/me 不能把它冲回去。
+            _serverConsume = Math.Max(_serverConsume, consume);
         }
+        ScheduleClickLedgerSave();
         ClicksChanged?.Invoke();
     }
 
@@ -1204,6 +1278,7 @@ public sealed class RoomManager : IDisposable
 
     internal ChestClicks CaptureChestClicks()
     {
+        RestoreClickLedger();
         lock (_clicksLock)
             return new ChestClicks(_baseClicks + _pendingClicks, _pendingClicks, _serverConsume, _clickEpoch);
     }
@@ -1218,12 +1293,14 @@ public sealed class RoomManager : IDisposable
             _serverConsume = Math.Max(_serverConsume, sent.Consumed + consume);
             _pendingClicks -= Math.Min(_pendingClicks, sent.Pending);
         }
+        SaveClickLedger();
         ClicksChanged?.Invoke();
     }
 
     public void ResetPendingClicks()
     {
         lock (_clicksLock) { _pendingClicks = 0; }
+        SaveClickLedger();
         ClicksChanged?.Invoke();
     }
 
@@ -1237,10 +1314,12 @@ public sealed class RoomManager : IDisposable
             _pendingClicks = 0;
             _inflightClicks = 0;
             _serverConsume = 0;
+            _clickLedgerKey = null;
         }
         // 换账号后重置上报退避：不能把上一个账号的 80013 冷却带进新会话。
         _clickBackoff.Reset();
         _lastClickBackoffSeconds = 0;
+        RestoreClickLedger();
         ClicksChanged?.Invoke();
     }
 
@@ -1281,6 +1360,7 @@ public sealed class RoomManager : IDisposable
 
     async Task FlushClicksAsync()
     {
+        RestoreClickLedger();
         // 80013 连续被拒后进入冷却：未到时间直接返回，不发送 cr；AddClicks 仍可继续累计。
         if (_clickBackoff.IsCoolingDown(Environment.TickCount64)) return;
         if (!string.IsNullOrEmpty(_blockedReason?.Invoke()) || !_auth.CanUseOnline) return;
@@ -1341,6 +1421,7 @@ public sealed class RoomManager : IDisposable
                     Log.Warn($"点击上报被拒绝 c={code} pending={pendingAfter} base={baseAfter} consecutive={failures} nextRetrySeconds={nextRetry}", "clicks");
                 }
             }
+            SaveClickLedger();
             ClicksChanged?.Invoke();
         }
         finally
@@ -1393,8 +1474,10 @@ public sealed class RoomManager : IDisposable
     public void Dispose()
     {
         try { _auth.StateChanged -= OnAuthStateChanged; } catch { }
+        try { SaveClickLedger(); } catch { }
         _reportTimer?.Dispose();
         _reconnectTimer?.Dispose();
+        _clickLedgerTimer?.Dispose();
         _ = CloseSocketAsync();
     }
 }

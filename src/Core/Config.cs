@@ -19,6 +19,10 @@ public sealed class Settings
     public long RoleId { get; set; }
     public long CharacterAssetId { get; set; }
     public long AccessoryAssetId { get; set; }
+    /// <summary>主桌宠是否水平镜像；只翻转角色皮肤/头饰，底栏不变。</summary>
+    public bool MainMirrored { get; set; }
+    /// <summary>联机成员镜像状态：key = 成员 id。</summary>
+    public Dictionary<string, bool> MemberMirrored { get; set; } = new();
     public long[] EmoteAssetIds { get; set; } = new long[5];
     /// <summary>本地换装标记：为 true 时 user/me 不再覆盖角色/配件。</summary>
     public bool LocalAppearance { get; set; }
@@ -179,6 +183,8 @@ public sealed class Settings
     public bool RunAsAdmin { get; set; }
     /// <summary>游戏模式规则：检测到这些进程启动时自动开启鼠标穿透；进程退出后恢复。</summary>
     public string[] GameModeRules { get; set; } = Array.Empty<string>();
+    /// <summary>检测到前台窗口全屏时自动开启鼠标穿透；退出全屏后恢复。</summary>
+    public bool AutoGameModeOnFullscreen { get; set; } = true;
 
     [JsonIgnore] public int PetX { get; set; } = -1;
     [JsonIgnore] public int PetY { get; set; } = -1;

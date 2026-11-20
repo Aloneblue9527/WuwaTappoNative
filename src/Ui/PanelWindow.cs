@@ -717,6 +717,7 @@ public sealed class PanelWindow : Form
             launchAtLogin = AutoStart.IsEnabled,
             runAsAdmin = _app.Cfg.RunAsAdmin,
             gameModeRules = _app.Cfg.GameModeRules,
+            autoGameModeOnFullscreen = _app.Cfg.AutoGameModeOnFullscreen,
             isElevated = Elevation.IsElevated,
             roomNo = _app.Cfg.RoomNo,
             lastRoom = _app.Cfg.LastRoom,
@@ -1071,6 +1072,7 @@ public sealed class PanelWindow : Form
                 return new
                 {
                     accepted,
+                    pending = _app.Room.PendingClicks,
                     available = _app.Room.AvailableClicks,
                     total = _app.Room.DisplayClicks,
                     consume = _app.Room.ServerConsume,
@@ -1285,6 +1287,15 @@ public sealed class PanelWindow : Form
                 // 按成员 id 持久化；重启/重新进房后由 RoomManager 创建成员时恢复。
                 _app.Room.SetMemberVisible(memberId, !hide);
                 _app.Pet.BeginInvoke(new Action(() => _app.Pet.RefreshMembers()));
+                return _app.RoomState();
+            }
+
+            case "room.mirror":
+            {
+                long memberId = ApiClient.ReadLong(data["id"]);
+                bool mirrored = ApiClient.ReadBool(data["mirrored"]);
+                if (memberId == auth.UserId) _app.Pet.SetMainMirrored(mirrored);
+                else _app.Pet.SetMemberMirrored(memberId, mirrored);
                 return _app.RoomState();
             }
 
@@ -1633,6 +1644,9 @@ public sealed class PanelWindow : Form
                             cfg.GameModeRules = GameModeRules.Normalize(arr?.Select(x => ApiClient.ReadString(x)));
                             break;
                         }
+                        case "autoGameModeOnFullscreen":
+                            cfg.AutoGameModeOnFullscreen = ApiClient.ReadBool(kv.Value);
+                            break;
                         case "launchAtLogin":
                             cfg.LaunchAtLogin = AutoStart.Apply(ApiClient.ReadBool(kv.Value), cfg.RunAsAdmin);
                             break;

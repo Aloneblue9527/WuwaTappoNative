@@ -52,6 +52,7 @@ internal static class Program
             CheckBagFetchPolicy();
             CheckRetryBackoff();
             CheckChestCooldownPolicy();
+            CheckClickLedgerAndChestFixes();
             CheckLogRetention();
             CheckLegacyLogMigration();
             CheckSynthesisSnapshotSerialization();
@@ -59,6 +60,9 @@ internal static class Program
             CheckCatOrderScreenSelection();
             CheckPetMultiSelectBehavior();
             CheckRoomProtocol105();
+            CheckFullscreenGameMode();
+            CheckMirrorMode();
+            CheckPerfOptimizations();
             if (args.Length > 0 && File.Exists(args[0])) CheckExternalPresetFile(args[0]);
 
             Console.WriteLine($"PASS: {_checks} assertions.");
@@ -1973,6 +1977,42 @@ internal static class Program
         Console.WriteLine("PASS: chest 70006 cooldown is 30min floor, follows server timestamp and caps at 6h.");
     }
 
+    static void CheckClickLedgerAndChestFixes()
+    {
+        var ledger = new ClickLedger
+        {
+            Cuid = "ledger-test",
+            Region = "cn",
+            Cumulative = 1964128,
+            Pending = 10000,
+        };
+        ClickLedgerStore.Save(ledger);
+        var loaded = ClickLedgerStore.Load("ledger-test", "cn");
+        Assert(loaded.Cumulative == 1964128 && loaded.Pending == 10000,
+            "Click ledger must persist cumulative gross and pending clicks.");
+        var otherRegion = ClickLedgerStore.Load("ledger-test", "global");
+        Assert(otherRegion.Cumulative == 0 && otherRegion.Pending == 0,
+            "Click ledger must be isolated by region.");
+
+        string room = ReadRepoSource("src", "Net", "RoomManager.cs");
+        Assert(room.Contains("ClickLedgerStore", StringComparison.Ordinal)
+                && room.Contains("SaveClickLedger", StringComparison.Ordinal)
+                && room.Contains("PendingClicks", StringComparison.Ordinal),
+            "RoomManager must persist and expose the click ledger.");
+        Assert(room.Contains("_serverConsume = Math.Max(_serverConsume, consume)", StringComparison.Ordinal),
+            "Server click consume must be monotonic so late user/me cannot roll back a chest.");
+        string app = ReadRepoSource("src", "App.cs");
+        Assert(app.Contains("IsChestCooling", StringComparison.Ordinal)
+                && app.Contains("consume <= 0", StringComparison.Ordinal),
+            "Manual chest opens must check local cooldown and reject invalid click_consume.");
+        string auth = ReadRepoSource("src", "Net", "AuthService.cs");
+        Assert(auth.Contains("ServerNowMs + 30L * 60 * 1000", StringComparison.Ordinal)
+                && auth.Contains("MergeChestTimestamps", StringComparison.Ordinal),
+            "Chest timestamps must start a 30min local cooldown and merge monotonically.");
+
+        Console.WriteLine("PASS: click ledger persistence, monotonic consume and chest cooldown guards.");
+    }
+
     /// <summary>
     /// 日志保留：7 个自然日内（含今天）保留，8/15 天前删除，当前文件永不删除。
     /// 使用临时目录，绝不触碰真实 %LOCALAPPDATA%。
@@ -2394,6 +2434,105 @@ internal static class Program
     {
         Assert(delta.X == expectedX && delta.Y == expectedY,
             $"Group snap {description} expected ({expectedX},{expectedY}) but got ({delta.X},{delta.Y}).");
+    }
+
+    static void CheckFullscreenGameMode()
+    {
+        Assert(FullscreenDetector.Covers(0, 0, 1920, 1080, 0, 0, 1920, 1080),
+            "Exact monitor-sized window must be treated as fullscreen.");
+        Assert(FullscreenDetector.Covers(-4, -4, 1924, 1084, 0, 0, 1920, 1080),
+            "Borderless fullscreen overscan must be treated as fullscreen.");
+        Assert(!FullscreenDetector.Covers(0, 0, 1920, 1032, 0, 0, 1920, 1080),
+            "A maximized window above the taskbar must not be treated as fullscreen.");
+        Assert(!FullscreenDetector.Covers(100, 100, 1820, 980, 0, 0, 1920, 1080),
+            "A normal window must not be treated as fullscreen.");
+
+        string app = ReadRepoSource("src", "App.cs");
+        Assert(app.Contains("IsForegroundFullscreen", StringComparison.Ordinal)
+                && app.Contains("AutoGameModeOnFullscreen", StringComparison.Ordinal),
+            "App must combine foreground fullscreen detection with the auto game-mode setting.");
+        string config = ReadRepoSource("src", "Core", "Config.cs");
+        Assert(config.Contains("AutoGameModeOnFullscreen", StringComparison.Ordinal),
+            "Settings must persist autoGameModeOnFullscreen.");
+        string web = ReadRepoSource("wwwroot", "app.js");
+        Assert(web.Contains("autoGameModeOnFullscreen", StringComparison.Ordinal),
+            "Settings UI must expose autoGameModeOnFullscreen.");
+
+        Console.WriteLine("PASS: fullscreen game mode detection, setting default and UI wiring.");
+    }
+
+    static void CheckMirrorMode()
+    {
+        using var head = new Bitmap(10, 10);
+        using (var g = Graphics.FromImage(head))
+        {
+            g.Clear(Color.Red);
+            using var blue = new SolidBrush(Color.Blue);
+            g.FillRectangle(blue, 5, 0, 5, 10);
+        }
+        var frames = new PetFrames { Head1 = head };
+        var info = new PetComposer.Info { ShowBar = false };
+        using var normal = PetComposer.Compose(frames, 1, 1, new Size(PetComposer.WindowW, PetComposer.WindowH), info);
+        info.Mirror = true;
+        using var mirrored = PetComposer.Compose(frames, 1, 1, new Size(PetComposer.WindowW, PetComposer.WindowH), info);
+        Color normalLeft = normal.GetPixel(PetComposer.CatX + 50, PetComposer.CatY + 100);
+        Color normalRight = normal.GetPixel(PetComposer.CatX + 150, PetComposer.CatY + 100);
+        Color mirroredLeft = mirrored.GetPixel(PetComposer.CatX + 50, PetComposer.CatY + 100);
+        Color mirroredRight = mirrored.GetPixel(PetComposer.CatX + 150, PetComposer.CatY + 100);
+        Assert(normalLeft.R > normalRight.R && mirroredLeft.R < mirroredRight.R,
+            "Mirror must flip the character layer horizontally.");
+
+        string config = ReadRepoSource("src", "Core", "Config.cs");
+        Assert(config.Contains("MainMirrored", StringComparison.Ordinal)
+                && config.Contains("MemberMirrored", StringComparison.Ordinal),
+            "Mirror state must be persisted per main pet and member id.");
+        string composer = ReadRepoSource("src", "Pet", "PetComposer.cs");
+        Assert(composer.Contains("public bool Mirror", StringComparison.Ordinal)
+                && composer.Contains("ScaleTransform(-1, 1)", StringComparison.Ordinal),
+            "PetComposer must support character-only horizontal mirroring.");
+        string remote = ReadRepoSource("src", "Pet", "RemoteCatWindow.cs");
+        Assert(remote.Contains("SetMirrored", StringComparison.Ordinal)
+                && remote.Contains("_mirrored", StringComparison.Ordinal)
+                && remote.Contains("MirrorRequested", StringComparison.Ordinal)
+                && remote.Contains("镜像角色", StringComparison.Ordinal),
+            "RemoteCatWindow must support independent mirroring and a right-click mirror item.");
+        string petWindow = ReadRepoSource("src", "Pet", "PetWindow.cs");
+        Assert(petWindow.Contains("镜像角色", StringComparison.Ordinal)
+                && petWindow.Contains("_mirrorItem", StringComparison.Ordinal),
+            "Main pet context menu must expose the mirror toggle.");
+        string app = ReadRepoSource("src", "App.cs");
+        Assert(app.Contains("mirrored = Cfg.MainMirrored", StringComparison.Ordinal)
+                && app.Contains("IsMemberMirrored", StringComparison.Ordinal),
+            "RoomState must expose main/member mirror state.");
+        string panel = ReadRepoSource("src", "Ui", "PanelWindow.cs");
+        Assert(panel.Contains("room.mirror", StringComparison.Ordinal), "Panel must handle room.mirror.");
+        string web = ReadRepoSource("wwwroot", "app.js");
+        Assert(web.Contains("data-mirror", StringComparison.Ordinal)
+                && web.Contains("room.mirror", StringComparison.Ordinal)
+                && web.Contains("m-role m-role-name", StringComparison.Ordinal),
+            "Room member actions must expose the mirror toggle and put role tags after the name.");
+        string css = ReadRepoSource("wwwroot", "style.css");
+        Assert(css.Contains(".member .m-role-name", StringComparison.Ordinal),
+            "Role tags after the name need their own compact spacing rule.");
+
+        Console.WriteLine("PASS: independent main/member mirror rendering, persistence and room UI.");
+    }
+
+    static void CheckPerfOptimizations()
+    {
+        string remote = ReadRepoSource("src", "Pet", "RemoteCatWindow.cs");
+        Assert(remote.Contains("_baseFrames", StringComparison.Ordinal)
+                && remote.Contains("bodyIndex", StringComparison.Ordinal),
+            "Remote cats must cache base frames per body frame instead of rebuilding on every action.");
+        string app = ReadRepoSource("src", "App.cs");
+        Assert(app.Contains("_clickRefreshBusy", StringComparison.Ordinal)
+                && app.Contains("_clickRefreshBackoff", StringComparison.Ordinal),
+            "Click refresh must be single-flight with failure backoff.");
+        string pet = ReadRepoSource("src", "Pet", "PetWindow.cs");
+        Assert(pet.Contains("_zOrderRestackTimer?.Enabled == true", StringComparison.Ordinal)
+                && pet.Contains("ProcessNameCache", StringComparison.Ordinal),
+            "Z-order watchdog must skip queued restacks and process names must be cached.");
+        Console.WriteLine("PASS: remote body-frame cache, click refresh backoff and z-order watchdog guards.");
     }
 
     static void CheckRoomProtocol105()

@@ -39,6 +39,8 @@ public sealed class App : ApplicationContext
     System.Threading.Timer _autoBoostTimer;
     System.Threading.Timer _clickRefreshTimer;
     int _autoBoostBusy;
+    int _clickRefreshBusy;
+    readonly RetryBackoff _clickRefreshBackoff = new(new[] { 60, 120, 300, 600 });
     System.Threading.Timer _autoClickTimer;
     System.Threading.Timer _gameModeRuleTimer;
     System.Threading.Timer _compatibilityTimer;
@@ -46,6 +48,9 @@ public sealed class App : ApplicationContext
     readonly object _gameModeRuleGate = new();
     bool _gameModeRuleMatched;
     bool _gameModeRuleAuto;
+    long _gameModeProcessScanMs;
+    bool _gameModeProcessMatched;
+    string _gameModeProcessName;
     long _clickUserId;
     readonly object _autoEmoteGate = new();
     readonly Queue<long> _autoEmoteTimes = new();
@@ -209,7 +214,7 @@ public sealed class App : ApplicationContext
         _autoChestTimer = new System.Threading.Timer(_ => _ = AutoChestTickAsync(), null, 5000, 5000);
         // 网络恢复后最多 30 秒重新同步一次点击/宝箱等服务器状态。
         _clickRefreshTimer = new System.Threading.Timer(_ => _ = RefreshClicksAsync(), null, 30000, 30000);
-        _gameModeRuleTimer = new System.Threading.Timer(_ => CheckGameModeRules(), null, 1500, 2000);
+        _gameModeRuleTimer = new System.Threading.Timer(_ => CheckGameModeRules(), null, 1000, 1000);
         // 启动后异步读取 GitHub Pages 上的兼容状态，之后每 30 分钟刷新；失败不阻塞启动。
         _compatibilityTimer = new System.Threading.Timer(_ => _ = RefreshCompatibilityAsync(), null, 2500, 30 * 60 * 1000);
         // 公告独立拉取；只在设置页显示，失败静默忽略。
@@ -423,8 +428,11 @@ public sealed class App : ApplicationContext
     /// </summary>
     async Task RefreshClicksAsync()
     {
+        // 30 秒定时器遇到慢网络/TLS 故障时不能叠加请求；单飞 + 失败退避。
+        if (Interlocked.Exchange(ref _clickRefreshBusy, 1) == 1) return;
         try
         {
+            if (_clickRefreshBackoff.IsCoolingDown(Environment.TickCount64)) return;
             if (!Auth.HasToken) return;
             if (Auth.State == AuthState.NetworkUnknown)
             {
@@ -432,11 +440,22 @@ public sealed class App : ApplicationContext
             }
             if (!Auth.CanUseOnline) return;
             await Auth.MaybeRenewAsync();
-            if (!await Auth.RefreshClicksAsync(Auth.CaptureSession())) return;
+            bool ok = await Auth.RefreshClicksAsync(Auth.CaptureSession());
+            if (!ok)
+            {
+                _clickRefreshBackoff.RecordFailure(Environment.TickCount64);
+                return;
+            }
+            _clickRefreshBackoff.Reset();
             Pet.BeginInvoke(new Action(() => { Pet.RefreshHud(); }));
             try { if (Panel != null && Panel.IsHandleCreated) Panel.BeginInvoke(new Action(PushAuth)); } catch { }
         }
-        catch (Exception ex) { Log.Write("刷新点击数失败 " + ex.Message); }
+        catch (Exception ex)
+        {
+            int next = _clickRefreshBackoff.RecordFailure(Environment.TickCount64);
+            Log.Write($"刷新点击数失败（{next}s 后重试） {ex.Message}");
+        }
+        finally { Interlocked.Exchange(ref _clickRefreshBusy, 0); }
     }
 
     void ApplySkinTestArg()
@@ -555,23 +574,44 @@ public sealed class App : ApplicationContext
         try
         {
             string[] rules = Cfg.GameModeRules ?? Array.Empty<string>();
-            bool matched = false;
-            string matchedName = null;
-            if (rules.Length > 0)
+            long nowMs = Environment.TickCount64;
+            // 进程扫描比全屏检测贵；规则结果缓存 2 秒，全屏检测仍按 1 秒执行。
+            if (nowMs - _gameModeProcessScanMs >= 2000)
             {
-                foreach (var p in Process.GetProcesses())
+                _gameModeProcessScanMs = nowMs;
+                _gameModeProcessMatched = false;
+                _gameModeProcessName = null;
+                foreach (string rule in rules)
                 {
+                    Process[] processes = null;
                     try
                     {
-                        if (GameModeRules.Matches(p.ProcessName, rules))
-                        {
-                            matched = true;
-                            matchedName = p.ProcessName;
-                            break;
-                        }
+                        processes = Process.GetProcessesByName(rule);
+                        if (processes.Length == 0) continue;
+                        _gameModeProcessMatched = true;
+                        _gameModeProcessName = rule;
+                        break;
                     }
                     catch { }
-                    finally { p.Dispose(); }
+                    finally
+                    {
+                        if (processes != null)
+                            foreach (var process in processes) process.Dispose();
+                    }
+                }
+            }
+            bool matched = _gameModeProcessMatched;
+            string matchedName = _gameModeProcessName;
+
+            // 1.0.5 风格的全屏自动游戏模式：前台窗口完整覆盖所在显示器时也视为游戏模式。
+            if (Cfg.AutoGameModeOnFullscreen)
+            {
+                bool fullscreen = FullscreenDetector.IsForegroundFullscreen(out string fullscreenProcess);
+                if (fullscreen)
+                {
+                    matched = true;
+                    string label = string.IsNullOrEmpty(fullscreenProcess) ? "全屏应用" : "全屏:" + fullscreenProcess;
+                    matchedName = matchedName == null ? label : matchedName + " + " + label;
                 }
             }
 
@@ -589,7 +629,7 @@ public sealed class App : ApplicationContext
 
             if (becameMatched)
             {
-                Log.Write("游戏模式规则命中：" + (matchedName ?? "?"));
+                Log.Write("游戏模式自动开启：" + (matchedName ?? "?"));
                 Pet.BeginInvoke(new Action(() =>
                 {
                     if (Cfg.ClickThrough) return;
@@ -599,7 +639,7 @@ public sealed class App : ApplicationContext
             }
             else if (becameUnmatched && _gameModeRuleAuto)
             {
-                Log.Write("游戏模式规则进程已退出，恢复鼠标交互");
+                Log.Write("游戏模式条件结束，恢复鼠标交互");
                 Pet.BeginInvoke(new Action(() =>
                 {
                     if (!_gameModeRuleAuto) return;
@@ -769,6 +809,17 @@ public sealed class App : ApplicationContext
         }
     }
 
+    /// <summary>手动开箱和自动开箱共用的本地冷却检查，避免服务端冷却期内反复请求 70006。</summary>
+    bool IsChestCooling(string place, long serverNowMs)
+    {
+        bool left = string.Equals(place, "left", StringComparison.OrdinalIgnoreCase);
+        var next = left ? _nextLeftAttempt : _nextRightAttempt;
+        if (DateTime.UtcNow < next) return true;
+        string key = left ? "left_treasure_chest" : "right_treasure_chest";
+        long unlock = ApiClient.ReadLong(Auth.UserInfo?[key]);
+        return unlock > 0 && unlock > serverNowMs + 1000;
+    }
+
     /// <summary>开宝箱：手动点击桌宠锚点或自动领取都走这里。返回原始响应供面板弹奖励。</summary>
     public Task<System.Text.Json.Nodes.JsonNode> OpenChestAsync(string place, bool auto)
     {
@@ -782,6 +833,8 @@ public sealed class App : ApplicationContext
         string blocked = OnlineBlockedReason;
         if (!string.IsNullOrEmpty(blocked)) throw new ApiException(-1, blocked);
         if (!Auth.CanUseOnline) throw new ApiException(-1, Auth.PauseMessage);
+        if (IsChestCooling(place, session.ServerNowMs))
+            throw new ApiException(70006, "宝箱冷却中，请稍后再试");
         if (Interlocked.Exchange(ref _chestBusy, 1) == 1) throw new ApiException(-1, "正在领取宝箱，请稍候");
         try
         {
@@ -805,7 +858,13 @@ public sealed class App : ApplicationContext
 
                 try { resp = await request; }
                 catch (OperationCanceledException) when (Auth.CaptureSession() != session) { return null; }
-                consume = Math.Max(0, ApiClient.ReadLong(resp?["click_consume"]));
+                consume = ApiClient.ReadLong(resp?["click_consume"]);
+                if (consume <= 0)
+                {
+                    Log.Warn("开宝箱响应 click_consume 无效", "chest");
+                    _ = RefreshAfterChestAsync(session);
+                    throw new ApiException(-1, "开宝箱响应异常，请刷新后重试");
+                }
                 if (!Auth.TryUseSession(session, () =>
                 {
                     Room.CompleteChestClicks(sent, consume);
@@ -926,9 +985,7 @@ public sealed class App : ApplicationContext
         {
             if (Room.BoostLocalClicks(10000))
             {
-                // 补贴可能发生在开箱失败退避之后：清掉旧退避并立即再检查一次。
-                _nextLeftAttempt = DateTime.MinValue;
-                _nextRightAttempt = DateTime.MinValue;
+                // 补贴只增加本地待上报点击，不改变宝箱冷却；冷却中的箱子仍等冷却结束。
                 Log.Write("自动补贴点击 +10000");
                 if (Cfg.AutoChest) CheckAutoChestNow();
             }
@@ -1065,15 +1122,18 @@ public sealed class App : ApplicationContext
     public void PushRoom() => Panel?.Push("room", RoomState());
     public void PushCatalog() => Panel?.Push("catalog", new { skins = Catalog.Count("character_skin"), accessories = Catalog.Count("accessory"), emotes = Catalog.Count("emote") });
 
+    bool IsMemberMirrored(long id)
+        => Cfg.MemberMirrored != null && Cfg.MemberMirrored.TryGetValue(id.ToString(), out bool mirrored) && mirrored;
+
     public object RoomState()
     {
         var members = new System.Collections.Generic.List<object>();
         bool ownerRoomMatches = !string.IsNullOrEmpty(Cfg.OwnerRoomNo)
             && string.Equals(Cfg.OwnerRoomCuid, Auth.Cuid, StringComparison.Ordinal)
             && string.Equals(Cfg.OwnerRoomNo, Room.RoomNo, StringComparison.Ordinal);
-        members.Add(new { id = Auth.UserId, nickname = Auth.Nickname, owner = Room.SelfIsOwner || ownerRoomMatches, online = true, self = true, visible = true, skin = Cfg.CharacterAssetId, part = Cfg.AccessoryAssetId });
+        members.Add(new { id = Auth.UserId, nickname = Auth.Nickname, owner = Room.SelfIsOwner || ownerRoomMatches, online = true, self = true, visible = true, mirrored = Cfg.MainMirrored, skin = Cfg.CharacterAssetId, part = Cfg.AccessoryAssetId });
         foreach (var m in Room.Members.Values)
-            members.Add(new { id = m.Id, nickname = m.Nickname, owner = m.IsOwner, online = m.Online, self = false, visible = m.Visible, skin = m.RoleKey, part = m.PartKey });
+            members.Add(new { id = m.Id, nickname = m.Nickname, owner = m.IsOwner, online = m.Online, self = false, visible = m.Visible, mirrored = IsMemberMirrored(m.Id), skin = m.RoleKey, part = m.PartKey });
         return new
         {
             state = Room.State,

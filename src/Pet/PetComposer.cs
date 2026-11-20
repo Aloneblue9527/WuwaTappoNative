@@ -243,6 +243,8 @@ public static class PetComposer
         public long NowMs;
         public bool ShowChestLeft, ShowChestRight;
         public bool Selected;
+        /// <summary>只水平翻转角色皮肤/头饰，底栏、气泡和宝箱保持正方向。</summary>
+        public bool Mirror;
         /// <summary>是否绘制计数条/工具栏/手部压条；关闭时角色本体、宝箱、气泡和轮盘仍照常显示。</summary>
         public bool ShowBar = true;
         /// <summary>登录态异常时计数条统一显示“未登录”，不再显示点击数。</summary>
@@ -295,11 +297,11 @@ public static class PetComposer
         var cat = new Rectangle((int)Math.Round(CatX * s), (int)Math.Round(CatY * s), (int)Math.Round(CatSize * s), (int)Math.Round(CatSize * s));
         if (cache == null)
             DrawCharacter(g, s, head, body, f.Accessory, f.AccOffsetX + info.AccOffsetX, f.AccOffsetY + info.AccOffsetY,
-                info.AccScalePercent, info.AccRotationDegrees, cat);
+                info.AccScalePercent, info.AccRotationDegrees, cat, info.Mirror);
         else
             cache.DrawCharacter(g, bmp.Size, s, head, body, f.Accessory,
                 f.AccOffsetX + info.AccOffsetX, f.AccOffsetY + info.AccOffsetY,
-                info.AccScalePercent, info.AccRotationDegrees, cat);
+                info.AccScalePercent, info.AccRotationDegrees, cat, info.Mirror);
         if (info.Selected)
             DrawSelection(g, new RectangleF(cat.X, cat.Y, cat.Width, cat.Height), s);
 
@@ -317,7 +319,7 @@ public static class PetComposer
             if (info.ShowBar)
             {
                 DrawStrip(g, s, info, bmp.Height);
-                DrawHandsOverStrip(g, s, body, cat, bmp.Height);
+                DrawHandsOverStrip(g, s, body, cat, bmp.Height, info.Mirror);
             }
         }
         else cache.DrawStrip(g, bmp.Size, s, info, body, cat);
@@ -335,38 +337,56 @@ public static class PetComposer
     }
 
     static void DrawCharacter(Graphics g, float s, Image head, Image body, Image accessory, double offsetX, double offsetY,
-        int scalePercent, int rotationDegrees, Rectangle cat)
+        int scalePercent, int rotationDegrees, Rectangle cat, bool mirror)
     {
-        if (head != null) g.DrawImage(head, cat);
-        if (body != null) g.DrawImage(body, cat);
-        if (accessory != null)
+        GraphicsState mirrorState = null;
+        try
         {
-            int ax = (int)Math.Round((CatX + offsetX) * s);
-            int ay = (int)Math.Round((CatY + offsetY) * s);
-            scalePercent = Math.Clamp(scalePercent <= 0 ? 100 : scalePercent,
-                AccessoryTransform.MinScalePercent, AccessoryTransform.MaxScalePercent);
-            rotationDegrees = Math.Clamp(rotationDegrees,
-                AccessoryTransform.MinRotationDegrees, AccessoryTransform.MaxRotationDegrees);
-            if (scalePercent != 100 || rotationDegrees != 0)
+            if (mirror)
             {
-                // 只对头饰做围绕自身中心的缩放/旋转，头和身体保持原样。
-                var state = g.Save();
-                try
+                // 只翻转角色层；调用方在角色层之外绘制底栏、气泡和宝箱。
+                mirrorState = g.Save();
+                float cx = cat.X + cat.Width / 2f;
+                g.TranslateTransform(cx, 0);
+                g.ScaleTransform(-1, 1);
+                g.TranslateTransform(-cx, 0);
+            }
+
+            if (head != null) g.DrawImage(head, cat);
+            if (body != null) g.DrawImage(body, cat);
+            if (accessory != null)
+            {
+                int ax = (int)Math.Round((CatX + offsetX) * s);
+                int ay = (int)Math.Round((CatY + offsetY) * s);
+                scalePercent = Math.Clamp(scalePercent <= 0 ? 100 : scalePercent,
+                    AccessoryTransform.MinScalePercent, AccessoryTransform.MaxScalePercent);
+                rotationDegrees = Math.Clamp(rotationDegrees,
+                    AccessoryTransform.MinRotationDegrees, AccessoryTransform.MaxRotationDegrees);
+                if (scalePercent != 100 || rotationDegrees != 0)
                 {
-                    float cx = ax + cat.Width / 2f;
-                    float cy = ay + cat.Height / 2f;
-                    g.TranslateTransform(cx, cy);
-                    g.RotateTransform(rotationDegrees);
-                    g.ScaleTransform(scalePercent / 100f, scalePercent / 100f);
-                    g.TranslateTransform(-cx, -cy);
+                    // 只对头饰做围绕自身中心的缩放/旋转，头和身体保持原样。
+                    var state = g.Save();
+                    try
+                    {
+                        float cx = ax + cat.Width / 2f;
+                        float cy = ay + cat.Height / 2f;
+                        g.TranslateTransform(cx, cy);
+                        g.RotateTransform(rotationDegrees);
+                        g.ScaleTransform(scalePercent / 100f, scalePercent / 100f);
+                        g.TranslateTransform(-cx, -cy);
+                        g.DrawImage(accessory, ax, ay, cat.Width, cat.Height);
+                    }
+                    finally { g.Restore(state); }
+                }
+                else
+                {
                     g.DrawImage(accessory, ax, ay, cat.Width, cat.Height);
                 }
-                finally { g.Restore(state); }
             }
-            else
-            {
-                g.DrawImage(accessory, ax, ay, cat.Width, cat.Height);
-            }
+        }
+        finally
+        {
+            if (mirrorState != null) g.Restore(mirrorState);
         }
     }
 
@@ -374,20 +394,21 @@ public static class PetComposer
     internal sealed class FrameCache : IDisposable
     {
         Bitmap _character, _strip;
-        (Size Size, Image Head, Image Body, Image Accessory, double X, double Y, int ScalePercent, int RotationDegrees) _characterKey;
-        (Size Size, bool ShowBar, bool ShowLoggedOut, Image Body, long Clicks, bool KeyboardOn, Color BarColor, Color BarTextColor, Color BarAccentColor, Color BarAccentMutedColor, Color LoggedOutColor) _stripKey;
+        (Size Size, Image Head, Image Body, Image Accessory, double X, double Y, int ScalePercent, int RotationDegrees, bool Mirror) _characterKey;
+        (Size Size, bool ShowBar, bool ShowLoggedOut, Image Body, long Clicks, bool KeyboardOn, Color BarColor, Color BarTextColor, Color BarAccentColor, Color BarAccentMutedColor, Color LoggedOutColor, bool Mirror) _stripKey;
 
         internal void DrawCharacter(Graphics target, Size size, float scale, Image head, Image body, Image accessory,
-            double offsetX, double offsetY, int accessoryScalePercent, int accessoryRotationDegrees, Rectangle cat)
+            double offsetX, double offsetY, int accessoryScalePercent, int accessoryRotationDegrees, Rectangle cat,
+            bool mirror)
         {
-            var key = (size, head, body, accessory, offsetX, offsetY, accessoryScalePercent, accessoryRotationDegrees);
+            var key = (size, head, body, accessory, offsetX, offsetY, accessoryScalePercent, accessoryRotationDegrees, mirror);
             if (_character == null || _characterKey != key)
             {
                 Prepare(ref _character, size);
                 using var g = Graphics.FromImage(_character);
                 Configure(g);
                 PetComposer.DrawCharacter(g, scale, head, body, accessory, offsetX, offsetY,
-                    accessoryScalePercent, accessoryRotationDegrees, cat);
+                    accessoryScalePercent, accessoryRotationDegrees, cat, mirror);
                 _characterKey = key;
             }
             target.DrawImageUnscaled(_character, 0, 0);
@@ -395,7 +416,7 @@ public static class PetComposer
 
         internal void DrawStrip(Graphics target, Size size, float scale, Info info, Image body, Rectangle cat)
         {
-            var key = (size, info.ShowBar, info.ShowLoggedOut, body, info.Clicks, info.KeyboardOn, info.BarColor, info.BarTextColor, info.BarAccentColor, info.BarAccentMutedColor, info.LoggedOutColor);
+            var key = (size, info.ShowBar, info.ShowLoggedOut, body, info.Clicks, info.KeyboardOn, info.BarColor, info.BarTextColor, info.BarAccentColor, info.BarAccentMutedColor, info.LoggedOutColor, info.Mirror);
             if (_strip == null || _stripKey != key)
             {
                 Prepare(ref _strip, size);
@@ -405,7 +426,7 @@ public static class PetComposer
                     if (info.ShowBar)
                     {
                         PetComposer.DrawStrip(g, scale, info, size.Height);
-                        DrawHandsOverStrip(g, scale, body, cat, size.Height);
+                        DrawHandsOverStrip(g, scale, body, cat, size.Height, info.Mirror);
                     }
                 }
                 _stripKey = key;
@@ -546,7 +567,7 @@ public static class PetComposer
     }
 
     /// <summary>只把角色手部帧重新画在计数条/工具栏范围内，避免整只角色压到 HUD 上。</summary>
-    static void DrawHandsOverStrip(Graphics g, float s, Image body, Rectangle cat, int windowHeight)
+    static void DrawHandsOverStrip(Graphics g, float s, Image body, Rectangle cat, int windowHeight, bool mirror)
     {
         if (body == null) return;
         var counter = Scaled(CounterRect, s);
@@ -559,6 +580,13 @@ public static class PetComposer
         {
             using var clip = Rounded(bar, 16 * s);
             g.SetClip(clip, CombineMode.Intersect);
+            if (mirror)
+            {
+                float cx = cat.X + cat.Width / 2f;
+                g.TranslateTransform(cx, 0);
+                g.ScaleTransform(-1, 1);
+                g.TranslateTransform(-cx, 0);
+            }
             g.DrawImage(body, cat);
         }
         finally { g.Restore(state); }
