@@ -238,14 +238,14 @@ dotnet run --project tests/SqliteChecks/SqliteChecks.csproj -c Release
 需要 PowerShell 7 和 Inno Setup 6.7 或更高版本。
 
 ```powershell
-pwsh -File .\installer\build.ps1 -Version 0.3.3
+pwsh -File .\installer\build.ps1 -Version 0.3.4
 ```
 
 输出：
 
 ```text
-dist/WuwatappoNative-0.3.3-Setup.exe
-dist/WuwatappoNative-0.3.3-portable.zip
+dist/WuwatappoNative-0.3.4-Setup.exe
+dist/WuwatappoNative-0.3.4-portable.zip
 dist/WuwatappoTokenExtractor-1.1.2-x64.zip
 ```
 
