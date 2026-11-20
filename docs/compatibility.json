@@ -1,5 +1,6 @@
 {
   "schema": 1,
+  "messageLocked": true,
   "updatedAt": "2026-11-20T08:50:00Z",
   "status": "safe",
   "message": "官方客户端 1.0.5 为强制更新；Wuwatappo Native 0.3.5 已适配 1.0.5 联机协议，请使用 0.3.5 或更高版本，旧版本可能无法正常联机。",
@@ -10,11 +11,13 @@
   "official": {
     "cn": {
       "latest": "1.0.5",
-      "minOta": "1.0.5"
+      "minOta": "1.0.5",
+      "minOtaLocked": true
     },
     "global": {
       "latest": "1.0.5",
       "minOta": "1.0.5",
+      "minOtaLocked": true,
       "inheritCn": false
     }
   },

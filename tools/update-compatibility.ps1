@@ -16,6 +16,20 @@ function Get-OfficialVersion([string]$hostUrl, [string]$hostFile) {
     return $manifest
 }
 
+function Get-VersionKey([string]$value) {
+    $match = [regex]::Match(($value ?? "").Trim(), '^[vV]?(\d+)\.(\d+)\.(\d+)')
+    if (-not $match.Success) { return $null }
+    return [version]("{0}.{1}.{2}" -f $match.Groups[1].Value, $match.Groups[2].Value, $match.Groups[3].Value)
+}
+
+function Test-VersionGreater([string]$left, [string]$right) {
+    $a = Get-VersionKey $left
+    $b = Get-VersionKey $right
+    if ($null -eq $a) { return $false }
+    if ($null -eq $b) { return $true }
+    return $a -gt $b
+}
+
 $cn = Get-OfficialVersion "https://mc-wuwatappo.kurogames-global.com" "latest_host.json"
 $global = Get-OfficialVersion "https://wutheringwaves-wuwatappo.kurogames-global.com" "latest-global_host.json"
 
@@ -24,18 +38,24 @@ if ($json.official.cn.latest -ne $cn.version) {
     $json.official.cn.latest = $cn.version
     $changed = $true
 }
-if (-not [string]::IsNullOrWhiteSpace($cn.min_ota_client_version) -and
-    $json.official.cn.minOta -ne $cn.min_ota_client_version) {
-    $json.official.cn.minOta = $cn.min_ota_client_version
+# minOta 允许维护者用 minOtaLocked 固定（例如官方已强制 1.0.5，但清单仍写 1.0.0）；
+# 未锁定时也只允许向上提升，不能被较低的服务端值拉回去。
+$cnFloor = if ($cn.force_manual_download) { $cn.version } else { $cn.min_ota_client_version }
+if ($json.official.cn.minOtaLocked -ne $true -and
+    -not [string]::IsNullOrWhiteSpace($cnFloor) -and
+    (Test-VersionGreater $cnFloor $json.official.cn.minOta)) {
+    $json.official.cn.minOta = $cnFloor
     $changed = $true
 }
 if ($json.official.global.latest -ne $global.version) {
     $json.official.global.latest = $global.version
     $changed = $true
 }
-if (-not [string]::IsNullOrWhiteSpace($global.min_ota_client_version) -and
-    $json.official.global.minOta -ne $global.min_ota_client_version) {
-    $json.official.global.minOta = $global.min_ota_client_version
+$globalFloor = if ($global.force_manual_download) { $global.version } else { $global.min_ota_client_version }
+if ($json.official.global.minOtaLocked -ne $true -and
+    -not [string]::IsNullOrWhiteSpace($globalFloor) -and
+    (Test-VersionGreater $globalFloor $json.official.global.minOta)) {
+    $json.official.global.minOta = $globalFloor
     $changed = $true
 }
 if ($json.official.global.inheritCn -ne $false) {
@@ -54,6 +74,15 @@ $tested = if ([string]::IsNullOrWhiteSpace($json.protocol.testedOfficial)) {
 } else {
     $json.protocol.testedOfficial
 }
-$json.message = "官方客户端已更新至 $($cn.version)；当前协议验证基于 $tested，暂未发现破坏性变更。"
+if ($json.messageLocked -ne $true) {
+    $forced = [bool]$cn.force_manual_download -or [bool]$global.force_manual_download
+    if ($forced) {
+        $json.message = "官方客户端已强制更新至 $($cn.version)；当前协议验证基于 $tested，请使用已验证版本。"
+    } else {
+        $json.message = "官方客户端已更新至 $($cn.version)；当前协议验证基于 $tested，暂未发现破坏性变更。"
+    }
+} else {
+    Write-Host "messageLocked=true，保留手动维护的兼容性说明。"
+}
 $json | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding utf8
 Write-Host "Updated compatibility.json: cn=$($cn.version), global=$($global.version)"

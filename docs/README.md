@@ -9,7 +9,7 @@
 
 直接编辑 `compatibility.json` 并提交到 `main`，GitHub Pages 会自动更新；不需要发布新的 Native 版本。
 
-官方 `official.cn.latest` / `official.global.latest` 由 `.github/workflows/update-compatibility.yml` 每 6 小时从官方更新清单同步一次，用于状态页展示；客户端还会直接读取官方 `latest_host.json`，因此不依赖 Actions 的同步延迟。`native.latest`、`native.minSafe` 和兼容性状态仍由发布流程手动维护。
+官方 `official.cn.latest` / `official.global.latest` 由 `.github/workflows/update-compatibility.yml` 每 6 小时从官方更新清单同步一次，用于状态页展示；客户端还会直接读取官方 `latest_host.json`，因此不依赖 Actions 的同步延迟。`native.latest`、`native.minSafe` 和兼容性状态仍由发布流程手动维护。官方清单和人工判断不一致时，可用 `messageLocked` / `minOtaLocked` 固定人工维护的值。
 
 常用字段：
 
@@ -17,6 +17,8 @@
 |---|---|
 | `status` | `safe` / `warning` / `unsafe` / `maintenance` |
 | `message` | 状态页和客户端显示的说明 |
+| `messageLocked` | 为 `true` 时，自动同步脚本不覆盖手动维护的 `message` |
+| `official.cn.minOtaLocked` / `official.global.minOtaLocked` | 为 `true` 时，自动同步脚本不覆盖该区服的 `minOta` |
 | `native.latest` | 当前已发布的最新 Native 版本，每次发版更新 |
 | `native.minSafe` | 仍兼容当前官方协议的最低版本；只在兼容基线变化时更新，不随普通修复版提升 |
 | `official.cn.latest` | 当前官方国服最新版本 |
