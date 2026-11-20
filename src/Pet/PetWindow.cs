@@ -56,6 +56,9 @@ public sealed class PetWindow : Form
     AnimationTimer _composeTimer;
     int _bodyFrame = 1, _headFrame = 1;
     bool _dragging, _moved;
+    // 本次左键手势是否从角色本体开始。底栏/轮盘/宝箱点击不会置位，
+    // OnMouseUp 据此跳过拖动收尾，避免沿用上一次拖动的 _moved/_dragOrigin。
+    bool _dragGesture;
     bool _handIsLeft;
     long _lastGeometryMs;
     // 高回报率鼠标每秒可产生上千条 WM_MOUSEMOVE；窗口移动按显示刷新节拍限频。
@@ -1133,11 +1136,41 @@ public sealed class PetWindow : Form
         return new HitZone(cat, counter, kb, menu, chest, chestReady);
     }
 
+    /// <summary>
+    /// 非拖动按下（底栏/轮盘/宝箱/空白）先清掉上一次拖动可能残留的状态，
+    /// 否则随后的 OnMouseUp 会拿旧的 _moved/_dragOrigin 把窗口挪走。
+    /// </summary>
+    void ResetDragGesture()
+    {
+        _dragGesture = false;
+        _dragging = false;
+        _moved = false;
+        _groupDragging = false;
+        _groupDragOrigins.Clear();
+        CancelPendingGroupDrag();
+    }
+
+    /// <summary>角色本体按下左键：本次 MouseUp 才允许执行贴边、保存位置和重叠重排。</summary>
+    void BeginDragGesture()
+    {
+        _dragGesture = true;
+        _dragging = true;
+        _moved = false;
+        _dragCursor = Cursor.Position;
+        _lastDragCursorX = _dragCursor.X;
+        _dragOrigin = Location;
+        _lastDragMoveMs = 0;
+        Capture = true;
+    }
+
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
         if (e.Button == MouseButtons.Right) { RefreshMenu(); _menu.Show(this, e.Location); return; }
         if (e.Button != MouseButtons.Left) return;
+
+        // 任何一次新的左键按下都从干净的拖动状态开始；只有命中角色本体才重新进入拖动手势。
+        ResetDragGesture();
 
         var zone = HitTest(e.Location);
 
@@ -1182,14 +1215,8 @@ public sealed class PetWindow : Form
             _multiSelectClickPending = true;
             _multiSelectClickId = SelfSelectionId;
             _multiSelectClickWasSelected = wasSelected;
-            _dragging = true;
-            _moved = false;
-            _dragCursor = Cursor.Position;
-            _lastDragCursorX = _dragCursor.X;
-            _dragOrigin = Location;
-            _lastDragMoveMs = 0;
-            Capture = true;
             BeginPendingGroupDrag(SelfSelectionId, Cursor.Position);
+            BeginDragGesture();
             return;
         }
 
@@ -1203,19 +1230,13 @@ public sealed class PetWindow : Form
         CancelHoverFadeForDrag();
         HandDown();
         Compose();
-        _dragging = true;
-        _moved = false;
-        _dragCursor = Cursor.Position;
-        _lastDragCursorX = _dragCursor.X;
-        _dragOrigin = Location;
-        _lastDragMoveMs = 0;
-        Capture = true;
+        BeginDragGesture();
     }
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
-        if (!_dragging)
+        if (!_dragging || !_dragGesture)
         {
             return;
         }
@@ -1308,11 +1329,17 @@ public sealed class PetWindow : Form
         if (e.Button == MouseButtons.Left)
         {
             Capture = false;
+            // 只有从角色本体开始的手势才允许拖动收尾。底栏/轮盘/宝箱/空白点击的
+            // OnMouseDown 已提前返回，这里必须直接结束，不能沿用上一次拖动的 _moved。
+            if (!_dragGesture) return;
+
             if (_groupDragPending && _groupDragPendingOwner == SelfSelectionId && !_groupDragging)
             {
                 // 死区内松手仍按 Ctrl+单击处理，不能因为 1~3px 抖动当成拖动。
                 CancelPendingGroupDrag();
                 _dragging = false;
+                _dragGesture = false;
+                _moved = false;
                 CompleteMultiSelectClick(false);
                 FlushPendingZOrderRestack();
                 return;
@@ -1322,10 +1349,13 @@ public sealed class PetWindow : Form
                 bool moved = _moved;
                 if (moved) UpdateGroupDrag(Cursor.Position, force: true);
                 _dragging = false;
+                _dragGesture = false;
+                _moved = false;
                 EndGroupDrag(moved);
                 return;
             }
-            if (_moved)
+            bool dragged = _moved;
+            if (dragged)
             {
                 // 8ms 节流可能丢掉最后一帧；松手前按当前光标补一次最终位置，避免落点偏移。
                 var finalTarget = new Point(
@@ -1337,12 +1367,17 @@ public sealed class PetWindow : Form
                 SetBody(1);
             }
             _dragging = false;
-            _cfg.PetX = Left;
-            _cfg.PetY = Top;
-            ConfigStore.Save(_cfg);
-            GeometryChanged?.Invoke();
-            if (!_cfg.AllowOverlap) ResolveOverlaps();
-            CompleteMultiSelectClick(_moved);
+            _dragGesture = false;
+            _moved = false;
+            if (dragged)
+            {
+                _cfg.PetX = Left;
+                _cfg.PetY = Top;
+                ConfigStore.Save(_cfg);
+                GeometryChanged?.Invoke();
+                if (!_cfg.AllowOverlap) ResolveOverlaps();
+            }
+            CompleteMultiSelectClick(dragged);
             FlushPendingZOrderRestack();
         }
     }

@@ -59,6 +59,7 @@ internal static class Program
             CheckPetZOrderGuard();
             CheckCatOrderScreenSelection();
             CheckPetMultiSelectBehavior();
+            CheckPetBarClickDragRegression();
             CheckRoomProtocol105();
             CheckFullscreenGameMode();
             CheckMirrorMode();
@@ -2428,6 +2429,47 @@ internal static class Program
             "SelectAllRemoteCats must use BuildCtrlASelection and never clear the main pet's selection.");
 
         Console.WriteLine("PASS: Ctrl multi-select (Ctrl+A preserves main selection, drag dead zone, group snapping, outside-click clear).");
+    }
+
+    /// <summary>
+    /// 底栏点击回归：底栏/轮盘/宝箱的 OnMouseDown 提前返回后，OnMouseUp 不能沿用上一次拖动的
+    /// _moved/_dragOrigin 执行贴边、保存或重叠重排。静态锁定显式拖动状态与守卫顺序。
+    /// </summary>
+    static void CheckPetBarClickDragRegression()
+    {
+        string pet = ReadRepoSource("src", "Pet", "PetWindow.cs");
+        Assert(pet.Contains("bool _dragGesture;", StringComparison.Ordinal),
+            "PetWindow must track whether the current left-button gesture started on the character.");
+        Assert(pet.Contains("void ResetDragGesture()", StringComparison.Ordinal) &&
+               pet.Contains("void BeginDragGesture()", StringComparison.Ordinal),
+            "PetWindow must reset stale drag state on non-drag presses and begin it only for character drags.");
+        Assert(Regex.IsMatch(pet, @"if\s*\(!_dragging\s*\|\|\s*!_dragGesture\)"),
+            "OnMouseMove must require both an active drag and a character-started gesture.");
+
+        string mouseDown = Regex.Match(pet,
+            @"protected\s+override\s+void\s+OnMouseDown\(MouseEventArgs\s+e\)[\s\S]*?\n    \}").Value;
+        Assert(mouseDown.Contains("ResetDragGesture();", StringComparison.Ordinal),
+            "OnMouseDown must clear the previous drag state before dispatching bar/chest/wheel clicks.");
+        Assert(Regex.Matches(mouseDown, @"BeginDragGesture\(\);").Count == 2,
+            "Only the Ctrl character branch and the plain character branch may begin a drag gesture.");
+
+        string mouseUp = Regex.Match(pet,
+            @"protected\s+override\s+void\s+OnMouseUp\(MouseEventArgs\s+e\)[\s\S]*?\n    \}").Value;
+        int guard = mouseUp.IndexOf("if (!_dragGesture) return;", StringComparison.Ordinal);
+        int snap = mouseUp.IndexOf("SnapToWorkingArea(Location, Cursor.Position)", StringComparison.Ordinal);
+        int saveX = mouseUp.IndexOf("_cfg.PetX = Left;", StringComparison.Ordinal);
+        int saveCfg = mouseUp.IndexOf("ConfigStore.Save(_cfg)", StringComparison.Ordinal);
+        int geometry = mouseUp.IndexOf("GeometryChanged?.Invoke();", StringComparison.Ordinal);
+        int overlaps = mouseUp.IndexOf("ResolveOverlaps();", StringComparison.Ordinal);
+        Assert(guard >= 0,
+            "OnMouseUp must return immediately when the gesture did not start on the character.");
+        Assert(snap > guard && saveX > guard && saveCfg > guard && geometry > guard && overlaps > guard,
+            "Snap/save/geometry/overlap finalization must run only after the explicit drag-gesture guard.");
+        Assert(Regex.IsMatch(mouseUp,
+                @"bool\s+dragged\s*=\s*_moved;[\s\S]*?if\s*\(dragged\)\s*\{[\s\S]*?SnapToWorkingArea\(Location,\s*Cursor\.Position\);[\s\S]*?if\s*\(dragged\)\s*\{[\s\S]*?_cfg\.PetX\s*=\s*Left;"),
+            "Position save must be gated by an actual moved drag, not by stale _moved.");
+
+        Console.WriteLine("PASS: bottom-bar clicks cannot inherit stale drag state; only real character drags snap/save/reflow.");
     }
 
     static void AssertSnap(Point delta, int expectedX, int expectedY, string description)
