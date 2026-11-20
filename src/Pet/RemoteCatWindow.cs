@@ -605,7 +605,9 @@ public sealed class RemoteCatWindow : Form
         get
         {
             var cp = base.CreateParams;
-            cp.Style = unchecked((int)0x80000000L) | 0x10000000;
+            // 不能把 WS_VISIBLE 写死：F9 隐藏后新建/重建句柄的远程窗口会在 CreateWindow
+            // 阶段直接显示。可见性交给 Show()/Hide() 和 Visible 属性控制。
+            cp.Style = (cp.Style & ~0x10000000) | unchecked((int)0x80000000L);
             cp.ExStyle = 0x00080000 | 0x00000080 | 0x08000000 | 0x00000008;
             if (_clickThrough) cp.ExStyle |= 0x00000020;
             if (!_topmost) cp.ExStyle &= ~0x00000008;

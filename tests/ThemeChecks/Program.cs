@@ -64,6 +64,7 @@ internal static class Program
             CheckFullscreenGameMode();
             CheckMirrorMode();
             CheckPerfOptimizations();
+            CheckHiddenMemberVisibility();
             if (args.Length > 0 && File.Exists(args[0])) CheckExternalPresetFile(args[0]);
 
             Console.WriteLine($"PASS: {_checks} assertions.");
@@ -2575,6 +2576,18 @@ internal static class Program
                 && pet.Contains("ProcessNameCache", StringComparison.Ordinal),
             "Z-order watchdog must skip queued restacks and process names must be cached.");
         Console.WriteLine("PASS: remote body-frame cache, click refresh backoff and z-order watchdog guards.");
+    }
+
+    static void CheckHiddenMemberVisibility()
+    {
+        string remote = ReadRepoSource("src", "Pet", "RemoteCatWindow.cs");
+        Assert(remote.Contains("cp.Style = (cp.Style & ~0x10000000)", StringComparison.Ordinal),
+            "Remote window creation must not force WS_VISIBLE; otherwise F9-hidden new members appear on handle creation.");
+        string pet = ReadRepoSource("src", "Pet", "PetWindow.cs");
+        Assert(pet.Contains("if (!_hiddenByHotkey)", StringComparison.Ordinal)
+                && pet.Contains("cat.Show();", StringComparison.Ordinal),
+            "New remote members must only be shown when F9 hidden mode is off.");
+        Console.WriteLine("PASS: F9-hidden mode blocks new and recreated remote windows from showing.");
     }
 
     static void CheckRoomProtocol105()
