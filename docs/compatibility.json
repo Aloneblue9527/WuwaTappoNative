@@ -1,20 +1,20 @@
 {
   "schema": 1,
-  "updatedAt": "2026-11-20T03:30:00Z",
+  "updatedAt": "2026-11-20T04:15:00Z",
   "status": "safe",
-  "message": "Wuwatappo Native 0.3.4 已发布；最低兼容版本为 0.1.3。官方客户端 1.0.5 为非强制更新，当前版本可继续使用。",
+  "message": "官方客户端 1.0.5 为强制更新；Wuwatappo Native 0.3.4 已适配 1.0.5 联机协议，请使用 0.3.4 或更高版本，旧版本可能无法正常联机。",
   "native": {
     "latest": "0.3.4",
-    "minSafe": "0.1.3"
+    "minSafe": "0.3.4"
   },
   "official": {
     "cn": {
       "latest": "1.0.5",
-      "minOta": "1.0.0"
+      "minOta": "1.0.5"
     },
     "global": {
       "latest": "1.0.5",
-      "minOta": "1.0.0",
+      "minOta": "1.0.5",
       "inheritCn": false
     }
   },
