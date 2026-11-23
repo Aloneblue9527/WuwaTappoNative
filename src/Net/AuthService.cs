@@ -44,7 +44,7 @@ public sealed class AuthService
     /// <summary>桌宠计数条是否切换为“未登录”。冲突与凭据失效都显示统一短文案。</summary>
     public bool ShowLoggedOutOnPet => !HasToken || _state == AuthState.Invalid || _state == AuthState.Conflict;
     public AuthState State { get { lock (_stateGate) return _state; } }
-    public string StateMessage { get { lock (_stateGate) return _stateMessage; } }
+    public string StateMessage { get { lock (_stateGate) return TranslateStateMessage(_stateMessage); } }
     public long LastCheckedAtMs { get { lock (_stateGate) return _lastCheckedAtMs; } }
     public bool? LastProbeCredentialValid { get { lock (_stateGate) return _lastProbeCredentialValid; } }
     public string StateName => State switch
@@ -58,13 +58,33 @@ public sealed class AuthService
     };
     public string PauseMessage => State switch
     {
-        AuthState.LoggedOut => "未登录：请先登录账号。",
-        AuthState.Checking => "正在确认登录状态，请稍候。",
-        AuthState.Conflict => "账号功能已暂停：登录态正在其他客户端使用。",
-        AuthState.Invalid => "账号功能已暂停：当前登录凭据已失效。",
-        AuthState.NetworkUnknown => "网络不可用：暂时无法确认登录状态。",
-        _ => "账号功能已暂停。",
+        AuthState.LoggedOut => Localization.T("auth.pause.loggedOut", "未登录：请先登录账号。"),
+        AuthState.Checking => Localization.T("auth.pause.checking", "正在确认登录状态，请稍候。"),
+        AuthState.Conflict => Localization.T("auth.pause.conflict", "账号功能已暂停：登录态正在其他客户端使用。"),
+        AuthState.Invalid => Localization.T("auth.pause.invalid", "账号功能已暂停：当前登录凭据已失效。"),
+        AuthState.NetworkUnknown => Localization.T("auth.pause.network", "网络不可用：暂时无法确认登录状态。"),
+        _ => Localization.T("auth.pause.default", "账号功能已暂停。"),
     };
+
+    static string TranslateStateMessage(string message)
+    {
+        return message switch
+        {
+            "未登录：请先登录账号。" => Localization.T("auth.msg.loggedOut", message),
+            "正在确认登录状态…" => Localization.T("auth.msg.checking", message),
+            "正在确认登录状态，请稍候。" => Localization.T("auth.msg.checking", message),
+            "登录态正在其他客户端使用；正在确认登录凭据…" => Localization.T("auth.msg.conflictChecking", message),
+            "当前登录凭据已失效；请重新登录或重新继承官方登录。" => Localization.T("auth.msg.invalid", message),
+            "登录态正在其他客户端使用；网络暂时不可用，无法确认登录凭据。" => Localization.T("auth.msg.conflictNetwork", message),
+            "登录态正在其他客户端使用；账号功能已暂停，不会自动重新登录或重连。" => Localization.T("auth.msg.conflictPaused", message),
+            "服务器暂时拒绝请求，正在自动重试…" => Localization.T("auth.msg.forbidden", message),
+            "网络不可用，暂时无法确认登录状态。" => Localization.T("auth.msg.network", message),
+            "登录态正在其他客户端使用；服务器暂时拒绝请求，无法确认凭据。" => Localization.T("auth.msg.conflictForbidden", message),
+            "登录凭据有效；账号功能仍暂停，点击“重新连接”恢复。" => Localization.T("auth.msg.credentialValid", message),
+            "登录凭据已恢复有效；账号功能仍暂停，点击“重新连接”恢复。" => Localization.T("auth.msg.credentialRecovered", message),
+            _ => message,
+        };
+    }
     public long UserId => _cfg.UserId;
     public long PlayerId => _cfg.PlayerId > 0 ? _cfg.PlayerId : _cfg.UserId;
     public string Cuid => _cfg.Cuid;
@@ -86,6 +106,15 @@ public sealed class AuthService
         _state = string.IsNullOrEmpty(cfg.Token) ? AuthState.LoggedOut : AuthState.Checking;
         _stateMessage = string.IsNullOrEmpty(cfg.Token) ? "未登录：请先登录账号。" : "正在确认登录状态…";
         Api = CreateApi(Guid.NewGuid().ToString("N"), ApiClient.ResolveBaseUrl(cfg.ServerRegion), cfg.Token);
+        ApplyLocale(cfg.Locale);
+    }
+
+    public void ApplyLocale(string locale)
+    {
+        string header = locale == "en" ? "en-US,en;q=0.9"
+            : locale == "ja" ? "ja-JP,ja;q=0.9,en;q=0.8"
+            : "zh-CN,zh;q=0.9,en;q=0.8";
+        Api?.SetAcceptLanguage(header);
     }
 
     ApiClient CreateApi(string cid, string baseUrl, string token)
@@ -171,6 +200,7 @@ public sealed class AuthService
     {
         var previous = Api;
         Api = CreateApi(baseUrl == null ? previous.Cid : Guid.NewGuid().ToString("N"), baseUrl ?? previous.BaseUrl, token);
+        ApplyLocale(_cfg.Locale);
         _cfg.Token = token;
         _cfg.TokenExpireMs = expires;
         _cfg.UserId = 0;

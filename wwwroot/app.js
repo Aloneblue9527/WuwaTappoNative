@@ -37,6 +37,8 @@
   const RARITY_TEXT = { epic: '史诗', rare: '稀有', uncommon: '优良', common: '普通' };
   const RARITY_ORDER = { epic: 4, rare: 3, uncommon: 2, common: 1 };
   const TYPE_TEXT = { character_skin: '角色', accessory: '配件', emote: '表情' };
+  const rarityText = r => tr('rarity.' + r, RARITY_TEXT[r] || r);
+  const typeText = t => tr('type.' + t, TYPE_TEXT[t] || t);
 
   const state = {
     boot: null,
@@ -128,10 +130,10 @@
   }
 
   window.addEventListener('error', e => {
-    try { toast('脚本错误：' + (e.message || '未知'), 'err'); } catch { }
+    try { toast(tr('error.scriptError', '脚本错误：{error}', { error: e.message || tr('error.unknown', '未知') }), 'err'); } catch { }
   });
   window.addEventListener('unhandledrejection', e => {
-    try { toast('脚本异常：' + (e.reason?.message || e.reason || '未知'), 'err'); } catch { }
+    try { toast(tr('error.scriptUnhandled', '脚本异常：{error}', { error: e.reason?.message || e.reason || tr('error.unknown', '未知') }), 'err'); } catch { }
   });
 
   /* ---------------- 基础 UI ---------------- */
@@ -164,11 +166,11 @@
 
   function confirmOwnerRoomAction(message, onConfirm) {
     modal(`<div class="about">
-      <div class="about-title">房主房间提醒</div>
+      <div class="about-title">${tr('ownerRoom.title', '房主房间提醒')}</div>
       <div class="about-note about-note--warn"><p>${esc(message)}</p></div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
-        <button class="btn ghost" id="ownerRoomCancel">取消</button>
-        <button class="btn danger" id="ownerRoomContinue">仍然继续</button>
+        <button class="btn ghost" id="ownerRoomCancel">${tr('common.cancel', '取消')}</button>
+        <button class="btn danger" id="ownerRoomContinue">${tr('ownerRoom.continue', '仍然继续')}</button>
       </div>
     </div>`, host => {
       host.querySelector('#ownerRoomCancel').onclick = closeModal;
@@ -181,7 +183,7 @@
       <div class="about-title">${esc(title)}</div>
       <div class="about-note about-note--warn"><p>${esc(message)}</p></div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
-        <button class="btn ghost" id="roomActionCancel">取消</button>
+        <button class="btn ghost" id="roomActionCancel">${tr('common.cancel', '取消')}</button>
         <button class="btn danger" id="roomActionContinue">${esc(confirmText)}</button>
       </div>
     </div>`, host => {
@@ -224,12 +226,12 @@
   function authStatusText(a = authInfo()) {
     const stateName = a.state || (a.loggedIn ? 'valid' : 'loggedOut');
     switch (stateName) {
-      case 'checking': return '正在确认登录状态…';
-      case 'conflict': return a.credentialValid ? '凭据有效 · 账号功能仍暂停' : '未登录 · 登录态正在其他客户端使用';
-      case 'invalid': return a.credentialValid ? '凭据已恢复有效 · 账号功能仍暂停' : '未登录 · 当前登录凭据已失效';
-      case 'network': return a.stateMessage || '网络不可用，暂时无法确认登录状态';
-      case 'valid': return '正常';
-      default: return '未登录';
+      case 'checking': return tr('auth.checking', '正在确认登录状态…');
+      case 'conflict': return a.credentialValid ? tr('auth.conflictValid', '凭据有效 · 账号功能仍暂停') : tr('auth.conflict', '未登录 · 登录态正在其他客户端使用');
+      case 'invalid': return a.credentialValid ? tr('auth.invalidValid', '凭据已恢复有效 · 账号功能仍暂停') : tr('auth.invalid', '未登录 · 当前登录凭据已失效');
+      case 'network': return a.stateMessage || tr('auth.network', '网络不可用，暂时无法确认登录状态');
+      case 'valid': return tr('auth.valid', '正常');
+      default: return tr('auth.loggedOut', '未登录');
     }
   }
 
@@ -268,15 +270,15 @@
     const icon = locked
       ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>'
       : '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 7.2-2.2"/></svg>';
-    return `<button type="button" class="card-lock ${locked ? 'locked' : ''} ${extra}" data-lock-type="${esc(type)}" data-lock-id="${Number(id)}" title="${locked ? '解除锁定' : '锁定，避免消耗最后一份'}">${icon}</button>`;
+    return `<button type="button" class="card-lock ${locked ? 'locked' : ''} ${extra}" data-lock-type="${esc(type)}" data-lock-id="${Number(id)}" title="${locked ? tr('bag.unlock', '解除锁定') : tr('bag.lock', '锁定，避免消耗最后一份')}">${icon}</button>`;
   }
   function showAdvancedSynthWarning() {
     modal(`<div class="about">
-      <div class="about-title">高级合成警告</div>
-      <div class="about-note about-note--warn"><p>此功能允许你使用所有库存物品进行合成，请务必看清后使用， 这将会损失你已解锁的图鉴！！！！每次重新打开操作面板后都会自动关闭，需要重新输入隐藏指令。</p></div>
+      <div class="about-title">${tr('synth.advancedTitle', '高级合成警告')}</div>
+      <div class="about-note about-note--warn"><p>${tr('synth.advancedFirstBody', '此功能允许你使用所有库存物品进行合成，请务必看清后使用， 这将会损失你已解锁的图鉴！！！！每次重新打开操作面板后都会自动关闭，需要重新输入隐藏指令。')}</p></div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
-        <button class="btn ghost" id="synthUnlockCancel">取消</button>
-        <button class="btn danger" id="synthUnlockOk">我已知晓并解锁</button>
+        <button class="btn ghost" id="synthUnlockCancel">${tr('common.cancel', '取消')}</button>
+        <button class="btn danger" id="synthUnlockOk">${tr('synth.unlock', '我已知晓并解锁')}</button>
       </div>
     </div>`, host => {
       host.querySelector('#synthUnlockCancel').onclick = closeModal;
@@ -289,7 +291,7 @@
           state.synthPanelVisible = true;
           renderChrome();
           if (state.page === 'synth') renderSynth();
-          toast('高级合成已解锁');
+          toast(tr('synth.unlocked', '高级合成已解锁'));
         } catch { }
       };
     });
@@ -299,11 +301,11 @@
   function confirmAdvancedSynthEnable(onConfirm) {
     const cancel = () => { closeModal(); renderSynth(); };
     modal(`<div class="about">
-      <div class="about-title">高级合成警告</div>
-      <div class="about-note about-note--warn"><p>开启后，任意物品合成会消耗你已解锁的图鉴，可能造成不可恢复的损失。每次实际合成前仍会再确认一次。</p></div>
+      <div class="about-title">${tr('synth.advancedTitle', '高级合成警告')}</div>
+      <div class="about-note about-note--warn"><p>${tr('synth.advancedEnableBody', '开启后，任意物品合成会消耗你已解锁的图鉴，可能造成不可恢复的损失。每次实际合成前仍会再确认一次。')}</p></div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
-        <button class="btn ghost" id="synthEnableCancel">取消</button>
-        <button class="btn danger" id="synthEnableOk">仍要开启</button>
+        <button class="btn ghost" id="synthEnableCancel">${tr('common.cancel', '取消')}</button>
+        <button class="btn danger" id="synthEnableOk">${tr('synth.stillEnable', '仍要开启')}</button>
       </div>
     </div>`, host => {
       host.onclick = e => { if (e.target === host) cancel(); };
@@ -343,7 +345,7 @@
     document.body.classList.toggle('panel-maximized', maximized);
     const btn = document.getElementById('maxBtn');
     if (btn) {
-      const label = maximized ? '还原' : '最大化';
+      const label = maximized ? tr('common.restore', '还原') : tr('common.maximize', '最大化');
       btn.title = label;
       btn.setAttribute('aria-label', label);
     }
@@ -465,12 +467,12 @@
     try { recent = JSON.parse(localStorage.getItem(recentKey) || '[]') || []; } catch { recent = []; }
     recent = recent.filter(c => /^#[0-9a-f]{6}$/i.test(String(c))).slice(0, 8);
     const recentHtml = recent.length
-      ? `<div class="color-recent-label">最近使用</div><div class="color-presets color-recent">${recent.map(c => `<button type="button" class="color-preset" data-cp-color="${c}" style="background:${c}" title="${c}"></button>`).join('')}</div>`
+      ? `<div class="color-recent-label">${tr('color.recent', '最近使用')}</div><div class="color-presets color-recent">${recent.map(c => `<button type="button" class="color-preset" data-cp-color="${c}" style="background:${c}" title="${c}"></button>`).join('')}</div>`
       : '';
     modal(`<div class="color-picker-dialog">
-      <div class="color-picker-title">选择颜色</div>
-      <div class="color-sv" id="cpSV" title="拖动选择饱和度和明度"><span class="color-sv-cursor" id="cpCursor"></span></div>
-      <label class="color-hue-row"><span>色相</span><input type="range" id="cpHue" min="0" max="360" step="1" /><output id="cpHueV"></output></label>
+      <div class="color-picker-title">${tr('color.title', '选择颜色')}</div>
+      <div class="color-sv" id="cpSV" title="${tr('color.svTitle', '拖动选择饱和度和明度')}"><span class="color-sv-cursor" id="cpCursor"></span></div>
+      <label class="color-hue-row"><span>${tr('color.hue', '色相')}</span><input type="range" id="cpHue" min="0" max="360" step="1" /><output id="cpHueV"></output></label>
       <div class="color-picker-preview-row">
         <span class="color-picker-preview" id="cpPreview"></span>
         <input class="input color-hex-input" id="cpHex" maxlength="7" value="${value}" />
@@ -483,8 +485,8 @@
         <label class="color-slider-row"><span>B</span><input type="range" id="cpB" min="0" max="255" step="1" /><output id="cpBV"></output></label>
       </div>
       <div class="color-picker-actions">
-        <button class="btn ghost" id="cpCancel">取消</button>
-        <button class="btn" id="cpOk">确定</button>
+        <button class="btn ghost" id="cpCancel">${tr('common.cancel', '取消')}</button>
+        <button class="btn" id="cpOk">${tr('common.confirm', '确定')}</button>
       </div>
     </div>`, host => {
       // 点击遮罩关闭时也必须走取消回调，否则桌宠可能停在临时预览色上。
@@ -674,7 +676,7 @@
     const s = state.boot?.settings || {};
     const has = themeBackgroundIsSet(s);
     const status = document.getElementById('themeBgStatus');
-    if (status) status.textContent = has ? '已设置背景图' : '未设置';
+    if (status) status.textContent = has ? tr('settings.theme.bg.set', '已设置背景图') : tr('settings.theme.bg.unset', '未设置');
     const clear = document.getElementById('themeBgClear');
     if (clear) clear.disabled = !has;
     const extract = document.getElementById('themeExtract');
@@ -1221,7 +1223,7 @@
       maybeShowDisclaimer();
       maybeShowUacPrompt();
       maybeOpenEmoteEditor();
-    } catch (e) { toast('初始化失败：' + e.message, 'err'); }
+    } catch (e) { toast(tr('error.initFailed', '初始化失败：{error}', { error: e.message }), 'err'); }
   }
 
   function disclaimerText() {
@@ -1264,15 +1266,15 @@
     state.uacPromptOpen = true;
     modal(`
       <div class="about">
-        <div class="about-title">管理员权限（UAC）</div>
+        <div class="about-title">${tr('uac.title', '管理员权限（UAC）')}</div>
         <div class="about-note">
-          <p>是否授予该应用管理员 UAC 权限？</p>
-          <p>标准权限无法监听其他 UAC 程序的输入。本程序只把管理员权限用于触发键位，不会有任何敏感操作、上传键盘内容等行为；可自行使用 AI 等工具审查源代码。</p>
-          <p>如不授予，可能会影响部分程序内的键位统计，其他功能不受影响。</p>
+          <p>${tr('uac.question', '是否授予该应用管理员 UAC 权限？')}</p>
+          <p>${tr('uac.body1', '标准权限无法监听其他 UAC 程序的输入。本程序只把管理员权限用于触发键位，不会有任何敏感操作、上传键盘内容等行为；可自行使用 AI 等工具审查源代码。')}</p>
+          <p>${tr('uac.body2', '如不授予，可能会影响部分程序内的键位统计，其他功能不受影响。')}</p>
         </div>
         <div style="display:flex;gap:10px;justify-content:center">
-          <button class="btn" id="mUacYes">是</button>
-          <button class="btn ghost" id="mUacNo">否</button>
+          <button class="btn" id="mUacYes">${tr('common.yes', '是')}</button>
+          <button class="btn ghost" id="mUacNo">${tr('common.no', '否')}</button>
         </div>
       </div>`, host => {
       host.onclick = null;
@@ -1287,7 +1289,7 @@
       };
       yes.onclick = async () => {
         yes.disabled = true; no.disabled = true;
-        yes.textContent = '正在请求…';
+        yes.textContent = tr('uac.requesting', '正在请求…');
         try {
           const r = await call('ui.uacPromptResult', { granted: true });
           state.uacPromptOpen = false;
@@ -1296,19 +1298,19 @@
             if (state.boot.settings) state.boot.settings.runAsAdmin = !!r?.granted;
           }
           closeModal();
-          if (r?.restarting) toast('已授予管理员权限，正在重启…');
-          else if (r?.cancelled) toast('已取消 UAC，继续使用普通权限；可随时在设置中开启', 'err');
-          else if (r?.elevated) toast('已启用管理员权限启动');
+          if (r?.restarting) toast(tr('uac.grantedRestarting', '已授予管理员权限，正在重启…'));
+          else if (r?.cancelled) toast(tr('uac.cancelled', '已取消 UAC，继续使用普通权限；可随时在设置中开启'), 'err');
+          else if (r?.elevated) toast(tr('uac.elevated', '已启用管理员权限启动'));
         } catch {
           yes.disabled = false; no.disabled = false;
-          yes.textContent = '是';
-          toast('请求管理员权限失败', 'err');
+          yes.textContent = tr('common.yes', '是');
+          toast(tr('uac.requestFailed', '请求管理员权限失败'), 'err');
         }
       };
       no.onclick = () => {
         if (state.boot?.settings) state.boot.settings.runAsAdmin = false;
         finish(false);
-        toast('已跳过管理员权限；可随时在设置中开启');
+        toast(tr('uac.skipped', '已跳过管理员权限；可随时在设置中开启'));
       };
     });
   }
@@ -1395,27 +1397,27 @@
       .map(a => a?.id == null ? '' : String(a.id))
       .filter(Boolean));
     const metaOf = {
-      info: { label: '公告', icon: 'i' },
-      warning: { label: '注意', icon: '!' },
-      critical: { label: '重要', icon: '!' }
+      info: { label: tr('ann.info', '公告'), icon: 'i' },
+      warning: { label: tr('ann.warning', '注意'), icon: '!' },
+      critical: { label: tr('ann.critical', '重要'), icon: '!' }
     };
     const items = list.map(a => {
       const severity = announcementSeverity(a);
       const meta = metaOf[severity];
       const dateText = announcementDateText(a.publishedAt);
       const action = a.action && a.action.url
-        ? `<div class="announcement-history-actions"><a class="btn ghost" href="${esc(a.action.url)}" target="_blank" rel="noreferrer">${esc(a.action.label || '查看详情')}</a></div>`
+        ? `<div class="announcement-history-actions"><a class="btn ghost" href="${esc(a.action.url)}" target="_blank" rel="noreferrer">${esc(a.action.label || tr('ann.viewDetails', '查看详情'))}</a></div>`
         : '';
       const unread = a.id != null && readIds.has(String(a.id))
-        ? '<span class="announcement-history-unread">未读</span>'
+        ? `<span class="announcement-history-unread">${tr('ann.unread', '未读')}</span>`
         : '';
       return `<article class="announcement-history-item ${severity}" data-ann-id="${esc(a.id)}">
         <div class="announcement-history-meta">
           <span class="announcement-history-badge"><span>${meta.icon}</span>${meta.label}</span>
-          <time class="announcement-history-date"${dateText ? ` datetime="${dateText}"` : ''}>${dateText || '时间未知'}</time>
+          <time class="announcement-history-date"${dateText ? ` datetime="${dateText}"` : ''}>${dateText || tr('ann.timeUnknown', '时间未知')}</time>
           ${unread}
         </div>
-        <div class="announcement-history-title">${esc(a.title || '公告')}</div>
+        <div class="announcement-history-title">${esc(a.title || tr('ann.fallbackTitle', '公告'))}</div>
         <div class="announcement-history-body">${esc(a.body || '')}</div>
         ${action}
       </article>`;
@@ -1424,17 +1426,17 @@
       ? `<div class="announcement-history-list">${items}</div>`
       : `<div class="announcement-history-empty">
           <div class="announcement-history-empty-mark">i</div>
-          <div class="announcement-history-empty-title">暂无公告历史</div>
-          <div class="announcement-history-empty-sub">服务器当前没有可显示的公告。</div>
+          <div class="announcement-history-empty-title">${tr('ann.emptyTitle', '暂无公告历史')}</div>
+          <div class="announcement-history-empty-sub">${tr('ann.emptySub', '服务器当前没有可显示的公告。')}</div>
         </div>`;
     modal(`
       <div class="about announcement-history">
         <div class="announcement-history-head">
-          <div class="about-title">公告历史</div>
-          <div class="announcement-history-sub">${list.length ? `共 ${list.length} 条 · 最新发布在前` : '按发布时间从新到旧排列'}</div>
+          <div class="about-title">${tr('ann.historyTitle', '公告历史')}</div>
+          <div class="announcement-history-sub">${list.length ? tr('ann.historyCount', '共 {count} 条 · 最新发布在前', { count: list.length }) : tr('ann.historyOrder', '按发布时间从新到旧排列')}</div>
         </div>
         ${body}
-        <button class="btn ghost" id="mCloseAnnouncementHistory" style="align-self:center;min-width:120px">关闭</button>
+        <button class="btn ghost" id="mCloseAnnouncementHistory" style="align-self:center;min-width:120px">${tr('common.close', '关闭')}</button>
       </div>`, host => {
       host.querySelector('.modal')?.classList.add('announcement-history-modal');
       host.querySelector('#mCloseAnnouncementHistory').onclick = closeModal;
@@ -1444,15 +1446,15 @@
   function showInheritLogin() {
     modal(`
       <div class="about">
-        <div class="about-title">继承官方程序登录状态</div>
+        <div class="about-title">${tr('inherit.title', '继承官方程序登录状态')}</div>
         <div class="about-note about-note--warn">
-          <p>建议在获取前先关闭本家程序的开机自动启动，以免下次开机因为 token 冲突导致掉线。</p>
-          <p>继续后会读取本机官方 WuwaTappo 客户端的登录数据；如果官方客户端正在运行，会被关闭。读取到的登录凭据只会发送给库洛官方服务器用于换取登录 token，不会发送到其他地址。</p>
-          <p>如果当前已经登录了其他账号，会被官方客户端的账号替换。请确认官方客户端已经在当前 Windows 用户下登录过一次。</p>
+          <p>${tr('inherit.tip1', '建议在获取前先关闭本家程序的开机自动启动，以免下次开机因为 token 冲突导致掉线。')}</p>
+          <p>${tr('inherit.tip2', '继续后会读取本机官方 WuwaTappo 客户端的登录数据；如果官方客户端正在运行，会被关闭。读取到的登录凭据只会发送给库洛官方服务器用于换取登录 token，不会发送到其他地址。')}</p>
+          <p>${tr('inherit.tip3', '如果当前已经登录了其他账号，会被官方客户端的账号替换。请确认官方客户端已经在当前 Windows 用户下登录过一次。')}</p>
         </div>
         <div style="display:flex;gap:10px;justify-content:center">
-          <button class="btn ghost" id="inheritCancel">取消</button>
-          <button class="btn" id="inheritGo">开始继承</button>
+          <button class="btn ghost" id="inheritCancel">${tr('common.cancel', '取消')}</button>
+          <button class="btn" id="inheritGo">${tr('inherit.start', '开始继承')}</button>
         </div>
       </div>`, host => {
       const cancel = host.querySelector('#inheritCancel');
@@ -1465,19 +1467,21 @@
         busy = true;
         cancel.disabled = true;
         go.disabled = true;
-        go.textContent = '正在读取…';
+        go.textContent = tr('inherit.reading', '正在读取…');
         try {
           const r = await tryCall('token.inherit');
           state.boot = await call('boot');
           closeModal();
           renderChrome();
           navigate('bag');
-          toast('已继承官方程序登录状态' + (r?.nickname ? '：' + r.nickname : ''));
+          toast(r?.nickname
+            ? tr('inherit.successNick', '已继承官方程序登录状态：{nick}', { nick: r.nickname })
+            : tr('inherit.success', '已继承官方程序登录状态'));
         } catch {
           busy = false;
           cancel.disabled = false;
           go.disabled = false;
-          go.textContent = '开始继承';
+          go.textContent = tr('inherit.start', '开始继承');
         }
       };
     });
@@ -1583,9 +1587,9 @@
         if (data?.phase === 'done' || data?.phase === 'error' || data?.phase === 'cancelled') renderSettings();
         else updateDownloadStatusUi();
       } else if (data?.phase === 'done') {
-        toast('更新安装包下载完成');
+        toast(tr('toast.updateDownloaded', '更新安装包下载完成'));
       } else if (data?.phase === 'error') {
-        toast(data.message || '更新下载失败', 'err');
+        toast(data.message || tr('toast.updateDownloadFailed', '更新下载失败'), 'err');
       }
       return;
     }
@@ -1772,10 +1776,10 @@
 
   function authPausedTitle() {
     const s = authState();
-    if (s === 'checking') return '正在确认登录状态';
-    if (s === 'conflict') return '登录态正在其他客户端使用';
-    if (s === 'network') return '网络不可用';
-    return '账号功能已暂停';
+    if (s === 'checking') return tr('auth.pausedChecking', '正在确认登录状态');
+    if (s === 'conflict') return tr('auth.pausedConflict', '登录态正在其他客户端使用');
+    if (s === 'network') return tr('auth.pausedNetwork', '网络不可用');
+    return tr('auth.pausedAccount', '账号功能已暂停');
   }
 
   function renderAuthPaused() {
@@ -1783,13 +1787,13 @@
     const s = authState();
     const canReconnect = s === 'conflict';
     const actions = `
-      ${s !== 'checking' ? '<button class="btn ghost" data-auth-recheck>重新检测</button>' : ''}
-      ${canReconnect ? '<button class="btn" data-auth-reconnect>重新连接</button>' : ''}
-      <button class="btn ghost" data-auth-account>查看账号</button>`;
+      ${s !== 'checking' ? `<button class="btn ghost" data-auth-recheck>${tr('auth.recheck', '重新检测')}</button>` : ''}
+      ${canReconnect ? `<button class="btn" data-auth-reconnect>${tr('auth.reconnect', '重新连接')}</button>` : ''}
+      <button class="btn ghost" data-auth-account>${tr('auth.viewAccount', '查看账号')}</button>`;
     document.getElementById('pageHost').innerHTML = `<div class="login-wrap"><div class="login-card auth-paused-card">
       <h2>${esc(authPausedTitle())}</h2>
-      <div class="hint">${esc(a.message || a.stateMessage || '为避免影响其他客户端，账号相关功能已暂停。')}</div>
-      <div class="hint muted">桌宠、键盘、主题和本地设置不受影响。本程序不会自动重新登录或自动重连。</div>
+      <div class="hint">${esc(a.message || a.stateMessage || tr('auth.pausedDefault', '为避免影响其他客户端，账号相关功能已暂停。'))}</div>
+      <div class="hint muted">${tr('auth.pausedLocal', '桌宠、键盘、主题和本地设置不受影响。本程序不会自动重新登录或自动重连。')}</div>
       <div class="auth-paused-actions">${actions}</div>
     </div></div>`;
     bindAuthActions(document.getElementById('pageHost'));
@@ -1798,13 +1802,15 @@
   async function runAuthRecheck(button) {
     if (button?.disabled) return;
     const old = button?.textContent;
-    if (button) { button.disabled = true; button.textContent = '检测中…'; }
+    if (button) { button.disabled = true; button.textContent = tr('auth.rechecking', '检测中…'); }
     try {
       const boot = await call('auth.recheck');
       if (boot) handleEvent('boot', boot);
-      toast(authInfo().credentialValid === true ? '登录凭据有效，账号功能仍暂停' : '登录态检测完成');
+      toast(authInfo().credentialValid === true
+        ? tr('auth.recheckValid', '登录凭据有效，账号功能仍暂停')
+        : tr('auth.recheckDone', '登录态检测完成'));
     } catch (e) {
-      toast(e.message || '登录态检测失败', 'err');
+      toast(e.message || tr('auth.recheckFailed', '登录态检测失败'), 'err');
     } finally {
       if (button && document.body.contains(button)) { button.disabled = false; button.textContent = old; }
     }
@@ -1812,27 +1818,27 @@
 
   function openAuthReconnectConfirm() {
     modal(`<div class="about">
-      <div class="about-title">重新连接联机</div>
-      <div class="about-note about-note--warn"><p>重新连接会重新建立联机会话，可能使正在使用同一登录态的其他客户端下线。</p></div>
-      <div class="about-note"><p>只有确认要由本程序接管联机会话时才继续。桌宠和本地功能不会受影响。</p></div>
+      <div class="about-title">${tr('auth.reconnectTitle', '重新连接联机')}</div>
+      <div class="about-note about-note--warn"><p>${tr('auth.reconnectBody1', '重新连接会重新建立联机会话，可能使正在使用同一登录态的其他客户端下线。')}</p></div>
+      <div class="about-note"><p>${tr('auth.reconnectBody2', '只有确认要由本程序接管联机会话时才继续。桌宠和本地功能不会受影响。')}</p></div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
-        <button class="btn ghost" id="authReconnectCancel">取消</button>
-        <button class="btn danger" id="authReconnectGo">仍要重新连接</button>
+        <button class="btn ghost" id="authReconnectCancel">${tr('common.cancel', '取消')}</button>
+        <button class="btn danger" id="authReconnectGo">${tr('auth.reconnectConfirm', '仍要重新连接')}</button>
       </div>
     </div>`, host => {
       host.querySelector('#authReconnectCancel').onclick = closeModal;
       const go = host.querySelector('#authReconnectGo');
       go.onclick = async () => {
         go.disabled = true;
-        go.textContent = '正在连接…';
+        go.textContent = tr('auth.reconnecting', '正在连接…');
         try {
           const boot = await call('auth.reconnect');
           closeModal();
           if (boot) handleEvent('boot', boot);
-          toast('已重新连接联机');
+          toast(tr('auth.reconnected', '已重新连接联机'));
         } catch (e) {
           closeModal();
-          toast(e.message || '重新连接失败', 'err');
+          toast(e.message || tr('auth.reconnectFailed', '重新连接失败'), 'err');
         }
       };
     });
@@ -1872,7 +1878,7 @@
 
       ${isGlobal ? `
         <div class="hint" style="color:var(--text-sub,#888);line-height:1.6;margin-bottom:14px;background:rgba(0,0,0,0.03);padding:10px 12px;border-radius:6px;border:1px solid var(--border,#e0d4c3)">
-          <strong>${tr('login.globalHintTitle', '国际服提示：')}</strong>${tr('login.globalHint', '国际服不支持游戏内 UID 邮件验证码。请先在电脑上登录官方 WuwaTappo 国际服客户端，再点击下方按钮继承登录状态。')}
+          <strong>${tr('login.globalHintTitle', '国际服提示：')}</strong>${tr('login.globalHint', '国际服请使用浏览器验证登录。邮箱 / X / Google 已验证可用，其他方式未验证需要自测。也可使用下方按钮继承本机已登录的国际服官方客户端数据。')}
         </div>
 
         <button class="btn" id="loginWeb" style="margin-bottom:10px;width:100%">${tr('login.web', '使用官方网页登录（支持 Google / X 等）')}</button>
@@ -2085,7 +2091,12 @@
     return await fetchBagItems();
   }
 
-  const BAG_TABS = [['recent', '最近获得'], ['character_skin', '角色'], ['accessory', '配件'], ['emote', '表情']];
+  const BAG_TABS = [
+    ['recent', () => tr('bag.tab.recent', '最近获得')],
+    ['character_skin', () => tr('bag.tab.character', '角色')],
+    ['accessory', () => tr('bag.tab.accessory', '配件')],
+    ['emote', () => tr('bag.tab.emote', '表情')]
+  ];
   const BAG_TAB_COUNT = k => k === 'recent' ? (state.bagRecentIds || []).length : 0;
 
   function assetMeta(item) {
@@ -2101,20 +2112,26 @@
     }
     if ((item.type === 'emote' || !item.type) && name.startsWith('emote_')) {
       const n = String(item.name || '');
-      if (n.includes('阿布') || /^(?:angry|effort|happy|idle|pain|stunned|surprised|threaten|triumph)$/i.test(name.slice(6))) {
+      if (name.startsWith('emote_2000_') || /^(?:angry|effort|happy|idle|pain|stunned|surprised|threaten|triumph)$/i.test(name.slice(6))) {
         return { role: '2000', series: '' };
       }
     }
     return { role: '0', series: item.series || '' };
   }
-  function roleLabelOf(item) {
+  function roleLabelInfo(item) {
     const raw = String(item?.name || '').trim();
-    if (!raw || /^#?\d+$/.test(raw) || /^role_\d+/i.test(raw) || /^emote_\d+/i.test(raw)) {
+    const fallbackLabel = () => {
       const r = assetMeta(item).role;
-      return (!r || r === '0') ? '通用' : '角色 ' + (item?.roleId || r);
-    }
+      return (!r || r === '0')
+        ? { label: tr('role.generic', '通用'), fallback: true }
+        : { label: tr('role.prefix', '角色 ') + (item?.roleId || r), fallback: true };
+    };
+    if (!raw || /^#?\d+$/.test(raw) || /^role_\d+/i.test(raw) || /^emote_\d+/i.test(raw)) return fallbackLabel();
     const first = raw.split(/[・·]/)[0].trim();
-    return first || (assetMeta(item).role === '0' ? '通用' : '角色 ' + (item?.roleId || assetMeta(item).role));
+    return first ? { label: first, fallback: false } : fallbackLabel();
+  }
+  function roleLabelOf(item) {
+    return roleLabelInfo(item).label;
   }
   const RECENT_KEY = 'wn_recent_assets';
   const UNSEEN_KEY = 'wn_unseen_assets';
@@ -2280,8 +2297,8 @@
 
   async function renderBag() {
     if (pageAuthBlocked('bag')) return;
-    setPage(`<div class="loading">正在读取背包…</div>`);
-    try { await ensureBag(); } catch { setPage(`<div class="empty-state">背包读取失败</div>`); return; }
+    setPage(`<div class="loading">${tr('bag.loading', '正在读取背包…')}</div>`);
+    try { await ensureBag(); } catch { setPage(`<div class="empty-state">${tr('bag.loadFailed', '背包读取失败')}</div>`); return; }
     if (!state.bagNewReady) { refreshNewAssets(); state.bagNewReady = true; }
 
     const counts = { character_skin: 0, accessory: 0, emote: 0 };
@@ -2293,12 +2310,14 @@
 
     const seriesOptions = [...new Set(state.bag.filter(x => x.type === 'character_skin' && x.series).map(x => x.series))].sort((a, b) => String(a).localeCompare(String(b), 'zh'));
     const roleMap = new Map();
+    const roleFallback = new Map();
     state.bag.filter(x => x.type === tab).forEach(x => {
       const r = assetMeta(x).role;
       if (!r || r === '0') return;
-      const lbl = roleLabelOf(x);
-      if (!roleMap.has(r) || (roleMap.get(r).startsWith('角色 ') && !lbl.startsWith('角色 '))) {
-        roleMap.set(r, lbl || r);
+      const info = roleLabelInfo(x);
+      if (!roleMap.has(r) || (roleFallback.get(r) && !info.fallback)) {
+        roleMap.set(r, info.label || r);
+        roleFallback.set(r, info.fallback);
       }
     });
     const roleOptions = [...roleMap.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'zh'));
@@ -2307,21 +2326,21 @@
       <div class="bag-layout">
         <div class="bag-main">
           <div class="seg-tabs">
-            ${BAG_TABS.map(([k, label]) => `<button class="seg-tab ${tab === k ? 'active' : ''}" data-btab="${k}">${label} ${k === 'recent' ? BAG_TAB_COUNT(k) : (counts[k] || 0)}</button>`).join('')}
+            ${BAG_TABS.map(([k, label]) => `<button class="seg-tab ${tab === k ? 'active' : ''}" data-btab="${k}">${label()} ${k === 'recent' ? BAG_TAB_COUNT(k) : (counts[k] || 0)}</button>`).join('')}
           </div>
           <div class="filter-row">
-            ${isChar ? `<select class="select" id="bagSeries"><option value="">系列：全部</option>${seriesOptions.map(s => `<option value="${esc(s)}" ${state.bagSeries === s ? 'selected' : ''}>系列：${esc(s)}</option>`).join('')}</select>` : ''}
-            ${showRole ? `<select class="select" id="bagRole"><option value="">角色：全部</option>${roleOptions.map(([id, label]) => `<option value="${id}" ${state.bagRole === id ? 'selected' : ''}>角色：${esc(label)}</option>`).join('')}</select>` : ''}
+            ${isChar ? `<select class="select" id="bagSeries"><option value="">${tr('bag.seriesPrefix', '系列：')}${tr('common.all', '全部')}</option>${seriesOptions.map(s => `<option value="${esc(s)}" ${state.bagSeries === s ? 'selected' : ''}>${tr('bag.seriesPrefix', '系列：')}${esc(s)}</option>`).join('')}</select>` : ''}
+            ${showRole ? `<select class="select" id="bagRole"><option value="">${tr('bag.rolePrefix', '角色：')}${tr('common.all', '全部')}</option>${roleOptions.map(([id, label]) => `<option value="${id}" ${state.bagRole === id ? 'selected' : ''}>${tr('bag.rolePrefix', '角色：')}${esc(label)}</option>`).join('')}</select>` : ''}
             <select class="select" id="bagRarity">
-              <option value="">稀有度：全部</option>
-              ${['epic', 'rare', 'uncommon', 'common'].map(r => `<option value="${r}" ${state.bagRarity === r ? 'selected' : ''}>稀有度：${RARITY_TEXT[r]}</option>`).join('')}
+              <option value="">${tr('bag.rarityPrefix', '稀有度：')}${tr('common.all', '全部')}</option>
+              ${['epic', 'rare', 'uncommon', 'common'].map(r => `<option value="${r}" ${state.bagRarity === r ? 'selected' : ''}>${tr('bag.rarityPrefix', '稀有度：')}${rarityText(r)}</option>`).join('')}
             </select>
-            <input class="input" id="bagSearch" placeholder="搜索名称 / 系列" value="${esc(state.bagSearch)}" style="flex:1;min-width:160px" />
-            <button class="btn ghost" id="bagRefresh">刷新</button>
-            <button class="btn ghost" id="bagClearNew" ${state.bagNewIds.length ? '' : 'disabled'} title="只清除新物品红点，不清空最近获得记录">清除红点${state.bagNewIds.length ? ' (' + state.bagNewIds.length + ')' : ''}</button>
-            ${tab === 'recent' ? '<button class="btn ghost" id="bagClearRecent">清空记录</button>' : ''}
-            <button class="btn" id="bagSync">同步角色/配件</button>
-            ${tab === 'accessory' ? `<button class="btn ghost" id="bagRemoveAccessory" ${equippedAccessoryId ? '' : 'disabled'} title="从本地和云端摘除当前头饰">摘下头饰</button>` : ''}
+            <input class="input" id="bagSearch" placeholder="${tr('bag.searchPlaceholder', '搜索名称 / 系列')}" value="${esc(state.bagSearch)}" style="flex:1;min-width:160px" />
+            <button class="btn ghost" id="bagRefresh">${tr('bag.refresh', '刷新')}</button>
+            <button class="btn ghost" id="bagClearNew" ${state.bagNewIds.length ? '' : 'disabled'} title="${tr('bag.clearNewTitle', '只清除新物品红点，不清空最近获得记录')}">${tr('bag.clearNew', '清除红点')}${state.bagNewIds.length ? ' (' + state.bagNewIds.length + ')' : ''}</button>
+            ${tab === 'recent' ? `<button class="btn ghost" id="bagClearRecent">${tr('bag.clearRecent', '清空记录')}</button>` : ''}
+            <button class="btn" id="bagSync">${tr('bag.sync', '同步角色/配件')}</button>
+            ${tab === 'accessory' ? `<button class="btn ghost" id="bagRemoveAccessory" ${equippedAccessoryId ? '' : 'disabled'} title="${tr('bag.removeAccessoryTitle', '从本地和云端摘除当前头饰')}">${tr('bag.removeAccessory', '摘下头饰')}</button>` : ''}
           </div>
           <div class="bag-groups" id="bagGroups"></div>
         </div>
@@ -2344,12 +2363,12 @@
       saveUnseen([]);
       state.bagNewIds = [];
       renderBag();
-      toast('已清除所有新物品红点');
+      toast(tr('bag.clearNewDone', '已清除所有新物品红点'));
     });
     document.getElementById('bagClearRecent')?.addEventListener('click', () => {
       dismissNewAssets();
       renderBag();
-      toast('已清空最近获得记录');
+      toast(tr('bag.clearRecentDone', '已清空最近获得记录'));
     });
     document.getElementById('bagSync').onclick = async () => {
       try {
@@ -2358,11 +2377,11 @@
         renderChrome();
         renderBagDetail();
         const blocked = [];
-        if (r?.characterBlocked) blocked.push('角色');
-        if (r?.accessoryBlocked) blocked.push('头饰');
+        if (r?.characterBlocked) blocked.push(tr('type.character_skin', '角色'));
+        if (r?.accessoryBlocked) blocked.push(tr('type.accessory', '头饰'));
         toast(blocked.length
-          ? `已同步；未拥有的${blocked.join('、')}保留了云端内容`
-          : '角色/配件已同步到云端（表情栏仅本地）');
+          ? tr('bag.syncBlocked', '已同步；未拥有的{items}保留了云端内容', { items: blocked.join(tr('common.listSeparator', '、')) })
+          : tr('bag.synced', '角色/配件已同步到云端（表情栏仅本地）'));
       } catch { }
     };
     document.getElementById('bagRemoveAccessory')?.addEventListener('click', async () => {
@@ -2372,7 +2391,9 @@
         state.boot = await call('boot');
         renderChrome();
         renderBag();
-        toast(r?.characterBlocked ? '已摘下头饰；未拥有的角色保留了云端内容' : '已摘下头饰并同步云端');
+        toast(r?.characterBlocked
+          ? tr('bag.accessoryRemovedBlocked', '已摘下头饰；未拥有的角色保留了云端内容')
+          : tr('bag.accessoryRemoved', '已摘下头饰并同步云端'));
       } catch { }
     });
     renderBagList();
@@ -2410,7 +2431,7 @@
     if (!host) return;
     const items = bagListItems();
     if (!items.length) {
-      host.innerHTML = `<div class="empty-state">没有符合条件的收集物</div>`;
+      host.innerHTML = `<div class="empty-state">${tr('bag.empty', '没有符合条件的收集物')}</div>`;
       return;
     }
     if (state.bagTab === 'recent') {
@@ -2431,7 +2452,7 @@
     host.innerHTML = order.filter(r => groups.has(r)).map(r => {
       const list = groups.get(r);
       const hidden = state.bagHidden.has(r);
-      const title = r === 'favorites' ? '收藏' : (RARITY_TEXT[r] || r);
+      const title = r === 'favorites' ? tr('bag.favorites', '收藏') : (rarityText(r) || r);
       return `<section class="bag-group">
         <div class="bag-group-head" data-bgroup="${r}"><span>${title}</span><span class="count">${list.length}</span><span class="chev">${hidden ? '▸' : '▾'}</span></div>
         ${hidden ? '' : `<div class="bag-grid">${list.map(x => cardHtml(x, state.bagSelected?.id === x.id, true)).join('')}</div>`}
@@ -2501,13 +2522,13 @@
     const fav = state.favors.has(item.id) ? '★' : '☆';
     const isNew = (state.bagNewIds || []).includes(item.id);
     return `<div class="card ${selected ? 'selected' : ''}" data-id="${item.id}">
-      ${isNew ? '<span class="new-dot" title="最近获得"></span>' : ''}
-      ${withFav ? `<div class="fav" data-id="${item.id}" title="收藏">${fav}</div>` : ''}
+      ${isNew ? `<span class="new-dot" title="${tr('bag.newItem', '最近获得')}"></span>` : ''}
+      ${withFav ? `<div class="fav" data-id="${item.id}" title="${tr('bag.favorites', '收藏')}">${fav}</div>` : ''}
       ${lockButtonHtml(item.type, item.id)}
       ${img(item.thumb, 'thumb', item.name)}
       <div class="rarity-bar ${rarityClass(item.rarity)}"></div>
       <div class="name" title="${esc(item.name)}">${esc(item.name)}</div>
-      <div class="sub">${esc(item.series || TYPE_TEXT[item.type] || '')}</div>
+      <div class="sub">${esc(item.series || typeText(item.type) || '')}</div>
       ${item.quantity > 1 ? `<div class="qty">×${item.quantity}</div>` : ''}
     </div>`;
   }
@@ -2517,7 +2538,7 @@
   }
 
   function emoteUploadStatus(item) {
-    if (!item || item.type !== 'emote') return { canUpload: false, reason: '请选择表情' };
+    if (!item || item.type !== 'emote') return { canUpload: false, reason: tr('bag.reasonSelectEmote', '请选择表情') };
     const appearance = state.boot?.appearance || {};
     const charId = Number(appearance.characterAssetId || 0);
     const charOwned = (state.bag || []).some(x => x.type === 'character_skin' && Number(x.id) === charId);
@@ -2525,7 +2546,10 @@
     const emoteRole = Number(assetMeta(item).role || 0);
     const roleMatch = emoteRole <= 0 || emoteRole === 2000 || (currentRole > 0 && emoteRole === currentRole);
     const owned = (state.bag || []).some(x => x.type === 'emote' && Number(x.id) === Number(item.id));
-    const reason = !owned ? '未拥有该表情' : !charOwned ? '当前角色未拥有' : !roleMatch ? '表情属于其他角色' : '';
+    const reason = !owned ? tr('bag.reasonNotOwned', '未拥有该表情')
+      : !charOwned ? tr('bag.reasonCharNotOwned', '当前角色未拥有')
+      : !roleMatch ? tr('bag.reasonRoleMismatch', '表情属于其他角色')
+      : '';
     return { canUpload: owned && charOwned && roleMatch, reason, currentRole, emoteRole, roleMatch, charOwned, owned };
   }
 
@@ -2547,25 +2571,25 @@
     const selectedHtml = selected ? `
       <div class="detail-preview">${img(selected.thumb, '', selected.name)}</div>
       <div class="detail-name">${esc(selected.name)}</div>
-      <div class="detail-row"><span>类别</span><span>表情</span></div>
-      <div class="detail-row"><span>稀有度</span><span>${RARITY_TEXT[effRarity(selected.rarity)] || selected.rarity}</span></div>
-      <div class="detail-row"><span>系列</span><span>${esc(selected.series || '—')}</span></div>
-      <div class="detail-row"><span>云端条件</span><span>${status.canUpload ? '可上传' : esc(status.reason)}</span></div>`
-      : `<div class="detail-empty" style="margin:20px auto">先在左侧选择一个表情<br><span style="font-size:12px">再点击下方槽位选择「仅本地」或「上传云端」</span></div>`;
+      <div class="detail-row"><span>${tr('detail.type', '类别')}</span><span>${tr('type.emote', '表情')}</span></div>
+      <div class="detail-row"><span>${tr('detail.rarity', '稀有度')}</span><span>${rarityText(effRarity(selected.rarity)) || selected.rarity}</span></div>
+      <div class="detail-row"><span>${tr('detail.series', '系列')}</span><span>${esc(selected.series || '—')}</span></div>
+      <div class="detail-row"><span>${tr('detail.cloudCondition', '云端条件')}</span><span>${status.canUpload ? tr('detail.uploadable', '可上传') : esc(status.reason)}</span></div>`
+      : `<div class="detail-empty" style="margin:20px auto">${tr('bag.emoteHintSelect', '先在左侧选择一个表情')}<br><span style="font-size:12px">${tr('bag.emoteHintSlot', '再点击下方槽位选择「仅本地」或「上传云端」')}</span></div>`;
     box.innerHTML = `
       ${selectedHtml}
-      <div class="section-title" style="margin:16px 0 8px;">表情槽位</div>
+      <div class="section-title" style="margin:16px 0 8px;">${tr('bag.emoteSlots', '表情槽位')}</div>
       <div class="emote-row bag-emote-slots">
         ${slots.map((id, i) => {
           const item = emoteInfo(id);
-          const mode = id ? (Number(cloudSlots[i]) === Number(id) ? '云' : '本') : '';
-          return `<div class="emote-slot" data-eslot="${i}" title="槽位 ${i + 1}">
-            ${item ? img(item.thumb) : '<span class="muted">空</span>'}
+          const mode = id ? (Number(cloudSlots[i]) === Number(id) ? tr('bag.slotCloud', '云') : tr('bag.slotLocal', '本')) : '';
+          return `<div class="emote-slot" data-eslot="${i}" title="${tr('bag.slotLabel', '槽位 {n}', { n: i + 1 })}">
+            ${item ? img(item.thumb) : `<span class="muted">${tr('common.empty', '空')}</span>`}
             <span class="slot-no">${i + 1}${mode ? ' · ' + mode : ''}</span>
           </div>`;
         }).join('')}
       </div>
-      <div class="hint muted" style="font-size:12px;margin-top:10px">点击槽位后选择仅本地或上传云端；只有表情已拥有、当前角色已拥有且角色匹配时才允许上传。</div>`;
+      <div class="hint muted" style="font-size:12px;margin-top:10px">${tr('bag.emoteSlotHint', '点击槽位后选择仅本地或上传云端；只有表情已拥有、当前角色已拥有且角色匹配时才允许上传。')}</div>`;
     box.querySelectorAll('[data-eslot]').forEach(el => {
       el.onclick = () => openEmoteSlotAction(Number(el.dataset.eslot), slots);
     });
@@ -2574,20 +2598,20 @@
   function openEmoteSlotAction(slot, slots) {
     const selected = state.bagSelected?.type === 'emote' ? state.bagSelected : null;
     const candidate = selected || (state.bag || []).find(x => x.type === 'emote' && Number(x.id) === Number(slots[slot]));
-    if (!candidate) return toast('请先从左侧选择一个表情', 'err');
+    if (!candidate) return toast(tr('bag.selectEmoteFirst', '请先从左侧选择一个表情'), 'err');
     const status = emoteUploadStatus(candidate);
     const current = slots[slot] || 0;
     modal(`
       <div class="reward">
         ${img(candidate.thumb, '', candidate.name)}
         <div class="r-name">${esc(candidate.name)}</div>
-        <div class="r-sub">槽位 ${slot + 1}${current ? ' · 当前已有表情' : ' · 空槽位'}</div>
-        <div class="r-sub" style="color:${status.canUpload ? 'var(--ink-dim)' : 'var(--danger)'}">${status.canUpload ? '满足云端条件' : esc(status.reason)}</div>
+        <div class="r-sub">${tr('bag.slotLabel', '槽位 {n}', { n: slot + 1 })}${current ? ' · ' + tr('bag.slotCurrent', '当前已有表情') : ' · ' + tr('bag.slotEmpty', '空槽位')}</div>
+        <div class="r-sub" style="color:${status.canUpload ? 'var(--ink-dim)' : 'var(--danger)'}">${status.canUpload ? tr('bag.slotCanUpload', '满足云端条件') : esc(status.reason)}</div>
         <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;justify-content:center">
-          <button class="btn ghost" id="slotLocal">仅本地</button>
-          <button class="btn" id="slotCloud" ${status.canUpload ? '' : 'disabled title="' + esc(status.reason) + '"'}>上传云端</button>
-          <button class="btn ghost" id="slotClear" ${current ? '' : 'disabled'}>清空</button>
-          <button class="btn ghost" id="slotCancel">取消</button>
+          <button class="btn ghost" id="slotLocal">${tr('bag.slotLocalOnly', '仅本地')}</button>
+          <button class="btn" id="slotCloud" ${status.canUpload ? '' : 'disabled title="' + esc(status.reason) + '"'}>${tr('bag.slotUpload', '上传云端')}</button>
+          <button class="btn ghost" id="slotClear" ${current ? '' : 'disabled'}>${tr('bag.slotClear', '清空')}</button>
+          <button class="btn ghost" id="slotCancel">${tr('common.cancel', '取消')}</button>
         </div>
       </div>`, h => {
       h.querySelector('#slotCancel').onclick = closeModal;
@@ -2596,7 +2620,7 @@
           state.boot = await tryCall('appearance.setSlot', { slot, id: candidate.id });
           closeModal();
           renderBagDetail();
-          toast(`槽位 ${slot + 1} 已应用（仅本地）`);
+          toast(tr('bag.slotApplied', '槽位 {n} 已应用（仅本地）', { n: slot + 1 }));
         } catch { }
       };
       h.querySelector('#slotCloud').onclick = async () => {
@@ -2605,7 +2629,7 @@
           state.boot = await tryCall('appearance.setSlot', { slot, id: candidate.id, upload: true });
           closeModal();
           renderBagDetail();
-          toast(`槽位 ${slot + 1} 已上传云端`);
+          toast(tr('bag.slotUploaded', '槽位 {n} 已上传云端', { n: slot + 1 }));
         } catch { }
       };
       h.querySelector('#slotClear').onclick = async () => {
@@ -2613,7 +2637,7 @@
           state.boot = await tryCall('appearance.setSlot', { slot, id: 0 });
           closeModal();
           renderBagDetail();
-          toast(`槽位 ${slot + 1} 已清空（仅本地）`);
+          toast(tr('bag.slotCleared', '槽位 {n} 已清空（仅本地）', { n: slot + 1 }));
         } catch { }
       };
     });
@@ -2651,9 +2675,9 @@
     const cloudReady = cloud.characterAssetId > 0 || cloud.accessoryAssetId > 0
       || (cloud.emoteAssetIds || []).some(id => Number(id) > 0);
     return `<div class="bag-appearance-panel">
-      ${bagAppearanceCard('在线形态', cloudReady ? '云端配置' : '未同步', cloud, false)}
-      ${bagAppearanceCard('本地形态', '仅本机显示', local, true)}
-      <div class="bag-appearance-hint">单击选择物品；再次单击已选物品可取消选择<br>双击装备并同步到云端</div>
+      ${bagAppearanceCard(tr('bag.onlineAppearance', '在线形态'), cloudReady ? tr('bag.cloudConfig', '云端配置') : tr('bag.notSynced', '未同步'), cloud, false)}
+      ${bagAppearanceCard(tr('bag.localAppearance', '本地形态'), tr('bag.localOnly', '仅本机显示'), local, true)}
+      <div class="bag-appearance-hint">${tr('bag.clickHint', '单击选择物品；再次单击已选物品可取消选择<br>双击装备并同步到云端')}</div>
     </div>`;
   }
 
@@ -2673,13 +2697,13 @@
     box.innerHTML = `
       <div class="detail-preview">${img(x.thumb, '', x.name)}</div>
       <div class="detail-name">${esc(x.name)}</div>
-      <div class="detail-row"><span>类别</span><span>${TYPE_TEXT[x.type] || x.type}</span></div>
-      <div class="detail-row"><span>稀有度</span><span>${RARITY_TEXT[effRarity(x.rarity)] || x.rarity}</span></div>
-      <div class="detail-row"><span>系列</span><span>${esc(x.series || '—')}</span></div>
-      <div class="detail-row"><span>数量</span><span>${x.quantity ?? 1}</span></div>
+      <div class="detail-row"><span>${tr('detail.type', '类别')}</span><span>${typeText(x.type) || x.type}</span></div>
+      <div class="detail-row"><span>${tr('detail.rarity', '稀有度')}</span><span>${rarityText(effRarity(x.rarity)) || x.rarity}</span></div>
+      <div class="detail-row"><span>${tr('detail.series', '系列')}</span><span>${esc(x.series || '—')}</span></div>
+      <div class="detail-row"><span>${tr('bag.quantity', '数量')}</span><span>${x.quantity ?? 1}</span></div>
       <div class="spacer"></div>
-      <button class="btn" id="equipSyncBtn">${accessoryEquipped ? '取消头饰并同步云端' : '装备并同步云端'}</button>
-      <button class="btn ghost" id="equipBtn">${accessoryEquipped ? '取消头饰（仅本地）' : '装备（仅本地）'}</button>`;
+      <button class="btn" id="equipSyncBtn">${accessoryEquipped ? tr('bag.unequipSync', '取消头饰并同步云端') : tr('bag.equipSync', '装备并同步云端')}</button>
+      <button class="btn ghost" id="equipBtn">${accessoryEquipped ? tr('bag.unequipLocal', '取消头饰（仅本地）') : tr('bag.equipLocal', '装备（仅本地）')}</button>`;
     document.getElementById('equipBtn').onclick = () => equip(x, false);
     document.getElementById('equipSyncBtn').onclick = () => equip(x, true);
   }
@@ -2695,7 +2719,7 @@
         let slot = slots.findIndex(id => Number(id) === Number(item.id));
         if (slot < 0) slot = slots.findIndex(id => !Number(id));
         if (slot < 0) {
-          toast('表情栏已满，请先在编辑器中调整槽位', 'err');
+          toast(tr('bag.emoteFull', '表情栏已满，请先在编辑器中调整槽位'), 'err');
           return;
         }
         await tryCall('appearance.setSlot', { slot, id: item.id, upload: true });
@@ -2705,12 +2729,14 @@
         if (sync) syncResult = await tryCall('appearance.sync');
       }
       const blocked = [];
-      if (syncResult?.characterBlocked) blocked.push('角色');
-      if (syncResult?.accessoryBlocked) blocked.push('头饰');
+      if (syncResult?.characterBlocked) blocked.push(tr('type.character_skin', '角色'));
+      if (syncResult?.accessoryBlocked) blocked.push(tr('type.accessory', '头饰'));
       const base = unequipAccessory
-        ? (sync ? '已取消头饰并同步云端' : '已取消头饰（本地显示）')
-        : (sync ? '已装备并同步到云端' : '已装备到本地显示');
-      toast(blocked.length ? `已更新；未拥有的${blocked.join('、')}保留了云端内容` : base);
+        ? (sync ? tr('bag.unequippedCloud', '已取消头饰并同步云端') : tr('bag.unequippedLocal', '已取消头饰（本地显示）'))
+        : (sync ? tr('bag.equippedCloud', '已装备并同步到云端') : tr('bag.equippedLocal', '已装备到本地显示'));
+      toast(blocked.length
+        ? tr('bag.updatedBlocked', '已更新；未拥有的{items}保留了云端内容', { items: blocked.join(tr('common.listSeparator', '、')) })
+        : base);
       state.boot = await call('boot');
       renderChrome();
       if (state.page === 'bag') {
@@ -2756,18 +2782,23 @@
     }
   }
 
-  const ATLAS_TABS = [['all', '全部'], ['character_skin', '角色'], ['accessory', '配件'], ['emote', '表情']];
+  const ATLAS_TABS = [
+    ['all', () => tr('atlas.tab.all', '全部')],
+    ['character_skin', () => tr('atlas.tab.character', '角色')],
+    ['accessory', () => tr('atlas.tab.accessory', '配件')],
+    ['emote', () => tr('atlas.tab.emote', '表情')]
+  ];
   const ATLAS_PAGE_SIZE = 120;
 
   async function renderAtlas(preserveScroll = false) {
     if (pageAuthBlocked('atlas')) return;
     const prevScroll = preserveScroll ? (document.getElementById('atlasGroups')?.scrollTop || 0) : 0;
     const type = state.atlasType;
-    setPage(`<div class="loading">正在读取图鉴…</div>`);
+    setPage(`<div class="loading">${tr('atlas.loading', '正在读取图鉴…')}</div>`);
     let items;
     try { items = await ensureAtlas(type); }
     catch {
-      setPage(`<div class="empty-state">图鉴读取失败（网络波动）<br><button class="btn ghost" id="atlasRetry" style="margin-top:10px">重试</button></div>`);
+      setPage(`<div class="empty-state">${tr('atlas.loadFailed', '图鉴读取失败（网络波动）')}<br><button class="btn ghost" id="atlasRetry" style="margin-top:10px">${tr('common.retry', '重试')}</button></div>`);
       document.getElementById('atlasRetry').onclick = renderAtlas;
       return;
     }
@@ -2779,38 +2810,41 @@
     const showRole = type !== 'accessory';
 
     const seriesOptions = [...new Set(items.filter(x => x.series).map(x => x.series))].sort((a, b) => String(a).localeCompare(String(b), 'zh'));
-    const roleMap = new Map();
-    if (showRole) {
-      for (const x of items) {
-        const r = assetMeta(x).role;
-        if (!r || r === '0') continue;
-        const lbl = roleLabelOf(x);
-        if (!roleMap.has(r) || (roleMap.get(r).startsWith('角色 ') && !lbl.startsWith('角色 '))) {
-          roleMap.set(r, lbl || r);
+      const roleMap = new Map();
+      const roleFallback = new Map();
+      if (showRole) {
+        for (const x of items) {
+          const r = assetMeta(x).role;
+          if (!r || r === '0') continue;
+          const info = roleLabelInfo(x);
+          if (!roleMap.has(r) || (roleFallback.get(r) && !info.fallback)) {
+            roleMap.set(r, info.label || r);
+            roleFallback.set(r, info.fallback);
+          }
         }
       }
-    }
+
     const roleOptions = [...roleMap.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'zh'));
 
     setPage(`
       <div class="seg-tabs">
         ${ATLAS_TABS.map(([k, label]) => {
           const count = k === 'all' ? (state.atlasAllCount || '') : (state.atlas[k]?.length ?? '');
-          return `<button class="seg-tab ${type === k ? 'active' : ''}" data-atab="${k}">${label} ${count}</button>`;
+          return `<button class="seg-tab ${type === k ? 'active' : ''}" data-atab="${k}">${label()} ${count}</button>`;
         }).join('')}
       </div>
       <div class="filter-row">
-        ${showSeries ? `<select class="select" id="atlasSeries"><option value="">系列：全部</option>${seriesOptions.map(s => `<option value="${esc(s)}" ${state.atlasSeries === s ? 'selected' : ''}>系列：${esc(s)}</option>`).join('')}</select>` : ''}
-        ${showRole ? `<select class="select" id="atlasRole"><option value="">角色：全部</option>${roleOptions.map(([id, label]) => `<option value="${id}" ${state.atlasRole === id ? 'selected' : ''}>角色：${esc(label)}</option>`).join('')}</select>` : ''}
+        ${showSeries ? `<select class="select" id="atlasSeries"><option value="">${tr('bag.seriesPrefix', '系列：')}${tr('common.all', '全部')}</option>${seriesOptions.map(s => `<option value="${esc(s)}" ${state.atlasSeries === s ? 'selected' : ''}>${tr('bag.seriesPrefix', '系列：')}${esc(s)}</option>`).join('')}</select>` : ''}
+        ${showRole ? `<select class="select" id="atlasRole"><option value="">${tr('bag.rolePrefix', '角色：')}${tr('common.all', '全部')}</option>${roleOptions.map(([id, label]) => `<option value="${id}" ${state.atlasRole === id ? 'selected' : ''}>${tr('bag.rolePrefix', '角色：')}${esc(label)}</option>`).join('')}</select>` : ''}
         <select class="select" id="atlasRarity">
-          <option value="">稀有度：全部</option>
-          ${['epic', 'rare', 'uncommon', 'common'].map(r => `<option value="${r}" ${state.atlasRarity === r ? 'selected' : ''}>稀有度：${RARITY_TEXT[r]}</option>`).join('')}
+          <option value="">${tr('bag.rarityPrefix', '稀有度：')}${tr('common.all', '全部')}</option>
+          ${['epic', 'rare', 'uncommon', 'common'].map(r => `<option value="${r}" ${state.atlasRarity === r ? 'selected' : ''}>${tr('bag.rarityPrefix', '稀有度：')}${rarityText(r)}</option>`).join('')}
         </select>
-        <input class="input" id="atlasSearch" placeholder="搜索名称 / 系列 / assetName" value="${esc(state.atlasSearch)}" style="flex:1;min-width:180px" autocomplete="off" />
-        <button class="pill ${state.atlasOwnedOnly ? 'active' : ''}" id="atlasOwnedOnly" title="只显示已经拥有的图鉴">仅拥有</button>
+        <input class="input" id="atlasSearch" placeholder="${tr('atlas.searchPlaceholder', '搜索名称 / 系列 / assetName')}" value="${esc(state.atlasSearch)}" style="flex:1;min-width:180px" autocomplete="off" />
+        <button class="pill ${state.atlasOwnedOnly ? 'active' : ''}" id="atlasOwnedOnly" title="${tr('atlas.ownedOnlyTitle', '只显示已经拥有的图鉴')}">${tr('atlas.ownedOnly', '仅拥有')}</button>
         <span class="spacer"></span>
-        <span class="muted" id="atlasCount" style="font-size:13px">共 ${items.length} 件 · 已拥有会显示标记</span>
-        ${type === 'emote' ? `<button class="pill ${state.atlasEmoteSendMode ? 'active' : ''}" id="atlasEmoteSendMode" title="开启后点击表情直接发送，不再弹出详情确认">发送模式</button>` : ''}
+        <span class="muted" id="atlasCount" style="font-size:13px">${tr('atlas.count', '共 {count} 件 · 已拥有会显示标记', { count: items.length })}</span>
+        ${type === 'emote' ? `<button class="pill ${state.atlasEmoteSendMode ? 'active' : ''}" id="atlasEmoteSendMode" title="${tr('atlas.sendModeTitle', '开启后点击表情直接发送，不再弹出详情确认')}">${tr('atlas.sendMode', '发送模式')}</button>` : ''}
       </div>
       <div class="bag-groups" id="atlasGroups"></div>`);
 
@@ -2844,7 +2878,7 @@
     document.getElementById('atlasEmoteSendMode')?.addEventListener('click', e => {
       state.atlasEmoteSendMode = !state.atlasEmoteSendMode;
       e.currentTarget.classList.toggle('active', state.atlasEmoteSendMode);
-      toast(state.atlasEmoteSendMode ? '发送模式已开启：点击表情直接发送' : '发送模式已关闭');
+      toast(state.atlasEmoteSendMode ? tr('atlas.sendModeOn', '发送模式已开启：点击表情直接发送') : tr('atlas.sendModeOff', '发送模式已关闭'));
     });
     if (!state.atlasLimit) state.atlasLimit = ATLAS_PAGE_SIZE;
     state.atlasSnapshot = { items, ownedNames };
@@ -2878,7 +2912,7 @@
       <div class="rarity-bar ${rarityClass(x.rarity)}"></div>
       <div class="name">${esc(x.name)}</div>
       <div class="sub">${esc(x.series || '')}</div>
-      <div class="atlas-badge ${owned ? 'owned' : 'locked'}">${owned ? '已拥有' : '未拥有'}</div>
+      <div class="atlas-badge ${owned ? 'owned' : 'locked'}">${owned ? tr('atlas.owned', '已拥有') : tr('atlas.unowned', '未拥有')}</div>
     </div>`;
   }
 
@@ -2891,10 +2925,10 @@
     const list = paged ? full.slice(0, Math.max(ATLAS_PAGE_SIZE, state.atlasLimit)) : full;
     const count = document.getElementById('atlasCount');
     if (count) {
-      if (state.atlasOwnedOnly) count.textContent = `仅拥有 ${full.length} 件${paged ? ` · 已显示 ${list.length}` : ''}`;
-      else count.textContent = `共 ${full.length} 件${paged ? ` · 已显示 ${list.length}` : ''} · 已拥有会显示标记`;
+      if (state.atlasOwnedOnly) count.textContent = tr('atlas.countOwned', '仅拥有 {count} 件', { count: full.length }) + (paged ? ' · ' + tr('atlas.shown', '已显示 {count}', { count: list.length }) : '');
+      else count.textContent = tr('atlas.countAll', '共 {count} 件', { count: full.length }) + (paged ? ' · ' + tr('atlas.shown', '已显示 {count}', { count: list.length }) : '') + tr('atlas.marked', ' · 已拥有会显示标记');
     }
-    if (!full.length) { host.innerHTML = `<div class="empty-state">没有符合条件的图鉴条目</div>`; return; }
+    if (!full.length) { host.innerHTML = `<div class="empty-state">${tr('atlas.empty', '没有符合条件的图鉴条目')}</div>`; return; }
     const byKey = new Map(list.map(x => [x.type + ':' + x.mainId, x]));
     if (state.atlasType !== 'all') {
       host.innerHTML = `<div class="bag-grid">${list.map(x => atlasCard(x, ownedNames.has(x.assetName))).join('')}</div>`;
@@ -2911,7 +2945,7 @@
         const owned = arr.filter(x => ownedNames.has(x.assetName)).length;
         const hidden = state.atlasHidden.has(r);
         return `<section class="bag-group">
-          <div class="bag-group-head" data-agroup="${r}"><span>${RARITY_TEXT[r]}</span><span class="count">（${owned}/${arr.length}）</span><span class="chev">${hidden ? '▸' : '▾'}</span></div>
+          <div class="bag-group-head" data-agroup="${r}"><span>${rarityText(r)}</span><span class="count">（${owned}/${arr.length}）</span><span class="chev">${hidden ? '▸' : '▾'}</span></div>
           ${hidden ? '' : `<div class="bag-grid">${arr.map(x => atlasCard(x, ownedNames.has(x.assetName))).join('')}</div>`}
         </section>`;
       }).join('');
@@ -2922,7 +2956,7 @@
       });
     }
     if (paged && list.length < full.length) {
-      host.insertAdjacentHTML('beforeend', `<div class="atlas-more"><button class="btn ghost" id="atlasMore">加载更多（已显示 ${list.length} / ${full.length}）</button></div>`);
+      host.insertAdjacentHTML('beforeend', `<div class="atlas-more"><button class="btn ghost" id="atlasMore">${tr('atlas.more', '加载更多（已显示 {shown} / {total}）', { shown: list.length, total: full.length })}</button></div>`);
       document.getElementById('atlasMore').onclick = () => {
         const scroll = host.scrollTop;
         state.atlasLimit = Math.max(ATLAS_PAGE_SIZE, state.atlasLimit) + ATLAS_PAGE_SIZE;
@@ -2938,7 +2972,7 @@
         const x = byKey.get(el.dataset.key);
         if (!x) return;
         if (x.type === 'emote' && state.atlasEmoteSendMode) {
-          try { await tryCall('emote.send', { id: x.mainId }); toast('已发送表情'); } catch { }
+          try { await tryCall('emote.send', { id: x.mainId }); toast(tr('atlas.sent', '已发送表情')); } catch { }
           return;
         }
         const bagItem = (state.bag || []).find(v => v.assetName === x.assetName);
@@ -2949,26 +2983,26 @@
         let pickSlot = currentSlots.findIndex(v => !v);
         if (pickSlot < 0) pickSlot = 0;
         const slotPicker = x.type === 'emote'
-          ? `<div class="muted" style="font-size:12px;margin-top:4px">选择要替换的表情槽位</div>
+          ? `<div class="muted" style="font-size:12px;margin-top:4px">${tr('atlas.slotPick', '选择要替换的表情槽位')}</div>
              <div class="emote-row" style="justify-content:center;margin-top:4px">
                ${currentSlots.map((id, i) => {
                  const it = emoteInfo(id);
-                 return `<div class="emote-slot ${i === pickSlot ? 'selected' : ''}" data-aslot="${i}" title="槽位 ${i + 1}">${it ? img(it.thumb) : '<span class="muted">空</span>'}<span class="slot-no">${i + 1}</span></div>`;
+                 return `<div class="emote-slot ${i === pickSlot ? 'selected' : ''}" data-aslot="${i}" title="${tr('bag.slotLabel', '槽位 {n}', { n: i + 1 })}">${it ? img(it.thumb) : `<span class="muted">${tr('common.empty', '空')}</span>`}<span class="slot-no">${i + 1}</span></div>`;
                }).join('')}
              </div>` : '';
         modal(`
           <div class="reward">
             ${img(x.thumb, '', x.name)}
             <div class="r-name">${esc(x.name)}</div>
-            <div class="r-sub">${TYPE_TEXT[x.type] || x.type} · ${RARITY_TEXT[effRarity(x.rarity)] || x.rarity} ${x.series ? '· ' + esc(x.series) : ''}</div>
-            <div class="r-sub">${bagItem ? '已拥有 · 可应用到本地，或装备并同步云端' : '尚未拥有 · 可应用到本地（仅自己可见）'}</div>
-            ${emoteStatus && !emoteStatus.canUpload ? `<div class="r-sub" style="color:var(--danger)">不能上传云端：${esc(emoteStatus.reason)}</div>` : ''}
+            <div class="r-sub">${typeText(x.type) || x.type} · ${rarityText(effRarity(x.rarity)) || x.rarity} ${x.series ? '· ' + esc(x.series) : ''}</div>
+            <div class="r-sub">${bagItem ? tr('atlas.ownedHint', '已拥有 · 可应用到本地，或装备并同步云端') : tr('atlas.unownedHint', '尚未拥有 · 可应用到本地（仅自己可见）')}</div>
+            ${emoteStatus && !emoteStatus.canUpload ? `<div class="r-sub" style="color:var(--danger)">${tr('atlas.cannotUpload', '不能上传云端：{reason}', { reason: esc(emoteStatus.reason) })}</div>` : ''}
             ${slotPicker}
             <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap">
-              <button class="btn ghost" id="mClose">关闭</button>
-              <button class="btn" id="mLocal">${accessoryEquipped ? '取消头饰（本地）' : '应用到本地'}</button>
-              ${bagItem && x.type !== 'emote' ? `<button class="btn ghost" id="mEquip">${accessoryEquipped ? '取消头饰并同步云端' : '装备并同步云端'}</button>` : ''}
-              ${emoteStatus?.canUpload ? '<button class="btn ghost" id="mEquipEmote">装备到线上</button>' : ''}
+              <button class="btn ghost" id="mClose">${tr('common.close', '关闭')}</button>
+              <button class="btn" id="mLocal">${accessoryEquipped ? tr('bag.unequipLocal', '取消头饰（本地）') : tr('atlas.applyLocal', '应用到本地')}</button>
+              ${bagItem && x.type !== 'emote' ? `<button class="btn ghost" id="mEquip">${accessoryEquipped ? tr('bag.unequipSync', '取消头饰并同步云端') : tr('bag.equipSync', '装备并同步云端')}</button>` : ''}
+              ${emoteStatus?.canUpload ? `<button class="btn ghost" id="mEquipEmote">${tr('atlas.equipOnline', '装备到线上')}</button>` : ''}
             </div>
           </div>`, h => {
           h.querySelector('#mClose').onclick = closeModal;
@@ -2986,7 +3020,9 @@
               const data = { type: x.type, id: x.mainId };
               if (x.type === 'emote') data.slot = pickSlot;
               state.boot = await tryCall('appearance.applyLocal', data);
-              toast(x.type === 'emote' ? `已替换本地表情槽位 ${pickSlot + 1}` : '已应用到本地（不上传服务端）');
+              toast(x.type === 'emote'
+                ? tr('atlas.emoteSlotApplied', '已替换本地表情槽位 {n}', { n: pickSlot + 1 })
+                : tr('atlas.localApplied', '已应用到本地（不上传服务端）'));
               closeModal();
               renderChrome();
               if (state.page === 'room') renderRoom();
@@ -3000,7 +3036,7 @@
               state.boot = await tryCall('appearance.setSlot', { slot: pickSlot, id: x.mainId, upload: true });
               closeModal();
               renderChrome();
-              toast(`表情已装备到线上（槽位 ${pickSlot + 1}）`);
+              toast(tr('atlas.emoteEquipped', '表情已装备到线上（槽位 {n}）', { n: pickSlot + 1 }));
             } catch { }
           };
         });
@@ -3081,8 +3117,8 @@
     if (pageAuthBlocked('synth')) return;
     // 点击材料卡片会重建整个合成页；这里保留网格滚动位置，避免选择下方物品时弹回顶部。
     const prevScroll = preserveScroll ? (document.getElementById('synthGrid')?.scrollTop || 0) : 0;
-    setPage(`<div class="loading">正在读取背包…</div>`);
-    try { await ensureBag(); } catch { setPage('<div class="empty-state">背包读取失败</div>'); return; }
+    setPage(`<div class="loading">${tr('synth.loading', '正在读取背包…')}</div>`);
+    try { await ensureBag(); } catch { setPage(`<div class="empty-state">${tr('synth.bagFailed', '背包读取失败')}</div>`); return; }
     await ensureAtlas(state.synthType).catch(() => { });
     if (state.synthSlots.length !== synthNeed()) synthResetSlots();
 
@@ -3115,53 +3151,53 @@
     const checkMode = state.boot?.settings?.synthCheckMode || 'up';
     const slotHtml = state.synthSlots.map((id, i) => {
       const item = id ? synthBagById(id) : null;
-      return `<div class="synth-slot ${item ? 'filled' : ''}" data-slot="${i}" title="${item ? esc(item.name) : '空槽位'}">
+      return `<div class="synth-slot ${item ? 'filled' : ''}" data-slot="${i}" title="${item ? esc(item.name) : tr('synth.slotEmpty', '空槽位')}">
         ${item ? img(item.thumb) : ''}<span class="idx">${i + 1}</span></div>`;
     }).join('');
-    const advancedReminderHtml = synthAnyMode() ? '<div class="synth-danger-note">高级合成已开启，使用完毕务必及时关闭。</div>' : '';
+    const advancedReminderHtml = synthAnyMode() ? `<div class="synth-danger-note">${tr('synth.advancedReminder', '高级合成已开启，使用完毕务必及时关闭。')}</div>` : '';
     const advancedPanelHtml = state.synthPanelVisible ? `
       <div class="synth-advanced-panel">
         <div class="synth-advanced-head">
-          <span>高级合成 <span class="synth-advanced-state ${state.synthEnabled ? 'on' : ''}">${state.synthEnabled ? '已启用' : '已关闭'}</span></span>
-          <label class="synth-advanced-toggle"><input type="checkbox" id="synthEnabled" ${state.synthEnabled ? 'checked' : ''}> 任意物品</label>
-          <span class="synth-advanced-meta">锁定 ${state.locks.size} 件</span>
-          <button class="btn ghost" id="synthHide">隐藏</button>
+          <span>${tr('synth.advanced', '高级合成')} <span class="synth-advanced-state ${state.synthEnabled ? 'on' : ''}">${state.synthEnabled ? tr('synth.enabled', '已启用') : tr('synth.disabled', '已关闭')}</span></span>
+          <label class="synth-advanced-toggle"><input type="checkbox" id="synthEnabled" ${state.synthEnabled ? 'checked' : ''}> ${tr('synth.anyItem', '任意物品')}</label>
+          <span class="synth-advanced-meta">${tr('synth.lockedCount', '锁定 {count} 件', { count: state.locks.size })}</span>
+          <button class="btn ghost" id="synthHide">${tr('synth.hide', '隐藏')}</button>
         </div>
-        <div class="synth-advanced-note">锁定物资在高级合成中只保证保留最后 1 件，不会被消耗到 0。锁定记录单独保存在 locks.json；每次合成前会二次确认。重新打开操作面板后会自动关闭，需要重新输入隐藏指令。</div>
-        <div class="synth-advanced-actions"><button class="btn" id="synthSave">保存设置</button></div>
+        <div class="synth-advanced-note">${tr('synth.advancedNote', '锁定物资在高级合成中只保证保留最后 1 件，不会被消耗到 0。锁定记录单独保存在 locks.json；每次合成前会二次确认。重新打开操作面板后会自动关闭，需要重新输入隐藏指令。')}</div>
+        <div class="synth-advanced-actions"><button class="btn" id="synthSave">${tr('synth.saveSettings', '保存设置')}</button></div>
       </div>` : '';
 
     setPage(`
       <div class="synth-top">
         <div class="synth-bar">
           <div class="synth-group">
-            <span class="synth-label">方式</span>
-            ${[['up', '升阶合成（10）'], ['same', '平阶合成（5）']].map(([k, label]) =>
+            <span class="synth-label">${tr('synth.mode', '方式')}</span>
+            ${[['up', tr('synth.up', '升阶合成（10）')], ['same', tr('synth.same', '平阶合成（5）')]].map(([k, label]) =>
               `<button class="pill ${state.synthMode === k ? 'active' : ''}" data-sm="${k}">${label}</button>`).join('')}
           </div>
           <div class="synth-group">
-            <span class="synth-label">类型</span>
+            <span class="synth-label">${tr('synth.type', '类型')}</span>
             ${['character_skin', 'accessory', 'emote'].map(t =>
-              `<button class="pill ${type === t ? 'active' : ''}" data-st="${t}">${TYPE_TEXT[t]}</button>`).join('')}
+              `<button class="pill ${type === t ? 'active' : ''}" data-st="${t}">${typeText(t)}</button>`).join('')}
           </div>
           <div class="synth-group synth-group-rarity">
-            <span class="synth-label">稀有度</span>
+            <span class="synth-label">${tr('detail.rarity', '稀有度')}</span>
             ${['all', 'common', 'uncommon', 'rare', 'epic'].map(r =>
-              `<button class="pill ${rarity === r ? 'active' : ''}" data-sr="${r}">${r === 'all' ? '全部' : RARITY_TEXT[r]}</button>`).join('')}
+              `<button class="pill ${rarity === r ? 'active' : ''}" data-sr="${r}">${r === 'all' ? tr('common.all', '全部') : rarityText(r)}</button>`).join('')}
           </div>
         </div>
         <div class="synth-check-card">
-          <div class="setting-title">合成设置</div>
-          <div class="setting-sub">获得新物品后检查或自动合成</div>
+          <div class="setting-title">${tr('synth.settings', '合成设置')}</div>
+          <div class="setting-sub">${tr('synth.settingsSub', '获得新物品后检查或自动合成')}</div>
           <div class="pill-row" style="margin-top:8px">
-            <button class="pill ${checkMode === 'up' ? 'active' : ''}" data-scm="up">升阶</button>
-            <button class="pill ${checkMode === 'same' ? 'active' : ''}" data-scm="same">平阶</button>
-            <button class="pill ${checkMode === 'off' ? 'active' : ''}" data-scm="off">关闭提醒</button>
+            <button class="pill ${checkMode === 'up' ? 'active' : ''}" data-scm="up">${tr('synth.upShort', '升阶')}</button>
+            <button class="pill ${checkMode === 'same' ? 'active' : ''}" data-scm="same">${tr('synth.sameShort', '平阶')}</button>
+            <button class="pill ${checkMode === 'off' ? 'active' : ''}" data-scm="off">${tr('synth.off', '关闭提醒')}</button>
           </div>
           <div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border);display:flex;align-items:center;justify-content:space-between">
             <div>
-              <div class="setting-title" style="font-size:12px">自动升阶合成</div>
-              <div class="setting-sub" style="font-size:10px;margin-top:2px">满10件同类型同稀有度多余材料自动升阶</div>
+              <div class="setting-title" style="font-size:12px">${tr('synth.auto', '自动升阶合成')}</div>
+              <div class="setting-sub" style="font-size:10px;margin-top:2px">${tr('synth.autoSub', '满10件同类型同稀有度多余材料自动升阶')}</div>
             </div>
             <div class="switch ${state.boot?.settings?.autoSynthUp ? 'on' : ''}" id="synthAutoSwitch"></div>
           </div>
@@ -3170,12 +3206,12 @@
       <div class="synth-slots">${slotHtml}</div>
       <div class="card-grid" id="synthGrid"></div>
       <div class="synth-foot">
-        <span class="synth-count">已选 ${filled} / ${need}${anchor ? ' · ' + esc(anchor.name) : ''}</span>
+        <span class="synth-count">${tr('synth.selected', '已选 {filled} / {need}', { filled, need })}${anchor ? ' · ' + esc(anchor.name) : ''}</span>
         <span class="spacer"></span>
-        <button class="btn ghost" id="synthClear">清空</button>
-        <button class="btn ghost" id="synthOne" ${synthAnyMode() ? 'disabled title="高级合成禁止一键放置"' : ''}>一键选择</button>
-        <button class="btn ghost" id="synthAutoAll" ${synthAnyMode() ? 'disabled title="高级合成模式下请手动选择材料"' : ''}>一键全部升阶</button>
-        <button class="btn" id="synthSubmit" ${filled === need ? '' : 'disabled'}>合成</button>
+        <button class="btn ghost" id="synthClear">${tr('synth.clear', '清空')}</button>
+        <button class="btn ghost" id="synthOne" ${synthAnyMode() ? `disabled title="${tr('synth.advancedForbidden', '高级合成禁止一键放置')}"` : ''}>${tr('synth.autoSelect', '一键选择')}</button>
+        <button class="btn ghost" id="synthAutoAll" ${synthAnyMode() ? `disabled title="${tr('synth.advancedManual', '高级合成模式下请手动选择材料')}"` : ''}>${tr('synth.autoAll', '一键全部升阶')}</button>
+        <button class="btn" id="synthSubmit" ${filled === need ? '' : 'disabled'}>${tr('synth.submit', '合成')}</button>
       </div>
       ${advancedPanelHtml}
       ${advancedReminderHtml}`);
@@ -3196,7 +3232,7 @@
         if (boot?.settings) state.boot = boot;
         updateSynthBadge();
         renderSynth();
-        toast(mode === 'off' ? '已关闭合成提醒' : (mode === 'same' ? '合成提醒改为平阶检查' : '合成提醒改为升阶检查'));
+        toast(mode === 'off' ? tr('synth.reminderOff', '已关闭合成提醒') : (mode === 'same' ? tr('synth.reminderSame', '合成提醒改为平阶检查') : tr('synth.reminderUp', '合成提醒改为升阶检查')));
       } catch { }
     });
     document.querySelectorAll('[data-slot]').forEach(el => el.onclick = () => {
@@ -3208,7 +3244,7 @@
     });
     document.getElementById('synthClear').onclick = () => { synthResetSlots(); renderSynth(); };
     document.getElementById('synthOne').onclick = () => {
-      synthOneClick().catch(e => toast(e.message || '一键选择失败', 'err'));
+      synthOneClick().catch(e => toast(e.message || tr('synth.autoSelectFailed', '一键选择失败'), 'err'));
     };
     document.getElementById('synthSubmit').onclick = doSynth;
     const autoSwitch = document.getElementById('synthAutoSwitch');
@@ -3219,7 +3255,7 @@
         try {
           const boot = await tryCall('settings.set', { autoSynthUp: next });
           if (boot?.settings) state.boot = boot;
-          toast(next ? '已开启自动升阶合成' : '已关闭自动升阶合成');
+          toast(next ? tr('synth.autoOn', '已开启自动升阶合成') : tr('synth.autoOff', '已关闭自动升阶合成'));
           renderSynth(true);
         } catch {
           autoSwitch.classList.toggle('on', !next);
@@ -3229,32 +3265,32 @@
     const autoAllBtn = document.getElementById('synthAutoAll');
     if (autoAllBtn) {
       autoAllBtn.onclick = async () => {
-        if (synthAnyMode()) return toast('高级合成模式下请手动选择材料', 'err');
+        if (synthAnyMode()) return toast(tr('synth.advancedManual', '高级合成模式下请手动选择材料'), 'err');
         if (state.synthBusy) return;
         try {
           state.synthBusy = true;
-          toast('正在检查并执行自动升阶合成…');
+          toast(tr('synth.autoChecking', '正在检查并执行自动升阶合成…'));
           const res = await tryCall('synth.auto');
           if (res?.busy) {
-            toast('正在进行其他合成操作，请稍候', 'err');
+            toast(tr('synth.busy', '正在进行其他合成操作，请稍候'), 'err');
             return;
           }
           const count = Number(res?.count) || 0;
           const processed = Number(res?.processed) || 0;
           if (count > 0 || processed > 0) {
             if (res?.success === false)
-              toast(`${res?.message || '自动升阶部分完成'}（已完成 ${count} 次，请刷新背包确认）`, 'err');
+              toast(tr('synth.autoPartial', '自动升阶部分完成（已完成 {count} 次，请刷新背包确认）', { count }), 'err');
             else
-              toast(`自动升阶合成完成：共完成 ${count} 次合成！`, 'ok');
+              toast(tr('synth.autoDone', '自动升阶合成完成：共完成 {count} 次合成！', { count }), 'ok');
             synthResetSlots();
             await fetchBagItems(true);
             if (state.page === 'synth') renderSynth();
             else if (state.page === 'atlas') renderAtlas(true);
           } else {
-            toast(res?.message || '当前没有满足升阶条件的材料（需要 10 件同类型同稀有度多余材料）');
+            toast(res?.message || tr('synth.autoNone', '当前没有满足升阶条件的材料（需要 10 件同类型同稀有度多余材料）'));
           }
         } catch (e) {
-          toast('自动升阶合成失败：' + (e.message || e), 'err');
+          toast(tr('synth.autoFailed', '自动升阶合成失败：{error}', { error: e.message || e }), 'err');
         } finally {
           state.synthBusy = false;
         }
@@ -3276,7 +3312,7 @@
             if (!enabled) synthResetSlots();
             renderChrome();
             renderSynth();
-            toast(enabled ? '高级合成已开启' : '高级合成已关闭');
+            toast(enabled ? tr('synth.advancedOn', '高级合成已开启') : tr('synth.advancedOff', '高级合成已关闭'));
           } catch { renderSynth(); }
         };
         // 每次从关闭切到开启都重新警告；已开启时重复保存不重复打扰。
@@ -3287,7 +3323,7 @@
 
     const grid = document.getElementById('synthGrid');
     if (!items.length) {
-      grid.innerHTML = `<div class="empty-state">没有可用于合成的重复收集物<br><span style="font-size:12px">合成会保留 1 份，只有第 2 份及以后可以被消耗</span></div>`;
+      grid.innerHTML = `<div class="empty-state">${tr('synth.noItems', '没有可用于合成的重复收集物')}<br><span style="font-size:12px">${tr('synth.noItemsHint', '合成会保留 1 份，只有第 2 份及以后可以被消耗')}</span></div>`;
       return;
     }
     grid.innerHTML = items.map(x => {
@@ -3298,7 +3334,7 @@
         ${img(x.thumb, 'thumb', x.name)}
         <div class="rarity-bar ${rarityClass(x.rarity)}"></div>
         <div class="name" title="${esc(x.name)}">${esc(x.name)}</div>
-        <div class="sub">${usable > 0 ? '可用 ×' + usable : '已选满'}</div>
+        <div class="sub">${usable > 0 ? tr('synth.usable', '可用 ×{count}', { count: usable }) : tr('synth.selectedFull', '已选满')}</div>
         ${x.quantity > 1 ? `<div class="qty">×${x.quantity}</div>` : ''}
       </div>`;
     }).join('');
@@ -3309,11 +3345,11 @@
       el.onclick = () => {
         const item = synthBagById(Number(el.dataset.id));
         if (!item) return;
-        if (synthUsable(item) <= 0) return toast('这个收集物没有多余份数可用于合成', 'err');
-        if (filled >= need) return toast('槽位已满', 'err');
+        if (synthUsable(item) <= 0) return toast(tr('synth.noExtra', '这个收集物没有多余份数可用于合成'), 'err');
+        if (filled >= need) return toast(tr('synth.slotsFull', '槽位已满'), 'err');
         const anchorNow = synthAnchor();
         if (anchorNow && (anchorNow.type !== item.type || effRarity(anchorNow.rarity) !== effRarity(item.rarity)))
-          return toast('请选择相同类型和稀有度的收集物', 'err');
+          return toast(tr('synth.sameType', '请选择相同类型和稀有度的收集物'), 'err');
         const idx = state.synthSlots.findIndex(v => v === null);
         if (idx < 0) return;
         state.synthSlots[idx] = item.id;
@@ -3326,7 +3362,7 @@
   }
 
   async function synthOneClick() {
-    if (synthAnyMode()) return toast('高级合成禁止使用一键放置', 'err');
+    if (synthAnyMode()) return toast(tr('synth.advancedForbidden', '高级合成禁止使用一键放置'), 'err');
     const need = synthNeed();
     const filled = state.synthSlots.filter(x => x !== null).length;
     if (filled >= need) return;
@@ -3340,7 +3376,7 @@
     if (synthAnyMode()) {
       const remaining = need - filled;
       if (pool.reduce((sum, x) => sum + synthUsable(x), 0) < remaining)
-        return toast('库存中的可用材料不足', 'err');
+        return toast(tr('synth.notEnough', '库存中的可用材料不足'), 'err');
       const slots = [...state.synthSlots];
       for (const item of pool.sort((a, b) => synthUsable(b) - synthUsable(a))) {
         const take = Math.min(synthUsable(item), remaining - slots.filter(Boolean).length);
@@ -3364,7 +3400,7 @@
       chosenRarity = effRarity(anchor.rarity);
       group = pool.filter(x => x.type === chosenType && effRarity(x.rarity) === chosenRarity);
       if (group.reduce((s, x) => s + synthUsable(x), 0) < need - filled)
-        return toast('已有槽位对应的类型/稀有度材料不足', 'err');
+        return toast(tr('synth.anchorNotEnough', '已有槽位对应的类型/稀有度材料不足'), 'err');
     } else {
       const groups = new Map();
       for (const it of pool) {
@@ -3381,7 +3417,7 @@
           || orderT[a[0].type] - orderT[b[0].type]
           || b.reduce((s, x) => s + synthUsable(x), 0) - a.reduce((s, x) => s + synthUsable(x), 0));
       if (!candidates.length)
-        return toast('角色 / 配件 / 表情中都没有足够的多余材料', 'err');
+        return toast(tr('synth.noMaterials', '角色 / 配件 / 表情中都没有足够的多余材料'), 'err');
       group = candidates[0];
       chosenType = group[0].type;
       chosenRarity = effRarity(group[0].rarity);
@@ -3438,7 +3474,7 @@
       }
     }
     if (state.page === 'bag') renderBag();
-    if (!loaded) toast('背包刷新失败，请稍后手动刷新', 'err');
+    if (!loaded) toast(tr('synth.bagRefreshFailed', '背包刷新失败，请稍后手动刷新'), 'err');
   }
 
   function bagDelta(before, after) {
@@ -3463,7 +3499,7 @@
           ...(bagItem || {}),
           ...x,
           id: id || bagItem?.id || 0,
-          name: x.name || x.asset_name || bagItem?.name || '新物品',
+          name: x.name || x.asset_name || bagItem?.name || tr('synth.newItem', '新物品'),
           thumb: x.thumb || bagItem?.thumb || '',
           gained: Number(x.quantity || x.count || 1) || 1,
         };
@@ -3478,15 +3514,15 @@
       ? `<div class="redeem-items">${list.map(x => `
           <div class="redeem-item">
             ${x.thumb ? img(x.thumb, 'redeem-thumb', x.name) : '<div class="redeem-thumb">🎁</div>'}
-            <div class="redeem-name">${esc(x.name || '新物品')}</div>
+            <div class="redeem-name">${esc(x.name || tr('synth.newItem', '新物品'))}</div>
             <div class="redeem-qty">×${x.gained || 1}</div>
           </div>`).join('')}</div>`
-      : '<div class="r-sub">奖励已发放到背包，请查看背包。</div>';
+      : `<div class="r-sub">${tr('synth.redeemToBag', '奖励已发放到背包，请查看背包。')}</div>`;
     modal(`<div class="reward">
-      <div class="r-name">兑换成功</div>
+      <div class="r-name">${tr('synth.redeemSuccess', '兑换成功')}</div>
       <div class="r-sub">${esc(code)}</div>
       ${body}
-      <button class="btn" id="mOk" style="margin-top:8px">收下</button>
+      <button class="btn" id="mOk" style="margin-top:8px">${tr('synth.take', '收下')}</button>
     </div>`, host => host.querySelector('#mOk').onclick = closeModal);
   }
 
@@ -3536,7 +3572,7 @@
     }
     if (state.page === 'bag') renderBag();
     if (gained.length) showRedeemReward(gained, code);
-    else toast('兑换成功，奖励已发放到背包');
+    else toast(tr('synth.redeemDone', '兑换成功，奖励已发放到背包'));
   }
 
   async function performSynth(ids, sameLevel) {
@@ -3546,20 +3582,20 @@
       const id = Number(r?.asset_id || r?.data?.asset_id) || 0;
       await refreshAfterAcquire(id);
       const found = (state.bag || []).find(v => v.id === id);
-      let thumb = '', name = '合成成功';
+      let thumb = '', name = tr('synth.success', '合成成功');
       if (found) { thumb = found.thumb; name = found.name; }
       modal(`<div class="reward">
         <div class="rays"></div>
         ${thumb ? img(thumb, 'prize', name) : '<div style="font-size:64px">🎁</div>'}
         <div class="r-name">${esc(name)}</div>
-        <div class="r-sub">合成成功</div>
-        <button class="btn" id="mOk" style="margin-top:8px">收下</button>
+        <div class="r-sub">${tr('synth.success', '合成成功')}</div>
+        <button class="btn" id="mOk" style="margin-top:8px">${tr('synth.take', '收下')}</button>
       </div>`, host => host.querySelector('#mOk').onclick = closeModal);
       synthResetSlots();
       renderSynth();
     } catch (e) {
       // 后端互斥锁可能返回“正在进行其他合成操作”，这里不能静默吞掉。
-      toast(e?.message || '合成失败', 'err');
+      toast(e?.message || tr('synth.failed', '合成失败'), 'err');
     }
     finally { state.synthBusy = false; }
   }
@@ -3568,22 +3604,22 @@
     if (state.synthBusy) return;
     const need = synthNeed();
     const ids = state.synthSlots.filter(x => x !== null);
-    if (ids.length !== need) return toast(`需要 ${need} 个材料`, 'err');
+    if (ids.length !== need) return toast(tr('synth.needMaterials', '需要 {count} 个材料', { count: need }), 'err');
     const selectedItems = ids.map(id => synthBagById(id)).filter(Boolean);
     if (selectedItems.length !== ids.length)
-      return toast('合成材料数据失效，请重新选择', 'err');
+      return toast(tr('synth.materialInvalid', '合成材料数据失效，请重新选择'), 'err');
     const first = selectedItems[0];
     if (selectedItems.some(x => x.type !== first.type || effRarity(x.rarity) !== effRarity(first.rarity)))
-      return toast('不能跨材料合成，请选择相同类型和稀有度的收集物', 'err');
+      return toast(tr('synth.crossType', '不能跨材料合成，请选择相同类型和稀有度的收集物'), 'err');
     const sameLevel = state.synthMode === 'same';
     if (synthAnyMode()) {
       state.synthBusy = true;
       modal(`<div class="about">
-        <div class="about-title">合成确认</div>
-        <div class="about-note about-note--warn"><p>确认要开始此次合成吗？这将可能损失你已解锁的图鉴</p></div>
+        <div class="about-title">${tr('synth.confirmTitle', '合成确认')}</div>
+        <div class="about-note about-note--warn"><p>${tr('synth.confirmBody', '确认要开始此次合成吗？这将可能损失你已解锁的图鉴')}</p></div>
         <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
-          <button class="btn ghost" id="synthCancel">取消</button>
-          <button class="btn danger" id="synthConfirm">确认合成</button>
+          <button class="btn ghost" id="synthCancel">${tr('common.cancel', '取消')}</button>
+          <button class="btn danger" id="synthConfirm">${tr('synth.confirm', '确认合成')}</button>
         </div>
       </div>`, host => {
         const release = () => { state.synthBusy = false; };
@@ -3739,18 +3775,18 @@
     const emoteIds = [...(source.emoteAssetIds || [])];
     while (emoteIds.length < 5) emoteIds.push(0);
     modal(`<div class="preset-edit">
-      <div class="preset-title" style="margin-bottom:10px">${existing ? '编辑本地外观' : '保存为本地外观'}</div>
-      <label class="setting-title">名称</label>
-      <input class="input" id="localPresetName" value="${esc(source.name || '')}" placeholder="例如：日常搭配" style="margin:6px 0 12px">
-      <div class="muted" style="font-size:12px;line-height:1.6">保存当前角色：${esc(catalogName('character_skin', source.characterAssetId))}<br>配件：${esc(catalogName('accessory', source.accessoryAssetId))}<br>表情：${emoteIds.filter(Boolean).length} 个</div>
+      <div class="preset-title" style="margin-bottom:10px">${existing ? tr('preset.editLocalTitle', '编辑本地外观') : tr('preset.saveLocalTitle', '保存为本地外观')}</div>
+      <label class="setting-title">${tr('preset.name', '名称')}</label>
+      <input class="input" id="localPresetName" value="${esc(source.name || '')}" placeholder="${tr('preset.namePlaceholder', '例如：日常搭配')}" style="margin:6px 0 12px">
+      <div class="muted" style="font-size:12px;line-height:1.6">${tr('preset.currentCharacter', '保存当前角色：{name}', { name: esc(catalogName('character_skin', source.characterAssetId)) })}<br>${tr('preset.accessory', '配件：{name}', { name: esc(catalogName('accessory', source.accessoryAssetId)) })}<br>${tr('preset.emoteCount', '表情：{count} 个', { count: emoteIds.filter(Boolean).length })}</div>
       <div style="display:flex;gap:10px;margin-top:14px;justify-content:flex-end">
-        <button class="btn ghost" id="localPresetCancel">取消</button>
-        <button class="btn" id="localPresetSave">保存</button>
+        <button class="btn ghost" id="localPresetCancel">${tr('common.cancel', '取消')}</button>
+        <button class="btn" id="localPresetSave">${tr('common.save', '保存')}</button>
       </div>
     </div>`, h => {
       h.querySelector('#localPresetCancel').onclick = closeModal;
       h.querySelector('#localPresetSave').onclick = async () => {
-        const name = h.querySelector('#localPresetName').value.trim() || '本地预设';
+        const name = h.querySelector('#localPresetName').value.trim() || tr('preset.defaultLocalName', '本地预设');
         try {
           await tryCall('presets.local.save', {
             id: source.id || '',
@@ -3763,7 +3799,7 @@
           closeModal();
           await ensureLocalPresets(true);
           renderPreset();
-          toast('已保存本地外观');
+          toast(tr('preset.savedLocal', '已保存本地外观'));
         } catch { }
       };
     });
@@ -3795,15 +3831,15 @@
       renderChrome();
       renderPreset();
       const localOnly = [];
-      if (!charOwned) localOnly.push('角色 ' + catalogName('character_skin', charId));
-      if (!accOwned) localOnly.push('配件 ' + catalogName('accessory', accId));
+      if (!charOwned) localOnly.push(tr('preset.localRole', '角色 {name}', { name: catalogName('character_skin', charId) }));
+      if (!accOwned) localOnly.push(tr('preset.localAccessory', '配件 {name}', { name: catalogName('accessory', accId) }));
       const suffix = !hasEmotes
-        ? '（预设不含表情，已保留本地表情栏）'
-        : (ignoreEmotes ? '（已忽略预设表情，本地表情栏未变）' : '');
-      if (localOnly.length) toast(`已应用；${localOnly.join('、')}仅本地生效${suffix}`);
-      else if (isLocal) toast(`已应用本地外观${suffix}`);
-      else toast((uploaded ? '已应用并同步云端' : '已应用本地外观') + suffix);
-    } catch (e) { toast(e.message || '应用预设失败', 'err'); }
+        ? tr('preset.keepEmotesSuffix', '（预设不含表情，已保留本地表情栏）')
+        : (ignoreEmotes ? tr('preset.ignoreEmotesSuffix', '（已忽略预设表情，本地表情栏未变）') : '');
+      if (localOnly.length) toast(tr('preset.localOnlySuffix', '已应用；{items}仅本地生效', { items: localOnly.join(tr('common.listSeparator', '、')) }) + suffix);
+      else if (isLocal) toast(tr('preset.appliedLocal', '已应用本地外观') + suffix);
+      else toast((uploaded ? tr('preset.appliedCloud', '已应用并同步云端') : tr('preset.appliedLocal', '已应用本地外观')) + suffix);
+    } catch (e) { toast(e.message || tr('preset.applyFailed', '应用预设失败'), 'err'); }
   }
 
   /** 「使用」按钮：非空表情集合覆盖前明确确认；空集合直接应用并说明保留本地表情。 */
@@ -3815,13 +3851,13 @@
     }
     const count = presetEmoteSlots(p).filter(id => id > 0).length;
     modal(`<div class="about">
-      <div class="about-title">应用预设</div>
-      <div class="about-note"><p>该预设包含 ${count} 个表情，应用后会覆盖本地 5 个表情槽位（空槽也会被清空）。</p></div>
-      <div class="about-note about-note--warn"><p>如果只想切换角色和配件，请选择「使用（忽略表情）」，本地表情栏不会改变。</p></div>
+      <div class="about-title">${tr('preset.applyTitle', '应用预设')}</div>
+      <div class="about-note"><p>${tr('preset.applyBody', '该预设包含 {count} 个表情，应用后会覆盖本地 5 个表情槽位（空槽也会被清空）。', { count })}</p></div>
+      <div class="about-note about-note--warn"><p>${tr('preset.applyWarn', '如果只想切换角色和配件，请选择「使用（忽略表情）」，本地表情栏不会改变。')}</p></div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap">
-        <button class="btn ghost" id="presetApplyCancel">取消</button>
-        <button class="btn ghost" id="presetApplyIgnore">使用（忽略表情）</button>
-        <button class="btn" id="presetApplyWithEmotes">应用角色/配件与表情</button>
+        <button class="btn ghost" id="presetApplyCancel">${tr('common.cancel', '取消')}</button>
+        <button class="btn ghost" id="presetApplyIgnore">${tr('preset.applyIgnore', '使用（忽略表情）')}</button>
+        <button class="btn" id="presetApplyWithEmotes">${tr('preset.applyWithEmotes', '应用角色/配件与表情')}</button>
       </div>
     </div>`, host => {
       host.querySelector('#presetApplyCancel').onclick = closeModal;
@@ -3851,36 +3887,36 @@
     const selectedItemId = () => tab === 'character_skin' ? temp.characterAssetId : tab === 'accessory' ? temp.accessoryAssetId : 0;
 
     modal(`<div class="preset-edit">
-      <div class="preset-title" style="margin-bottom:10px">${isLocal ? '编辑本地外观' : '修改云外观配置'}</div>
-      ${isLocal ? `<label class="setting-title">名称</label><input class="input" id="peName" value="${esc(p.name || '')}" style="margin:6px 0 10px">` : ''}
+      <div class="preset-title" style="margin-bottom:10px">${isLocal ? tr('preset.editingLocal', '编辑本地外观') : tr('preset.editingCloud', '修改云外观配置')}</div>
+      ${isLocal ? `<label class="setting-title">${tr('preset.name', '名称')}</label><input class="input" id="peName" value="${esc(p.name || '')}" style="margin:6px 0 10px">` : ''}
       <div id="pePreview"></div>
       <div class="pe-tabs">
-        <button type="button" class="pill active" data-pe-tab="character_skin">角色</button>
-        <button type="button" class="pill" data-pe-tab="accessory">配件</button>
-        <button type="button" class="pill" data-pe-tab="emote">表情</button>
+        <button type="button" class="pill active" data-pe-tab="character_skin">${tr('preset.tabCharacter', '角色')}</button>
+        <button type="button" class="pill" data-pe-tab="accessory">${tr('preset.tabAccessory', '配件')}</button>
+        <button type="button" class="pill" data-pe-tab="emote">${tr('preset.tabEmote', '表情')}</button>
         <span class="spacer"></span>
         <span class="muted" id="peSlotHint" style="font-size:11px"></span>
       </div>
       <div class="pe-filters">
-        <input class="input" id="peSearch" placeholder="搜索名称 / 系列" style="flex:1;min-width:120px">
+        <input class="input" id="peSearch" placeholder="${tr('preset.searchPlaceholder', '搜索名称 / 系列')}" style="flex:1;min-width:120px">
         <span id="peFilterHost" style="display:flex;gap:8px"></span>
-        <button type="button" class="pill" id="peOwnedOnly" title="只显示当前账号已拥有的条目">仅拥有</button>
+        <button type="button" class="pill" id="peOwnedOnly" title="${tr('preset.ownedOnlyTitle', '只显示当前账号已拥有的条目')}">${tr('preset.ownedOnly', '仅拥有')}</button>
       </div>
       <div class="pe-grid" id="peGrid"></div>
-      <div class="muted" style="font-size:11px;margin-top:8px">${isLocal ? '本地预设可以任意搭配；云端修改会创建新预设并删除旧预设。' : '云端预设需要角色、配件和表情都满足拥有/角色匹配条件才能保存。'}</div>
+      <div class="muted" style="font-size:11px;margin-top:8px">${isLocal ? tr('preset.localHint', '本地预设可以任意搭配；云端修改会创建新预设并删除旧预设。') : tr('preset.cloudHint', '云端预设需要角色、配件和表情都满足拥有/角色匹配条件才能保存。')}</div>
       <div style="display:flex;gap:10px;margin-top:14px;justify-content:flex-end">
-        <button class="btn ghost" id="peCancel">取消</button>
-        <button class="btn" id="peSave">保存</button>
+        <button class="btn ghost" id="peCancel">${tr('common.cancel', '取消')}</button>
+        <button class="btn" id="peSave">${tr('common.save', '保存')}</button>
       </div>
     </div>`, h => {
       const escAttr = esc;
       const emoteSlotsHtml = () => [0, 1, 2, 3, 4].map(i => {
         const thumb = catalogThumb('emote', temp.emoteAssetIds[i]);
-        return `<div class="preset-emote ${i === selectedSlot ? 'selected' : ''}" data-pe-slot="${i}" title="槽位 ${i + 1}">${thumb ? `<img src="${escAttr(thumb)}" alt="">` : '<span class="muted">空</span>'}<span>${i + 1}</span></div>`;
+        return `<div class="preset-emote ${i === selectedSlot ? 'selected' : ''}" data-pe-slot="${i}" title="${tr('bag.slotLabel', '槽位 {n}', { n: i + 1 })}">${thumb ? `<img src="${escAttr(thumb)}" alt="">` : `<span class="muted">${tr('common.empty', '空')}</span>`}<span>${i + 1}</span></div>`;
       }).join('');
       const renderPreview = () => {
         h.querySelector('#pePreview').innerHTML = `${presetStageHtml(temp.characterAssetId, temp.accessoryAssetId)}<div class="preset-emote-preview">${emoteSlotsHtml()}</div>`;
-        h.querySelector('#peSlotHint').textContent = tab === 'emote' ? `正在编辑槽位 ${selectedSlot + 1}` : '点击下方表情可放入当前槽位';
+        h.querySelector('#peSlotHint').textContent = tab === 'emote' ? tr('preset.editSlot', '正在编辑槽位 {n}', { n: selectedSlot + 1 }) : tr('preset.clickEmote', '点击下方表情可放入当前槽位');
         h.querySelectorAll('[data-pe-slot]').forEach(el => {
           el.onclick = () => { selectedSlot = Number(el.dataset.peSlot); renderPreview(); renderGrid(); };
         });
@@ -3889,11 +3925,15 @@
       const renderGrid = () => {
         const all = itemsOf(tab);
         const roleMap = new Map();
+        const roleFallback = new Map();
         for (const x of all) {
           const r = String(assetMeta(x).role || 0);
           if (!r || r === '0') continue;
-          const lbl = roleLabelOf(x);
-          if (!roleMap.has(r) || (roleMap.get(r).startsWith('角色 ') && !lbl.startsWith('角色 '))) roleMap.set(r, lbl || r);
+          const info = roleLabelInfo(x);
+          if (!roleMap.has(r) || (roleFallback.get(r) && !info.fallback)) {
+            roleMap.set(r, info.label || r);
+            roleFallback.set(r, info.fallback);
+          }
         }
         const roleOptions = [...roleMap.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'zh'));
         const seriesOptions = [...new Set(all.map(x => x.series).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), 'zh'));
@@ -3906,13 +3946,13 @@
           }
         }
         const defs = tab === 'character_skin'
-          ? [{ key: 'role', label: '角色', options: roleOptions }, { key: 'series', label: '系列', options: seriesOptions.map(s => [s, s]) }]
+          ? [{ key: 'role', label: tr('preset.role', '角色'), options: roleOptions }, { key: 'series', label: tr('detail.series', '系列'), options: seriesOptions.map(s => [s, s]) }]
           : tab === 'emote'
-            ? [{ key: 'role', label: '角色', options: roleOptions }, { key: 'kind', label: '表情', options: [...kindMap.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'zh')) }]
-            : [{ key: 'rarity', label: '稀有度', options: rarityOptions.map(r => [r, RARITY_TEXT[r] || r]) }, { key: 'series', label: '系列', options: seriesOptions.map(s => [s, s]) }];
+            ? [{ key: 'role', label: tr('preset.role', '角色'), options: roleOptions }, { key: 'kind', label: tr('preset.tabEmote', '表情'), options: [...kindMap.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'zh')) }]
+            : [{ key: 'rarity', label: tr('detail.rarity', '稀有度'), options: rarityOptions.map(r => [r, rarityText(r) || r]) }, { key: 'series', label: tr('detail.series', '系列'), options: seriesOptions.map(s => [s, s]) }];
         const host = h.querySelector('#peFilterHost');
         host.innerHTML = defs.filter(d => d.options.length).map((d, i) =>
-          `<select class="select" id="peFilter${i}" style="width:130px"><option value="">${d.label}：全部</option>${d.options.map(([value, label]) => `<option value="${escAttr(value)}">${escAttr(d.label + '：' + label)}</option>`).join('')}</select>`
+          `<select class="select" id="peFilter${i}" style="width:130px"><option value="">${d.label}：${tr('common.all', '全部')}</option>${d.options.map(([value, label]) => `<option value="${escAttr(value)}">${escAttr(d.label + '：' + label)}</option>`).join('')}</select>`
         ).join('');
         const applyFilter = (def, value) => {
           if (!value) return;
@@ -3949,7 +3989,7 @@
             <span class="pe-name">${esc(catalogName(tab, id))}</span>
             <span class="pe-sub">${esc(x.series || (tab === 'emote' ? emoteKindLabel(x) : ''))}</span>
           </button>`;
-        }).join('') : `<div class="empty-state" style="grid-column:1/-1">没有符合条件的条目</div>`;
+        }).join('') : `<div class="empty-state" style="grid-column:1/-1">${tr('preset.noMatch', '没有符合条件的条目')}</div>`;
         h.querySelectorAll('[data-pe-type]').forEach(el => {
           el.onclick = () => {
             const type = el.dataset.peType;
@@ -3965,7 +4005,7 @@
             renderGrid();
           };
         });
-        h.querySelector('#peSlotHint').textContent = tab === 'emote' ? `正在编辑槽位 ${selectedSlot + 1}` : '点击下方表情可放入当前槽位';
+        h.querySelector('#peSlotHint').textContent = tab === 'emote' ? tr('preset.editSlot', '正在编辑槽位 {n}', { n: selectedSlot + 1 }) : tr('preset.clickEmote', '点击下方表情可放入当前槽位');
       };
 
       h.querySelectorAll('[data-pe-tab]').forEach(btn => btn.onclick = () => {
@@ -3992,7 +4032,7 @@
           if (isLocal) {
             await tryCall('presets.local.save', {
               id: p.id || '',
-              name: h.querySelector('#peName')?.value.trim() || p.name || '本地预设',
+              name: h.querySelector('#peName')?.value.trim() || p.name || tr('preset.defaultLocalName', '本地预设'),
               characterAssetId: temp.characterAssetId,
               accessoryAssetId: temp.accessoryAssetId,
               emoteAssetIds,
@@ -4013,8 +4053,8 @@
             await ensurePresets(true);
           }
           renderPreset();
-          toast('预设已更新');
-        } catch (e) { toast(e.message || '保存预设失败', 'err'); }
+          toast(tr('preset.updated', '预设已更新'));
+        } catch (e) { toast(e.message || tr('preset.saveFailed', '保存预设失败'), 'err'); }
       };
       renderPreview();
       renderGrid();
@@ -4025,26 +4065,28 @@
     const charId = Number(p.character_asset_id ?? p.characterAssetId ?? 0);
     const accId = Number(p.accessory_asset_id ?? p.accessoryAssetId ?? 0);
     const emotes = presetEmoteIds(p);
-    const title = isLocal ? (p.name || `本地预设 ${index + 1}`) : `预设 ${index + 1}`;
+    const title = isLocal
+      ? (p.name || tr('preset.localDefault', '本地预设 {n}', { n: index + 1 }))
+      : tr('preset.cloudDefault', '预设 {n}', { n: index + 1 });
     return `<div class="preset-card">
       <div class="preset-head"><span class="preset-emoji">${isLocal ? '🏠' : '⭐'}</span><span class="preset-title">${esc(title)}</span></div>
       ${presetPreviewHtml(p)}
-      <div class="detail-row"><span>角色</span><span>${esc(catalogName('character_skin', charId))}</span></div>
-      <div class="detail-row"><span>配件</span><span>${esc(catalogName('accessory', accId))}</span></div>
-      <div class="detail-row"><span>表情</span><span>${emotes.length ? emotes.length + ' 个' : '不含表情（应用时保留本地）'}</span></div>
+      <div class="detail-row"><span>${tr('preset.role', '角色')}</span><span>${esc(catalogName('character_skin', charId))}</span></div>
+      <div class="detail-row"><span>${tr('preset.tabAccessory', '配件')}</span><span>${esc(catalogName('accessory', accId))}</span></div>
+      <div class="detail-row"><span>${tr('preset.tabEmote', '表情')}</span><span>${emotes.length ? tr('preset.emoteCountShort', '{count} 个', { count: emotes.length }) : tr('preset.noEmotes', '不含表情（应用时保留本地）')}</span></div>
       <div class="preset-actions">
-        <button class="btn ghost" data-${isLocal ? 'l' : 'c'}apply="${index}" title="${emotes.length ? '应用前会确认是否覆盖本地表情槽' : '预设不含表情，不会改变本地表情槽'}">使用</button>
-        <button class="btn ghost" data-${isLocal ? 'l' : 'c'}ignore="${index}" title="只应用角色和配件，本地 5 个表情槽保持不变">使用（忽略表情）</button>
-        <button class="btn ghost" data-${isLocal ? 'l' : 'c'}edit="${index}">修改</button>
-        ${isLocal ? `<button class="btn ghost" data-lupload="${index}">上传云端</button>` : ''}
-        <button class="btn danger" data-${isLocal ? 'l' : 'c'}del="${index}">删除</button>
+        <button class="btn ghost" data-${isLocal ? 'l' : 'c'}apply="${index}" title="${emotes.length ? tr('preset.applyConfirmTitle', '应用前会确认是否覆盖本地表情槽') : tr('preset.applyIgnoreTitle', '预设不含表情，不会改变本地表情槽')}">${tr('preset.use', '使用')}</button>
+        <button class="btn ghost" data-${isLocal ? 'l' : 'c'}ignore="${index}" title="${tr('preset.applyIgnoreTitle2', '只应用角色和配件，本地 5 个表情槽保持不变')}">${tr('preset.applyIgnore', '使用（忽略表情）')}</button>
+        <button class="btn ghost" data-${isLocal ? 'l' : 'c'}edit="${index}">${tr('common.edit', '修改')}</button>
+        ${isLocal ? `<button class="btn ghost" data-lupload="${index}">${tr('preset.upload', '上传云端')}</button>` : ''}
+        <button class="btn danger" data-${isLocal ? 'l' : 'c'}del="${index}">${tr('common.delete', '删除')}</button>
       </div>
     </div>`;
   }
 
   async function renderPreset() {
     if (pageAuthBlocked('preset')) return;
-    setPage('<div class="loading">正在读取预设…</div>');
+    setPage(`<div class="loading">${tr('preset.loading', '正在读取预设…')}</div>`);
     try {
       await Promise.all([
         ensurePresets(),
@@ -4052,26 +4094,26 @@
         ...['character_skin', 'accessory', 'emote'].map(t => ensureCatalog(t).catch(() => [])),
         ...['character_skin', 'accessory', 'emote'].map(t => ensureAtlasOne(t).catch(() => [])),
       ]);
-    } catch { setPage('<div class="empty-state">预设读取失败</div>'); return; }
+    } catch { setPage(`<div class="empty-state">${tr('preset.loadFailed', '预设读取失败')}</div>`); return; }
     const list = state.presets || [];
     const localList = state.localPresets || [];
     setPage(`
       <div class="preset-page-scroll">
         <div class="pill-row" style="margin-bottom:14px;flex-wrap:wrap">
-          <span class="muted" style="font-size:13px">预设保存角色、配件与五个表情槽位；云端预设只在全部满足云端条件时上传。</span>
+          <span class="muted" style="font-size:13px">${tr('preset.intro', '预设保存角色、配件与五个表情槽位；云端预设只在全部满足云端条件时上传。')}</span>
           <span class="spacer"></span>
-          <label class="muted" style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="presetIncludeEmotes"> 保存云端时包含表情</label>
-          <button class="btn ghost" id="presetRefresh">刷新</button>
-          <button class="btn ghost" id="presetCreateLocal">保存为本地外观</button>
-          <button class="btn" id="presetCreate">保存当前为云外观配置</button>
+          <label class="muted" style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="presetIncludeEmotes"> ${tr('preset.includeEmotes', '保存云端时包含表情')}</label>
+          <button class="btn ghost" id="presetRefresh">${tr('common.refresh', '刷新')}</button>
+          <button class="btn ghost" id="presetCreateLocal">${tr('preset.saveLocal', '保存为本地外观')}</button>
+          <button class="btn" id="presetCreate">${tr('preset.saveCloud', '保存当前为云外观配置')}</button>
         </div>
         <div class="section">
-          <div class="section-title">云外观配置</div>
-          <div class="preset-list" id="presetList">${list.length ? list.map((p, i) => presetCardHtml(p, i, false)).join('') : '<div class="empty-state">还没有云端预设</div>'}</div>
+          <div class="section-title">${tr('preset.cloudSection', '云外观配置')}</div>
+          <div class="preset-list" id="presetList">${list.length ? list.map((p, i) => presetCardHtml(p, i, false)).join('') : `<div class="empty-state">${tr('preset.noCloud', '还没有云端预设')}</div>`}</div>
         </div>
         <div class="section">
-          <div class="section-title">本地外观配置</div>
-          <div class="preset-list" id="localPresetList">${localList.length ? localList.map((p, i) => presetCardHtml(p, i, true)).join('') : '<div class="empty-state">还没有本地预设，点击「保存为本地外观」创建</div>'}</div>
+          <div class="section-title">${tr('preset.localSection', '本地外观配置')}</div>
+          <div class="preset-list" id="localPresetList">${localList.length ? localList.map((p, i) => presetCardHtml(p, i, true)).join('') : `<div class="empty-state">${tr('preset.noLocal', '还没有本地预设，点击「保存为本地外观」创建')}</div>`}</div>
         </div>
       </div>`);
     document.getElementById('presetRefresh').onclick = async () => { await Promise.all([ensurePresets(true), ensureLocalPresets(true)]); renderPreset(); };
@@ -4080,8 +4122,8 @@
         await tryCall('presets.create', { includeEmotes: document.getElementById('presetIncludeEmotes').checked });
         await ensurePresets(true);
         renderPreset();
-        toast('已保存当前为云外观配置');
-      } catch (e) { toast(e.message || '当前外观不满足云端条件', 'err'); }
+        toast(tr('preset.savedCloud', '已保存当前为云外观配置'));
+      } catch (e) { toast(e.message || tr('preset.notCloudReady', '当前外观不满足云端条件'), 'err'); }
     };
     document.getElementById('presetCreateLocal').onclick = () => saveLocalPresetDialog();
     document.querySelectorAll('[data-capply]').forEach(b => b.onclick = () => confirmApplyPreset(list[Number(b.dataset.capply)], false));
@@ -4090,8 +4132,8 @@
     document.querySelectorAll('[data-cdel]').forEach(b => b.onclick = async () => {
       const p = list[Number(b.dataset.cdel)];
       const id = p.preset_id ?? p.id;
-      if (!id) return toast('该预设缺少 id', 'err');
-      try { await tryCall('presets.delete', { id }); await ensurePresets(true); renderPreset(); toast('已删除'); } catch { }
+      if (!id) return toast(tr('preset.missingId', '该预设缺少 id'), 'err');
+      try { await tryCall('presets.delete', { id }); await ensurePresets(true); renderPreset(); toast(tr('preset.deleted', '已删除')); } catch { }
     });
     document.querySelectorAll('[data-lapply]').forEach(b => b.onclick = () => confirmApplyPreset(localList[Number(b.dataset.lapply)], true));
     document.querySelectorAll('[data-lignore]').forEach(b => b.onclick = () => applyPreset(localList[Number(b.dataset.lignore)], true, true));
@@ -4107,13 +4149,13 @@
         });
         await ensurePresets(true);
         renderPreset();
-        toast('本地预设已上传为云外观配置');
-      } catch (e) { toast(e.message || '本地预设不满足云端条件', 'err'); }
+        toast(tr('preset.localUploaded', '本地预设已上传为云外观配置'));
+      } catch (e) { toast(e.message || tr('preset.localNotCloudReady', '本地预设不满足云端条件'), 'err'); }
     });
     document.querySelectorAll('[data-ldel]').forEach(b => b.onclick = async () => {
       const p = localList[Number(b.dataset.ldel)];
       if (!p.id) return;
-      try { await tryCall('presets.local.delete', { id: p.id }); state.localPresets = null; await ensureLocalPresets(true); renderPreset(); toast('已删除本地预设'); } catch { }
+      try { await tryCall('presets.local.delete', { id: p.id }); state.localPresets = null; await ensureLocalPresets(true); renderPreset(); toast(tr('preset.localDeleted', '已删除本地预设')); } catch { }
     });
   }
 
@@ -4147,70 +4189,73 @@
     const serviceDown = !!room.serviceUnavailable;
     const auth = state.boot?.auth || {};
     const authPaused = !authOnlineAvailable();
-    const authMessage = auth.message || auth.stateMessage || '账号功能已暂停。';
+    const authMessage = auth.message || auth.stateMessage || tr('auth.pausedDefault', '账号功能已暂停。');
     const hideOthersHotkey = String(state.boot?.settings?.hotkeys?.hideOtherPets || '').trim();
     const emotes = state.boot?.appearance?.emoteAssetIds || [];
     const blocked = onlineBlockedReason();
     const errorText = authPaused ? '' : (room.lastError || state.roomError?.message || '');
+    const hideOthersLabel = hideOthersHotkey
+      ? tr('settings.hotkeys.useKey', '使用 {key} 开关', { key: esc(hideOthersHotkey) })
+      : tr('settings.hotkeys.notSet', '当前未设置快捷键');
     setPage(`
       <div class="room-layout">
         <div class="room-left">
           ${authPaused ? `
           <div class="panel-box room-error auth-room-paused" style="background:#fff8e8;border:1px solid #e8c98c;color:#7a5a1f;font-size:13px;line-height:1.6">
-            <div class="setting-title" style="color:inherit">联机已暂停</div>
-            <div class="setting-sub" style="color:inherit">${esc(authMessage)} 本程序不会自动重新连接。</div>
+            <div class="setting-title" style="color:inherit">${tr('room.paused', '联机已暂停')}</div>
+            <div class="setting-sub" style="color:inherit">${esc(authMessage)} ${tr('room.pausedNoReconnect', '本程序不会自动重新连接。')}</div>
             <div style="display:flex;gap:8px;margin-top:8px">
-              <button class="btn ghost" data-auth-recheck>重新检测</button>
-              ${authState() === 'conflict' ? '<button class="btn" data-auth-reconnect>重新连接</button>' : ''}
+              <button class="btn ghost" data-auth-recheck>${tr('auth.recheck', '重新检测')}</button>
+              ${authState() === 'conflict' ? `<button class="btn" data-auth-reconnect>${tr('auth.reconnect', '重新连接')}</button>` : ''}
             </div>
           </div>` : ''}
           ${blocked ? `
           <div class="panel-box room-error" style="background:#fff8e8;border:1px solid #e8c98c;color:#7a5a1f;font-size:13px;line-height:1.6">
-            联网功能已暂停：${esc(blocked)}恢复安全状态后才能加入房间、开宝箱、合成或兑换。
+            ${tr('room.blocked', '联网功能已暂停：{reason}恢复安全状态后才能加入房间、开宝箱、合成或兑换。', { reason: esc(blocked) })}
           </div>` : ''}
           ${errorText ? `
           <div class="panel-box room-error" style="background:#fff0ee;border:1px solid #f2b8ad;color:#9b3b2e;font-size:13px;line-height:1.6">
-            <div class="setting-title" style="color:inherit">房间连接失败</div>
+            <div class="setting-title" style="color:inherit">${tr('room.failedTitle', '房间连接失败')}</div>
             <div class="setting-sub" style="color:inherit">${esc(errorText)}</div>
-            <button class="btn ghost" id="roomRetry" style="margin-top:8px">重试</button>
+            <button class="btn ghost" id="roomRetry" style="margin-top:8px">${tr('common.retry', '重试')}</button>
           </div>` : ''}
           ${serviceDown ? `
           <div class="panel-box" style="background:#fff0ee;border:1px solid #f2b8ad;color:#9b3b2e;font-size:13px;line-height:1.6">
-            联机服务暂不可用：官方联机服务器暂时无法连接，正在自动重试。
+            ${tr('room.serviceDown', '联机服务暂不可用：官方联机服务器暂时无法连接，正在自动重试。')}
           </div>` : ''}
           <div class="panel-box">
-            <div class="detail-row" style="margin-bottom:6px"><span>当前房间</span><span>${serviceDown ? '联机服务暂不可用' : (joined ? (room.connected ? '已连接' : '进入中…（等待房间确认）') : '未加入')}</span></div>
-            <div class="room-no">${joined ? esc(room.roomNo) : '——'}<span class="copy" id="copyRoom" ${joined ? '' : 'style="display:none"'}>复制</span></div>
-            <div class="detail-row" style="margin-top:8px"><span>可用点击数</span><span data-click-avail>${auth.clicks ?? 0}</span></div>
-            <div class="detail-row"><span>累计点击数</span><span data-click-total>${auth.clickTotal ?? auth.clicks ?? 0}</span></div>
+            <div class="detail-row" style="margin-bottom:6px"><span>${tr('room.current', '当前房间')}</span><span>${serviceDown ? tr('room.serviceUnavailable', '联机服务暂不可用') : (joined ? (room.connected ? tr('room.connected', '已连接') : tr('room.joining', '进入中…（等待房间确认）')) : tr('room.notJoined', '未加入'))}</span></div>
+            <div class="room-no">${joined ? esc(room.roomNo) : '——'}<span class="copy" id="copyRoom" ${joined ? '' : 'style="display:none"'}>${tr('room.copy', '复制')}</span></div>
+            <div class="detail-row" style="margin-top:8px"><span>${tr('room.availClicks', '可用点击数')}</span><span data-click-avail>${auth.clicks ?? 0}</span></div>
+            <div class="detail-row"><span>${tr('room.totalClicks', '累计点击数')}</span><span data-click-total>${auth.clickTotal ?? auth.clicks ?? 0}</span></div>
             ${joined && room.canSetRoomPublic ? `
             <div class="setting-item" style="margin-top:10px;padding:6px 4px;background:transparent">
-              <div><div class="setting-title">公开房间</div><div class="setting-sub">允许其他玩家通过“随机加入房间”匹配到本房间</div></div>
+              <div><div class="setting-title">${tr('room.public.title', '公开房间')}</div><div class="setting-sub">${tr('room.public.sub', '允许其他玩家通过“随机加入房间”匹配到本房间')}</div></div>
               <div class="switch ${room.roomIsPublic ? 'on' : ''}" id="roomPublic"></div>
             </div>` : ''}
             <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
-              <button class="btn" id="roomCreate" ${joined || authPaused || blocked ? 'disabled' : ''}>创建房间</button>
-              ${!joined ? `<button class="btn ghost" id="roomRandomJoin" ${authPaused || blocked ? 'disabled' : ''}>随机加入</button>` : ''}
-              <button class="btn danger" id="roomLeave" ${!joined || authPaused ? 'disabled' : ''}>离开房间</button>
+              <button class="btn" id="roomCreate" ${joined || authPaused || blocked ? 'disabled' : ''}>${tr('room.create', '创建房间')}</button>
+              ${!joined ? `<button class="btn ghost" id="roomRandomJoin" ${authPaused || blocked ? 'disabled' : ''}>${tr('room.randomJoin', '随机加入')}</button>` : ''}
+              <button class="btn danger" id="roomLeave" ${!joined || authPaused ? 'disabled' : ''}>${tr('room.leave', '离开房间')}</button>
             </div>
           </div>
           <div class="panel-box">
-            <div class="section-title" style="margin-left:0">${joined ? '切换房间' : '加入房间'}</div>
+            <div class="section-title" style="margin-left:0">${joined ? tr('room.switchRoom', '切换房间') : tr('room.joinRoom', '加入房间')}</div>
             <div style="display:flex;gap:10px">
-              <input class="input" id="joinNo" placeholder="输入房间号" style="flex:1" value="${esc(joined ? '' : (state.boot?.settings?.lastRoom || ''))}" ${authPaused ? 'disabled' : ''} />
-              <button class="btn" id="roomJoin" ${authPaused ? 'disabled' : ''}>${joined ? '切换' : '加入'}</button>
+              <input class="input" id="joinNo" placeholder="${tr('room.roomNoPlaceholder', '输入房间号')}" style="flex:1" value="${esc(joined ? '' : (state.boot?.settings?.lastRoom || ''))}" ${authPaused ? 'disabled' : ''} />
+              <button class="btn" id="roomJoin" ${authPaused ? 'disabled' : ''}>${joined ? tr('room.switch', '切换') : tr('room.join', '加入')}</button>
             </div>
-            ${joined ? '<div class="hint muted" style="font-size:12px;margin-top:8px">切换会先退出当前房间，再从历史或输入框进入新房间。</div>' : ''}
+            ${joined ? `<div class="hint muted" style="font-size:12px;margin-top:8px">${tr('room.switchHint', '切换会先退出当前房间，再从历史或输入框进入新房间。')}</div>` : ''}
           </div>
           <div class="panel-box">
-            <div class="section-title" style="margin-left:0">历史房间</div>
+            <div class="section-title" style="margin-left:0">${tr('room.history', '历史房间')}</div>
             ${(room.history || []).length
-              ? `<div class="chips">${room.history.slice(0, 20).map(h => `<button class="chip ${h === room.roomNo ? 'active' : ''}" data-hist="${esc(h)}" title="${h === room.roomNo ? '当前房间' : '点击进入'}">${esc(h)}</button>`).join('')}</div>`
-              : '<div class="hint muted" style="font-size:12px">还没有历史记录，加入或创建房间后会自动记录。</div>'}
+              ? `<div class="chips">${room.history.slice(0, 20).map(h => `<button class="chip ${h === room.roomNo ? 'active' : ''}" data-hist="${esc(h)}" title="${h === room.roomNo ? tr('room.currentRoom', '当前房间') : tr('room.clickEnter', '点击进入')}">${esc(h)}</button>`).join('')}</div>`
+              : `<div class="hint muted" style="font-size:12px">${tr('room.noHistory', '还没有历史记录，加入或创建房间后会自动记录。')}</div>`}
           </div>
           <div class="panel-box">
             <div class="setting-item" style="margin-bottom:0;padding:6px 4px;background:transparent">
-              <div><div class="setting-title">隐藏其他成员桌宠</div><div class="setting-sub">只影响本机显示<br><span class="hide-others-hotkey-note">${hideOthersHotkey ? `使用 ${esc(hideOthersHotkey)} 开关` : '当前未设置快捷键'}</span></div></div>
+              <div><div class="setting-title">${tr('room.hideOthers.title', '隐藏其他成员桌宠')}</div><div class="setting-sub">${tr('room.hideOthers.sub', '只影响本机显示')}<br><span class="hide-others-hotkey-note">${hideOthersLabel}</span></div></div>
               <div class="switch ${state.boot?.settings?.hideOtherPets ? 'on' : ''}" id="hideOthers"></div>
             </div>
           </div>
@@ -4218,51 +4263,51 @@
         <div class="room-right">
           <div class="panel-box" style="flex:1;display:flex;flex-direction:column;min-height:0">
             <div style="display:flex;align-items:center;gap:10px">
-              <div class="section-title" style="margin-left:0;flex:1">房间成员（${room.members?.length || 0}）</div>
-              <div class="layout-switch" id="catLayout" style="margin-left:auto" title="切换排列方向并重新排序">
-                <button type="button" class="layout-choice ${(state.boot?.settings?.catLayout || 'horizontal') !== 'vertical' ? 'active' : ''}" data-layout="horizontal">横向排列</button>
-                <button type="button" class="layout-choice ${(state.boot?.settings?.catLayout || 'horizontal') === 'vertical' ? 'active' : ''}" data-layout="vertical">纵向排列</button>
+              <div class="section-title" style="margin-left:0;flex:1">${tr('room.members', '房间成员（{count}）', { count: room.members?.length || 0 })}</div>
+              <div class="layout-switch" id="catLayout" style="margin-left:auto" title="${tr('room.layoutTitle', '切换排列方向并重新排序')}">
+                <button type="button" class="layout-choice ${(state.boot?.settings?.catLayout || 'horizontal') !== 'vertical' ? 'active' : ''}" data-layout="horizontal">${tr('room.horizontal', '横向排列')}</button>
+                <button type="button" class="layout-choice ${(state.boot?.settings?.catLayout || 'horizontal') === 'vertical' ? 'active' : ''}" data-layout="vertical">${tr('room.vertical', '纵向排列')}</button>
               </div>
             </div>
             <div class="member-list" id="memberList">
               ${(room.members || []).map(m => `
                 <div class="member ${m.owner ? 'owner' : ''}">
                   <span class="dot ${m.online ? '' : 'off'}"></span>
-                  <span class="m-name">${esc(m.nickname || '漂泊者')}</span>
-                  ${m.owner ? '<span class="m-role m-role-name">房主</span>' : ''}
-                  ${m.self ? '<span class="m-role m-role-name">我</span>' : ''}
-                  ${!m.online ? '<span class="m-role m-role-name">离线</span>' : ''}
+                  <span class="m-name">${esc(m.nickname || tr('common.defaultNickname', '漂泊者'))}</span>
+                  ${m.owner ? `<span class="m-role m-role-name">${tr('room.owner', '房主')}</span>` : ''}
+                  ${m.self ? `<span class="m-role m-role-name">${tr('room.me', '我')}</span>` : ''}
+                  ${!m.online ? `<span class="m-role m-role-name">${tr('room.offline', '离线')}</span>` : ''}
                   <span class="m-actions">
-                    <button class="chip" style="padding:2px 8px" data-mirror="${m.id}" data-mirrored="${m.mirrored ? 1 : 0}" title="水平翻转角色，底栏保持正方向">${m.mirrored ? '取消镜像' : '镜像'}</button>
+                    <button class="chip" style="padding:2px 8px" data-mirror="${m.id}" data-mirrored="${m.mirrored ? 1 : 0}" title="${tr('room.mirrorTitle', '水平翻转角色，底栏保持正方向')}">${m.mirrored ? tr('room.unmirror', '取消镜像') : tr('room.mirror', '镜像')}</button>
                     ${selfIsOwner && !m.self ? `
-                      <button class="chip" style="padding:2px 8px" data-transfer="${m.id}" ${room.ready ? '' : 'disabled'}>转让</button>
-                      <button class="chip" style="padding:2px 8px" data-kick="${m.id}" ${room.ready ? '' : 'disabled'}>移出</button>` : ''}
+                      <button class="chip" style="padding:2px 8px" data-transfer="${m.id}" ${room.ready ? '' : 'disabled'}>${tr('room.transfer', '转让')}</button>
+                      <button class="chip" style="padding:2px 8px" data-kick="${m.id}" ${room.ready ? '' : 'disabled'}>${tr('room.kick', '移出')}</button>` : ''}
                     ${!m.self ? (room.hiddenAll
-                      ? '<span class="m-role" title="已开启“隐藏其他成员桌宠”">已隐藏</span>'
-                      : `<button class="chip" style="padding:2px 10px" data-hide="${m.id}" data-visible="${m.visible ? 1 : 0}">${m.visible ? '隐藏' : '显示'}</button>`) : ''}
+                      ? `<span class="m-role" title="${tr('room.hiddenTitle', '已开启“隐藏其他成员桌宠”')}">${tr('room.hidden', '已隐藏')}</span>`
+                      : `<button class="chip" style="padding:2px 10px" data-hide="${m.id}" data-visible="${m.visible ? 1 : 0}">${m.visible ? tr('room.hide', '隐藏') : tr('room.show', '显示')}</button>`) : ''}
                   </span>
-                </div>`).join('') || '<div class="empty-state">还没有加入房间</div>'}
+                </div>`).join('') || `<div class="empty-state">${tr('room.noMembers', '还没有加入房间')}</div>`}
             </div>
           </div>
           <div class="panel-box">
             <div style="display:flex;align-items:center">
-              <div class="section-title" style="margin-left:0;flex:1">快捷表情（仅本地）</div>
-              <button class="btn ghost" id="editEmotesBtn" style="height:30px;padding:0 12px;font-size:13px">编辑表情栏</button>
+              <div class="section-title" style="margin-left:0;flex:1">${tr('room.emotes', '快捷表情（仅本地）')}</div>
+              <button class="btn ghost" id="editEmotesBtn" style="height:30px;padding:0 12px;font-size:13px">${tr('room.editEmotes', '编辑表情栏')}</button>
             </div>
             <div class="emote-row" id="emoteRow">
               ${[0, 1, 2, 3, 4].map(i => {
                 const id = emotes[i];
                 const item = emoteInfo(id);
-                return `<div class="emote-slot" data-emote="${id || ''}" title="槽位 ${i + 1}">${item ? img(item.thumb) : '<span class="muted">空</span>'}<span class="slot-no">${i + 1}</span></div>`;
+                return `<div class="emote-slot" data-emote="${id || ''}" title="${tr('bag.slotLabel', '槽位 {n}', { n: i + 1 })}">${item ? img(item.thumb) : `<span class="muted">${tr('common.empty', '空')}</span>`}<span class="slot-no">${i + 1}</span></div>`;
               }).join('')}
             </div>
-            <div class="hint muted" style="font-size:12px;margin-top:8px">槽位只保存在本机；发送时服务端不校验归属/角色，可直接发送任意表情。</div>
+            <div class="hint muted" style="font-size:12px;margin-top:8px">${tr('room.emoteHint', '槽位只保存在本机；发送时服务端不校验归属/角色，可直接发送任意表情。')}</div>
           </div>
         </div>
       </div>`);
 
     document.getElementById('copyRoom')?.addEventListener('click', () => {
-      navigator.clipboard?.writeText(room.roomNo).then(() => toast('房间号已复制')).catch(() => toast(room.roomNo));
+      navigator.clipboard?.writeText(room.roomNo).then(() => toast(tr('room.copied', '房间号已复制'))).catch(() => toast(room.roomNo));
     });
     document.getElementById('roomCreate').onclick = async () => {
       if (authPaused) return toast(authMessage, 'err');
@@ -4271,8 +4316,8 @@
         state.boot.room = r;
         state.roomError = null;
         renderRoom();
-        toast(r?.connected ? '房间已创建' : '正在创建房间，等待房间确认…');
-      } catch (e) { state.roomError = { message: e?.message || '创建房间失败' }; renderRoom(); }
+        toast(r?.connected ? tr('room.created', '房间已创建') : tr('room.creating', '正在创建房间，等待房间确认…'));
+      } catch (e) { state.roomError = { message: e?.message || tr('room.createFailed', '创建房间失败') }; renderRoom(); }
     };
     document.getElementById('roomRandomJoin')?.addEventListener('click', async () => {
       if (authPaused) return toast(authMessage, 'err');
@@ -4281,8 +4326,8 @@
         state.boot.room = r;
         state.roomError = null;
         renderRoom();
-        toast(r?.connected ? '已加入随机房间' : '正在进入随机房间，等待房间确认…');
-      } catch (e) { state.roomError = { message: e?.message || '随机加入房间失败' }; renderRoom(); }
+        toast(r?.connected ? tr('room.randomJoined', '已加入随机房间') : tr('room.randomJoining', '正在进入随机房间，等待房间确认…'));
+      } catch (e) { state.roomError = { message: e?.message || tr('room.randomJoinFailed', '随机加入房间失败') }; renderRoom(); }
     });
     document.getElementById('roomPublic')?.addEventListener('click', async () => {
       if (authPaused) return toast(authMessage, 'err');
@@ -4291,34 +4336,34 @@
         const r = await tryCall('room.setPublic', { isPublic: next });
         state.boot.room = r;
         renderRoom();
-        toast(next ? '已设为公开房间' : '已设为私有房间');
-      } catch (e) { toast(e?.message || '修改房间公开状态失败', 'err'); }
+        toast(next ? tr('room.publicOn', '已设为公开房间') : tr('room.publicOff', '已设为私有房间'));
+      } catch (e) { toast(e?.message || tr('room.publicFailed', '修改房间公开状态失败'), 'err'); }
     });
     document.querySelectorAll('[data-kick]').forEach(b => {
       b.onclick = () => {
         const id = Number(b.dataset.kick);
-        confirmRoomAction('移出成员', '是否确认将该玩家移出房间？', '移出', async () => {
+        confirmRoomAction(tr('room.kickTitle', '移出成员'), tr('room.kickBody', '是否确认将该玩家移出房间？'), tr('room.kickConfirm', '移出'), async () => {
           try {
             const r = await tryCall('room.kick', { id });
             state.boot.room = r;
             state.roomError = null;
             renderRoom();
-            toast('移出请求已发送');
-          } catch (e) { state.roomError = { message: e?.message || '移出成员失败' }; renderRoom(); }
+            toast(tr('room.kickSent', '移出请求已发送'));
+          } catch (e) { state.roomError = { message: e?.message || tr('room.kickFailed', '移出成员失败') }; renderRoom(); }
         });
       };
     });
     document.querySelectorAll('[data-transfer]').forEach(b => {
       b.onclick = () => {
         const id = Number(b.dataset.transfer);
-        confirmRoomAction('转让房主', '是否转让房主给该玩家？', '转让', async () => {
+        confirmRoomAction(tr('room.transferTitle', '转让房主'), tr('room.transferBody', '是否转让房主给该玩家？'), tr('room.transferConfirm', '转让'), async () => {
           try {
             const r = await tryCall('room.transferOwner', { id });
             state.boot.room = r;
             state.roomError = null;
             renderRoom();
-            toast('转让请求已发送');
-          } catch (e) { state.roomError = { message: e?.message || '转让房主失败' }; renderRoom(); }
+            toast(tr('room.transferSent', '转让请求已发送'));
+          } catch (e) { state.roomError = { message: e?.message || tr('room.transferFailed', '转让房主失败') }; renderRoom(); }
         });
       };
     });
@@ -4329,7 +4374,7 @@
         state.boot.room = r;
         state.roomError = null;
         renderRoom();
-        toast('已离开房间');
+        toast(tr('room.left', '已离开房间'));
       } catch { }
     };
     const joinRoom = async (roomNo, ownerConfirmed = false) => {
@@ -4340,29 +4385,29 @@
         state.roomError = null;
         renderRoom();
         // 只有房间成员快照确认后才算真正加入；否则只提示“进入中”，由 room 事件确认。
-        toast(r?.connected ? '已加入房间' : '正在进入房间，等待房间确认…');
+        toast(r?.connected ? tr('room.joined', '已加入房间') : tr('room.joiningWait', '正在进入房间，等待房间确认…'));
       } catch (e) {
-        state.roomError = { message: e?.message || '加入房间失败' };
+        state.roomError = { message: e?.message || tr('room.joinFailed', '加入房间失败') };
         renderRoom();
       }
     };
     document.getElementById('roomRetry')?.addEventListener('click', () => {
       const no = room.roomNo || state.boot?.settings?.lastRoom || document.getElementById('joinNo')?.value.trim();
-      if (!no) return toast('请输入房间号', 'err');
+      if (!no) return toast(tr('room.enterNo', '请输入房间号'), 'err');
       joinRoom(no, false);
     });
     document.getElementById('roomLeave').onclick = () => {
       if (selfIsOwner) {
-        confirmOwnerRoomAction('当前账号是房主。离开房间可能导致房间解散，其他成员会受到影响。确定要继续吗？', () => leaveRoom(true));
+        confirmOwnerRoomAction(tr('room.leaveOwnerConfirm', '当前账号是房主。离开房间可能导致房间解散，其他成员会受到影响。确定要继续吗？'), () => leaveRoom(true));
         return;
       }
       leaveRoom(false);
     };
     document.getElementById('roomJoin').onclick = () => {
       const no = document.getElementById('joinNo').value.trim();
-      if (!no) return toast('请输入房间号', 'err');
+      if (!no) return toast(tr('room.enterNo', '请输入房间号'), 'err');
       if (selfIsOwner && no !== room.roomNo) {
-        confirmOwnerRoomAction(`切换房间会先离开当前房主房间，可能导致房间解散。确定要切换到 ${no} 吗？`, () => joinRoom(no, true));
+        confirmOwnerRoomAction(tr('room.switchOwnerConfirm', '切换房间会先离开当前房主房间，可能导致房间解散。确定要切换到 {room} 吗？', { room: no }), () => joinRoom(no, true));
         return;
       }
       joinRoom(no, false);
@@ -4370,7 +4415,7 @@
     document.querySelectorAll('[data-hist]').forEach(b => b.onclick = () => {
       const no = b.dataset.hist;
       if (selfIsOwner && no !== room.roomNo) {
-        confirmOwnerRoomAction(`切换房间会先离开当前房主房间，可能导致房间解散。确定要切换到 ${no} 吗？`, () => joinRoom(no, true));
+        confirmOwnerRoomAction(tr('room.switchOwnerConfirm', '切换房间会先离开当前房主房间，可能导致房间解散。确定要切换到 {room} 吗？', { room: no }), () => joinRoom(no, true));
         return;
       }
       joinRoom(no, false);
@@ -4383,7 +4428,7 @@
           if (state.boot?.settings) state.boot.settings.catLayout = val;
           await tryCall('room.resetOrder');
           renderRoom();
-          toast(val === 'vertical' ? '已切换为纵向排列' : '已切换为横向排列');
+          toast(val === 'vertical' ? tr('toast.layoutVertical', '已切换为纵向排列') : tr('toast.layoutHorizontal', '已切换为横向排列'));
         } catch { }
       };
     });
@@ -4403,8 +4448,8 @@
           const r = await tryCall('room.mirror', { id, mirrored });
           state.boot.room = r;
           renderRoom();
-          toast(mirrored ? '已开启镜像' : '已关闭镜像');
-        } catch (e) { toast(e?.message || '切换镜像失败', 'err'); }
+          toast(mirrored ? tr('room.mirrorOn', '已开启镜像') : tr('room.mirrorOff', '已关闭镜像'));
+        } catch (e) { toast(e?.message || tr('room.mirrorFailed', '切换镜像失败'), 'err'); }
       };
     });
     document.querySelectorAll('[data-hide]').forEach(b => b.onclick = async () => {
@@ -4413,13 +4458,13 @@
       try { const r = await tryCall('room.hideMember', { id, hide }); state.boot.room = r; renderRoom(); } catch { }
     });
     document.getElementById('editEmotesBtn').onclick = () => {
-      openEmoteEditor().catch(e => toast('打开编辑器失败：' + e.message, 'err'));
+      openEmoteEditor().catch(e => toast(tr('room.editFailed', '打开编辑器失败：{error}', { error: e.message }), 'err'));
     };
     document.querySelectorAll('[data-emote]').forEach(el => el.onclick = async () => {
       if (authPaused) return toast(authMessage, 'err');
       const id = Number(el.dataset.emote);
-      if (!id) return toast('该槽位未装备表情', 'err');
-      try { await tryCall('emote.send', { id }); toast('已发送表情'); } catch { }
+      if (!id) return toast(tr('room.slotEmpty', '该槽位未装备表情'), 'err');
+      try { await tryCall('emote.send', { id }); toast(tr('room.sent', '已发送表情')); } catch { }
     });
     bindAuthActions(document.getElementById('pageHost'));
     if (!authPaused && !state.emoteCatalog)
@@ -4438,7 +4483,7 @@
         const r = await tryCall('chest.open', { place: b.dataset.chest, clickNum: 1000 });
         const id = Number(r?.asset_id) || 0;
         await refreshAfterAcquire(id);
-        let thumb = '', name = '领取成功';
+        let thumb = '', name = tr('room.chestClaimed', '领取成功');
         if (id) {
           await ensureCatalog('character_skin').catch(() => []);
           const found = (state.catalog.character_skin || []).find(v => v.id === id)
@@ -4450,8 +4495,8 @@
           <div class="rays"></div>
           ${thumb ? img(thumb, 'prize', name) : '<div style="font-size:64px">🎁</div>'}
           <div class="r-name">${esc(name)}</div>
-          <div class="r-sub">宝箱奖励</div>
-          <button class="btn" id="mOk" style="margin-top:8px">收下</button>
+          <div class="r-sub">${tr('room.chestReward', '宝箱奖励')}</div>
+          <button class="btn" id="mOk" style="margin-top:8px">${tr('synth.take', '收下')}</button>
         </div>`, host => host.querySelector('#mOk').onclick = closeModal);
       } catch { }
     });
@@ -4480,7 +4525,7 @@
       try { list = await ensureEmotes(attempt > 0); } catch { list = []; }
       if (!list.length) await new Promise(r => setTimeout(r, 700));
     }
-    if (!list.length) { toast('表情目录尚未就绪，请稍后再试', 'err'); return; }
+    if (!list.length) { toast(tr('room.emoteCatalogNotReady', '表情目录尚未就绪，请稍后再试'), 'err'); return; }
     let ids = [...(state.boot?.appearance?.emoteAssetIds || [])];
     while (ids.length < 5) ids.push(0);
     let slot = 0;
@@ -4490,18 +4535,18 @@
 
     modal(`<div style="display:flex;flex-direction:column;gap:10px">
       <div style="display:flex;align-items:center;gap:10px">
-        <div style="font-size:18px;font-weight:800;color:var(--ink-strong)">编辑表情栏</div>
-        <span class="muted" style="font-size:12px">仅本机 · 可拖拽 / 点选</span>
+        <div style="font-size:18px;font-weight:800;color:var(--ink-strong)">${tr('room.emoteEditor', '编辑表情栏')}</div>
+        <span class="muted" style="font-size:12px">${tr('room.emoteEditorSub', '仅本机 · 可拖拽 / 点选')}</span>
         <span class="spacer"></span>
-        <button class="btn ghost" id="eeClose">关闭</button>
+        <button class="btn ghost" id="eeClose">${tr('common.close', '关闭')}</button>
       </div>
       <div class="emote-row" id="eeSlots" style="align-items:flex-start"></div>
       <div style="display:flex;gap:8px;align-items:center">
-        <input class="input" id="eeSearch" placeholder="搜索表情 / 角色" style="flex:1" />
+        <input class="input" id="eeSearch" placeholder="${tr('room.emoteSearch', '搜索表情 / 角色')}" style="flex:1" />
         <span class="muted" id="eeStatus" style="font-size:12px;white-space:nowrap"></span>
       </div>
       <div class="emote-editor-grid" id="eeGrid"></div>
-      <div class="muted" style="font-size:12px">点一个槽位再点表情即可替换；也可以把表情直接拖到槽位，或把槽位拖到另一个槽位交换。</div>
+      <div class="muted" style="font-size:12px">${tr('room.emoteEditorHint', '点一个槽位再点表情即可替换；也可以把表情直接拖到槽位，或把槽位拖到另一个槽位交换。')}</div>
     </div>`, host => {
       const slotsEl = host.querySelector('#eeSlots');
       const gridEl = host.querySelector('#eeGrid');
@@ -4511,13 +4556,13 @@
       const paint = () => {
         slotsEl.innerHTML = ids.map((id, i) => {
           const it = info(id);
-          return `<div class="emote-slot ${i === slot ? 'selected' : ''}" data-slot="${i}" draggable="${it ? 'true' : 'false'}" title="槽位 ${i + 1}">
-            ${it ? img(it.thumb) : '<span class="muted">空</span>'}
+          return `<div class="emote-slot ${i === slot ? 'selected' : ''}" data-slot="${i}" draggable="${it ? 'true' : 'false'}" title="${tr('bag.slotLabel', '槽位 {n}', { n: i + 1 })}">
+            ${it ? img(it.thumb) : `<span class="muted">${tr('common.empty', '空')}</span>`}
             <span class="slot-no">${i + 1}</span>
-            ${it ? `<button class="slot-clear" data-clear="${i}" title="清空">×</button>` : ''}
+            ${it ? `<button class="slot-clear" data-clear="${i}" title="${tr('bag.slotClear', '清空')}">×</button>` : ''}
           </div>`;
         }).join('');
-        statusEl.textContent = `当前槽位 ${slot + 1}`;
+        statusEl.textContent = tr('room.currentSlot', '当前槽位 {n}', { n: slot + 1 });
         gridEl.querySelectorAll('.ee-card').forEach(el => el.classList.toggle('in-slot', ids.includes(Number(el.dataset.eid))));
 
         slotsEl.querySelectorAll('[data-slot]').forEach(el => {
@@ -4585,18 +4630,18 @@
   }
 
   function chestTimeText(ts) {
-    if (!ts) return '未生成';
+    if (!ts) return tr('room.chestNotGenerated', '未生成');
     const left = ts - serverNowMs();
-    if (left <= 0) return '可开启';
+    if (left <= 0) return tr('room.chestAvailable', '可开启');
     const s = Math.ceil(left / 1000), m = Math.floor(s / 60), ss = s % 60;
-    return `${m}分${String(ss).padStart(2, '0')}秒后可开启`;
+    return tr('room.chestCountdown', '{minutes}分{seconds}秒后可开启', { minutes: m, seconds: String(ss).padStart(2, '0') });
   }
 
   function updateChestStatus() {
     const el = document.getElementById('chestStatus');
     if (!el) return;
     const a = state.boot?.auth || {};
-    el.textContent = `左侧宝箱：${chestTimeText(a.chestLeft)}　右侧宝箱：${chestTimeText(a.chestRight)}`;
+    el.textContent = tr('room.chestStatus', '左侧宝箱：{left}　右侧宝箱：{right}', { left: chestTimeText(a.chestLeft), right: chestTimeText(a.chestRight) });
   }
 
   /* ---------------- 设置 ---------------- */
@@ -4661,29 +4706,29 @@
 
   function openForcedOnlineConfirm(oc) {
     if (!forcedOnlineCanOptIn()) {
-      toast('当前状态由维护者强制暂停，无法通过风险确认绕过', 'err');
+      toast(tr('forcedOnline.blocked', '当前状态由维护者强制暂停，无法通过风险确认绕过'), 'err');
       return;
     }
     const version = String(oc?.officialVersion || '').trim();
     const tested = String(oc?.testedVersion || '').trim();
     if (!version) {
-      toast('官方版本信息尚未就绪，请刷新版本状态后重试', 'err');
+      toast(tr('forcedOnline.notReady', '官方版本信息尚未就绪，请刷新版本状态后重试'), 'err');
       return;
     }
     modal(`<div class="about">
-      <div class="about-title">强制更新后继续联网</div>
-      <div class="about-note about-note--warn"><p>官方客户端已强制更新至 ${esc(version)}，当前 Native 只验证到 ${esc(tested || '更早版本')}。</p></div>
-      <div class="about-note"><p>继续后，房间、宝箱、合成、兑换、外观同步等会按旧协议尝试联网。可能出现请求失败、房间状态异常或账号风险；本程序无法保证与官方新版本兼容。</p><p>建议优先更新 Native。只有确认愿意自担风险时才继续。</p></div>
+      <div class="about-title">${tr('forcedOnline.title', '强制更新后继续联网')}</div>
+      <div class="about-note about-note--warn"><p>${tr('forcedOnline.body1', '官方客户端已强制更新至 {version}，当前 Native 只验证到 {tested}。', { version: esc(version), tested: esc(tested || tr('forcedOnline.earlier', '更早版本')) })}</p></div>
+      <div class="about-note"><p>${tr('forcedOnline.body2', '继续后，房间、宝箱、合成、兑换、外观同步等会按旧协议尝试联网。可能出现请求失败、房间状态异常或账号风险；本程序无法保证与官方新版本兼容。')}</p><p>${tr('forcedOnline.body3', '建议优先更新 Native。只有确认愿意自担风险时才继续。')}</p></div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap">
-        <button class="btn ghost" id="forcedOnlineCancel">取消</button>
-        <button class="btn danger" id="forcedOnlineConfirm">我已了解，仍要继续</button>
+        <button class="btn ghost" id="forcedOnlineCancel">${tr('common.cancel', '取消')}</button>
+        <button class="btn danger" id="forcedOnlineConfirm">${tr('forcedOnline.confirm', '我已了解，仍要继续')}</button>
       </div>
     </div>`, host => {
       host.querySelector('#forcedOnlineCancel').onclick = closeModal;
       const confirm = host.querySelector('#forcedOnlineConfirm');
       confirm.onclick = async () => {
         confirm.disabled = true;
-        confirm.textContent = '正在开启…';
+        confirm.textContent = tr('forcedOnline.enabling', '正在开启…');
         try {
           const boot = await call('compatibility.acceptForcedOnline', { version });
           closeModal();
@@ -4694,11 +4739,11 @@
           } catch { }
           if (boot && boot.settings) handleEvent('boot', boot);
           else { state.boot = await call('boot'); renderChrome(); }
-          toast('已允许在官方强制更新后继续联网（风险自负）');
+          toast(tr('forcedOnline.accepted', '已允许在官方强制更新后继续联网（风险自负）'));
         } catch (e) {
           confirm.disabled = false;
-          confirm.textContent = '我已了解，仍要继续';
-          toast(e.message || '开启失败', 'err');
+          confirm.textContent = tr('forcedOnline.confirm', '我已了解，仍要继续');
+          toast(e.message || tr('forcedOnline.enableFailed', '开启失败'), 'err');
         }
       };
     });
@@ -4706,11 +4751,11 @@
 
   function confirmRestoreForcedOnline() {
     modal(`<div class="about">
-      <div class="about-title">撤销风险授权</div>
-      <div class="about-note"><p>撤销后将立即恢复官方强制更新期间的联网拦截。正常情况下，授权只会在官方再次更新或维护者标记为不安全/维护中时自动失效；这里只是手动提前撤销。</p></div>
+      <div class="about-title">${tr('forcedOnline.restoreTitle', '撤销风险授权')}</div>
+      <div class="about-note"><p>${tr('forcedOnline.restoreBody', '撤销后将立即恢复官方强制更新期间的联网拦截。正常情况下，授权只会在官方再次更新或维护者标记为不安全/维护中时自动失效；这里只是手动提前撤销。')}</p></div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
-        <button class="btn ghost" id="forcedOnlineRestoreCancel">取消</button>
-        <button class="btn danger" id="forcedOnlineRestoreConfirm">确认撤销</button>
+        <button class="btn ghost" id="forcedOnlineRestoreCancel">${tr('common.cancel', '取消')}</button>
+        <button class="btn danger" id="forcedOnlineRestoreConfirm">${tr('forcedOnline.restoreConfirm', '确认撤销')}</button>
       </div>
     </div>`, host => {
       host.querySelector('#forcedOnlineRestoreCancel').onclick = closeModal;
@@ -4728,10 +4773,10 @@
           } catch { }
           if (boot && boot.settings) handleEvent('boot', boot);
           else { state.boot = await call('boot'); renderChrome(); }
-          toast('已撤销风险授权，联网限制已恢复');
+          toast(tr('forcedOnline.restored', '已撤销风险授权，联网限制已恢复'));
         } catch (e) {
           confirm.disabled = false;
-          toast(e.message || '恢复失败', 'err');
+          toast(e.message || tr('forcedOnline.restoreFailed', '恢复失败'), 'err');
         }
       };
     });
@@ -4743,31 +4788,31 @@
     const s = a.state || (a.loggedIn ? 'valid' : 'loggedOut');
     if (s === 'valid' || s === 'loggedOut') return '';
     const map = {
-      checking: { cls: 'warning', title: '正在确认登录状态', text: '账号功能暂时暂停，确认完成后会自动恢复。' },
-      conflict: { cls: 'warning', title: '登录态正在其他客户端使用', text: '为避免影响其他客户端，账号相关功能已暂停；本程序不会自动重新登录或重连。桌宠与本地功能仍可用。' },
-      invalid: { cls: 'danger', title: '当前登录凭据已失效', text: '账号相关功能已暂停。请重新登录或重新继承官方登录。' },
-      network: { cls: 'warning', title: '网络不可用，暂时无法确认登录状态', text: '账号功能已暂停，网络恢复后可重新检测。' },
+      checking: { cls: 'warning', title: tr('auth.noticeCheckingTitle', '正在确认登录状态'), text: tr('auth.noticeCheckingText', '账号功能暂时暂停，确认完成后会自动恢复。') },
+      conflict: { cls: 'warning', title: tr('auth.noticeConflictTitle', '登录态正在其他客户端使用'), text: tr('auth.noticeConflictText', '为避免影响其他客户端，账号相关功能已暂停；本程序不会自动重新登录或重连。桌宠与本地功能仍可用。') },
+      invalid: { cls: 'danger', title: tr('auth.noticeInvalidTitle', '当前登录凭据已失效'), text: tr('auth.noticeInvalidText', '账号相关功能已暂停。请重新登录或重新继承官方登录。') },
+      network: { cls: 'warning', title: tr('auth.noticeNetworkTitle', '网络不可用，暂时无法确认登录状态'), text: tr('auth.noticeNetworkText', '账号功能已暂停，网络恢复后可重新检测。') },
     };
     const meta = map[s];
     if (!meta) return '';
-    const noticeTitle = s === 'invalid' && a.credentialValid ? '登录凭据已恢复有效' : meta.title;
+    const noticeTitle = s === 'invalid' && a.credentialValid ? tr('auth.noticeRestoredTitle', '登录凭据已恢复有效') : meta.title;
     const noticeText = s === 'invalid' && a.credentialValid
-      ? '账号功能仍暂停；点击“重新连接”后再恢复联机。'
+      ? tr('auth.noticeRestoredText', '账号功能仍暂停；点击“重新连接”后再恢复联机。')
       : (s === 'network' && a.stateMessage ? a.stateMessage : meta.text);
     const actions = [];
-    if (s !== 'checking') actions.push('<button class="btn ghost" data-auth-recheck>重新检测</button>');
-    if (s === 'conflict') actions.push('<button class="btn danger" data-auth-reconnect>重新连接</button>');
+    if (s !== 'checking') actions.push(`<button class="btn ghost" data-auth-recheck>${tr('auth.recheck', '重新检测')}</button>`);
+    if (s === 'conflict') actions.push(`<button class="btn danger" data-auth-reconnect>${tr('auth.reconnect', '重新连接')}</button>`);
     if (s === 'invalid') actions.push(a.credentialValid
-      ? '<button class="btn" data-auth-reconnect>重新连接</button>'
-      : '<button class="btn" data-auth-login>重新登录</button>');
-    actions.push('<button class="btn ghost" data-auth-account>查看账号</button>');
+      ? `<button class="btn" data-auth-reconnect>${tr('auth.reconnect', '重新连接')}</button>`
+      : `<button class="btn" data-auth-login>${tr('auth.loginAgain', '重新登录')}</button>`);
+    actions.push(`<button class="btn ghost" data-auth-account>${tr('auth.viewAccount', '查看账号')}</button>`);
     return `<section class="official-notice ${meta.cls} auth-notice">
       <div class="official-notice-main">
         <div class="official-notice-icon">!</div>
         <div class="official-notice-copy">
           <div class="official-notice-title">${esc(noticeTitle)}</div>
           <div class="official-notice-text">${esc(noticeText)}</div>
-          <div class="official-notice-meta">登录状态：${esc(authStatusText(a))}${a.lastCheckedAt ? ' · 检测于 ' + new Date(Number(a.lastCheckedAt)).toLocaleTimeString('zh-CN', { hour12: false }) : ''}</div>
+          <div class="official-notice-meta">${tr('auth.statusLabel', '登录状态：{status}', { status: authStatusText(a) })}${a.lastCheckedAt ? ' · ' + tr('auth.checkedAt', '检测于 {time}', { time: new Date(Number(a.lastCheckedAt)).toLocaleTimeString('zh-CN', { hour12: false }) }) : ''}</div>
         </div>
       </div>
       <div class="official-notice-actions">${actions.join('')}</div>
@@ -4799,14 +4844,14 @@
             <div class="official-notice-main">
               <div class="official-notice-icon">!</div>
               <div class="official-notice-copy">
-                <div class="official-notice-title">已允许在官方强制更新后继续联网</div>
-                <div class="official-notice-text">当前官方 ${esc(oc.officialVersion || '新版本')} 超出 Native 验证基线 ${esc(oc.testedVersion || '—')}。所有联机功能已恢复正常，仅保留此提示；直到官方再次更新、维护者将当前版本标记为不安全/强制暂停，或验证基线更新到当前版本。</div>
-                <div class="official-notice-meta">风险自负 · 仅对官方 ${esc(oc.officialVersion || '当前版本')} 有效</div>
+                <div class="official-notice-title">${tr('official.acceptedTitle', '已允许在官方强制更新后继续联网')}</div>
+                <div class="official-notice-text">${tr('official.acceptedText', '当前官方 {version} 超出 Native 验证基线 {tested}。所有联机功能已恢复正常，仅保留此提示；直到官方再次更新、维护者将当前版本标记为不安全/强制暂停，或验证基线更新到当前版本。', { version: esc(oc.officialVersion || tr('official.newVersion', '新版本')), tested: esc(oc.testedVersion || '—') })}</div>
+                <div class="official-notice-meta">${tr('official.acceptedMeta', '风险自负 · 仅对官方 {version} 有效', { version: esc(oc.officialVersion || tr('official.currentVersion', '当前版本')) })}</div>
               </div>
-              <button class="official-notice-close" data-official-dismiss title="关闭">×</button>
+              <button class="official-notice-close" data-official-dismiss title="${tr('common.close', '关闭')}">×</button>
             </div>
             <div class="official-notice-actions">
-              <a class="btn ghost" href="https://github.com/DanielToyama/WuwaTappoNative/releases/latest" target="_blank" rel="noreferrer">查看项目状态</a>
+              <a class="btn ghost" href="https://github.com/DanielToyama/WuwaTappoNative/releases/latest" target="_blank" rel="noreferrer">${tr('official.viewStatus', '查看项目状态')}</a>
             </div>
           </section>`;
         } else {
@@ -4814,19 +4859,19 @@
             <div class="official-notice-main">
               <div class="official-notice-icon">${danger ? '!' : '?'}</div>
               <div class="official-notice-copy">
-                <div class="official-notice-title">官方客户端已${danger ? '强制' : ''}更新至 ${esc(oc.officialVersion || '新版本')}</div>
+                <div class="official-notice-title">${tr('official.updatedTitle', '官方客户端已{force}更新至 {version}', { force: danger ? tr('official.forced', '强制') : '', version: esc(oc.officialVersion || tr('official.newVersion', '新版本')) })}</div>
                 <div class="official-notice-text">${esc(oc.message || '')}</div>
-                <div class="official-notice-meta">当前 Native 验证基线：${esc(oc.testedVersion || '—')}${oc.stale ? ' · 显示上次检查结果' : ''}</div>
+                <div class="official-notice-meta">${tr('official.baseline', '当前 Native 验证基线：{version}', { version: esc(oc.testedVersion || '—') })}${oc.stale ? ' · ' + tr('official.stale', '显示上次检查结果') : ''}</div>
               </div>
-              <button class="official-notice-close" data-official-dismiss title="关闭">×</button>
+              <button class="official-notice-close" data-official-dismiss title="${tr('common.close', '关闭')}">×</button>
             </div>
             <div class="official-notice-actions">
-              <a class="btn ghost" href="https://github.com/DanielToyama/WuwaTappoNative/releases/latest" target="_blank" rel="noreferrer">查看项目状态</a>
+              <a class="btn ghost" href="https://github.com/DanielToyama/WuwaTappoNative/releases/latest" target="_blank" rel="noreferrer">${tr('official.viewStatus', '查看项目状态')}</a>
               ${danger
                 ? (forcedOnlineCanOptIn()
-                  ? '<button class="btn danger" data-official-allow>仍要联网（自担风险）</button>'
-                  : '<span class="muted" style="font-size:12px">当前状态由维护者强制暂停，无法本地绕过</span>')
-                : '<button class="btn ghost" data-official-dismiss>继续使用</button>'}
+                  ? `<button class="btn danger" data-official-allow>${tr('official.allowRisk', '仍要联网（自担风险）')}</button>`
+                  : `<span class="muted" style="font-size:12px">${tr('official.blocked', '当前状态由维护者强制暂停，无法本地绕过')}</span>`)
+                : `<button class="btn ghost" data-official-dismiss>${tr('official.continue', '继续使用')}</button>`}
             </div>
           </section>`;
         }
@@ -4857,32 +4902,32 @@
     const severity = ['info', 'warning', 'critical'].includes(String(a.severity || '').toLowerCase())
       ? String(a.severity).toLowerCase() : 'info';
     const meta = ({
-      info: { label: '公告', icon: 'i' },
-      warning: { label: '注意', icon: '!' },
-      critical: { label: '重要', icon: '!' }
+      info: { label: tr('ann.info', '公告'), icon: 'i' },
+      warning: { label: tr('ann.warning', '注意'), icon: '!' },
+      critical: { label: tr('ann.critical', '重要'), icon: '!' }
     })[severity];
     const count = list.length > 1 ? `<span class="announcement-count">1 / ${list.length}</span>` : '';
     const dateValue = a.publishedAt ? new Date(a.publishedAt) : null;
     const dateText = dateValue && !Number.isNaN(dateValue.getTime()) ? dateValue.toLocaleDateString('zh-CN') : '';
     const action = a.action && a.action.url
-      ? `<a class="btn ghost announcement-action" href="${esc(a.action.url)}" target="_blank" rel="noreferrer" data-ann-action>${esc(a.action.label || '查看详情')}</a>`
+      ? `<a class="btn ghost announcement-action" href="${esc(a.action.url)}" target="_blank" rel="noreferrer" data-ann-action>${esc(a.action.label || tr('ann.viewDetails', '查看详情'))}</a>`
       : '';
     const canClose = a.dismissible !== false;
     const close = canClose
-      ? '<button class="announcement-close" data-ann-close title="关闭">×</button>'
+      ? `<button class="announcement-close" data-ann-close title="${tr('common.close', '关闭')}">×</button>`
       : '';
-    const confirm = canClose ? '' : '<button class="btn ghost" data-ann-close>我知道了</button>';
+    const confirm = canClose ? '' : `<button class="btn ghost" data-ann-close>${tr('ann.iKnow', '我知道了')}</button>`;
     return `<section class="announcement-card ${severity}" data-ann-id="${esc(a.id)}">
       <div class="announcement-head">
         <span class="announcement-badge"><span>${meta.icon}</span>${meta.label}</span>
-        <span class="announcement-title">${esc(a.title || '公告')}</span>
+        <span class="announcement-title">${esc(a.title || tr('ann.fallbackTitle', '公告'))}</span>
         ${count}
         ${close}
       </div>
       <div class="announcement-body">${esc(a.body || '')}</div>
-      <button class="announcement-expand hidden" data-ann-expand>展开全文</button>
+      <button class="announcement-expand hidden" data-ann-expand>${tr('ann.expand', '展开全文')}</button>
       <div class="announcement-foot">
-        <span class="announcement-meta">${dateText ? esc(dateText) + ' · ' : ''}Tappo 公告</span>
+        <span class="announcement-meta">${dateText ? esc(dateText) + ' · ' : ''}${tr('ann.footer', 'Tappo 公告')}</span>
         <span class="announcement-actions">${action}${confirm}</span>
       </div>
     </section>`;
@@ -4897,7 +4942,7 @@
       if (body.scrollHeight > body.clientHeight + 2) expand.classList.remove('hidden');
       expand.onclick = () => {
         const expanded = body.classList.toggle('expanded');
-        expand.textContent = expanded ? '收起' : '展开全文';
+        expand.textContent = expanded ? tr('ann.collapse', '收起') : tr('ann.expand', '展开全文');
       };
     }
     const id = card.dataset.annId || '';
@@ -4933,14 +4978,14 @@
     };
     const kill = c.killSwitch || {};
     if (kill.forceOffline) {
-      return `安全模式已启用：${sentence(kill.reason, '维护者要求暂停联网')}。`;
+      return tr('compat.blockedSafeMode', '安全模式已启用：{reason}。', { reason: sentence(kill.reason, tr('compat.maintainerOffline', '维护者要求暂停联网')) });
     }
     const status = String(c.status || '').toLowerCase();
-    if (status === 'unsafe') return `当前版本状态为不安全：${sentence(c.message, '请更新后再联网')}。`;
-    if (status === 'maintenance') return `官方服务维护中：${sentence(c.message, '请稍后再试')}。`;
+    if (status === 'unsafe') return tr('compat.blockedUnsafe', '当前版本状态为不安全：{reason}。', { reason: sentence(c.message, tr('compat.updateFirst', '请更新后再联网')) });
+    if (status === 'maintenance') return tr('compat.blockedMaintenance', '官方服务维护中：{reason}。', { reason: sentence(c.message, tr('compat.tryLater', '请稍后再试')) });
     if (c.officialCheck?.state === 'forced') {
       if (forcedOnlineAccepted(c)) return '';
-      return `官方客户端已强制更新，当前 Native 尚未验证：${sentence(c.officialCheck.message, '建议暂停联机')}。`;
+      return tr('compat.blockedForced', '官方客户端已强制更新，当前 Native 尚未验证：{reason}。', { reason: sentence(c.officialCheck.message, tr('compat.pauseOnline', '建议暂停联机')) });
     }
     return '';
   }
@@ -4957,12 +5002,12 @@
     if (status === 'safe' && (belowMinSafe || officialCheck?.state === 'unverified' || officialCheck?.state === 'forced'))
       status = officialCheck?.state === 'forced' ? (forcedAccepted ? 'warning' : 'unsafe') : 'warning';
     const meta = ({
-      safe: { cls: 'safe', icon: '✓', label: '安全', title: '当前版本可继续使用' },
-      warning: { cls: 'warning', icon: '!', label: '注意', title: '当前版本需要关注' },
-      unsafe: { cls: 'unsafe', icon: '×', label: '不安全', title: '当前版本不建议继续联网' },
-      maintenance: { cls: 'maintenance', icon: '…', label: '维护中', title: '官方服务可能正在维护' },
-      unknown: { cls: 'unknown', icon: '?', label: '未知', title: '暂时无法确认版本状态' }
-    })[status] || { cls: 'unknown', icon: '?', label: '未知', title: '暂时无法确认版本状态' };
+      safe: { cls: 'safe', icon: '✓', label: tr('compat.safe', '安全'), title: tr('compat.safeTitle', '当前版本可继续使用') },
+      warning: { cls: 'warning', icon: '!', label: tr('compat.warning', '注意'), title: tr('compat.warningTitle', '当前版本需要关注') },
+      unsafe: { cls: 'unsafe', icon: '×', label: tr('compat.unsafe', '不安全'), title: tr('compat.unsafeTitle', '当前版本不建议继续联网') },
+      maintenance: { cls: 'maintenance', icon: '…', label: tr('compat.maintenance', '维护中'), title: tr('compat.maintenanceTitle', '官方服务可能正在维护') },
+      unknown: { cls: 'unknown', icon: '?', label: tr('compat.unknown', '未知'), title: tr('compat.unknownTitle', '暂时无法确认版本状态') }
+    })[status] || { cls: 'unknown', icon: '?', label: tr('compat.unknown', '未知'), title: tr('compat.unknownTitle', '暂时无法确认版本状态') };
     const official = c.official || {};
     const cn = official.cn || {};
     const global = official.global || {};
@@ -4977,29 +5022,34 @@
       ? updated.toLocaleString('zh-CN', { hour12: false })
       : '';
     const bits = [];
-    if (native.latest) bits.push(`最新 ${esc(native.latest)}`);
-    if (native.minSafe) bits.push(`最低兼容 ${esc(native.minSafe)}`);
-    if (cn.latest) bits.push(`官方 CN ${esc(cn.latest)}`);
-    if (globalLatest) bits.push(`官方 Global ${esc(globalLatest)}${globalUsesCn ? '（沿用 CN）' : ''}`);
-    if (protocol.testedOfficial) bits.push(`验证基线 ${esc(protocol.testedOfficial)}`);
+    if (native.latest) bits.push(tr('compat.latest', '最新 {v}', { v: esc(native.latest) }));
+    if (native.minSafe) bits.push(tr('compat.minSafe', '最低兼容 {v}', { v: esc(native.minSafe) }));
+    if (cn.latest) bits.push(tr('compat.officialCn', '官方 CN {v}', { v: esc(cn.latest) }));
+    if (globalLatest) bits.push(tr('compat.officialGlobal', '官方 Global {v}', { v: esc(globalLatest) }) + (globalUsesCn ? tr('compat.usesCn', '（沿用 CN）') : ''));
+    if (protocol.testedOfficial) bits.push(tr('compat.baseline', '验证基线 {v}', { v: esc(protocol.testedOfficial) }));
     if (officialCheck?.officialVersion) {
-      const label = ({ verified: '已验证', unverified: '未验证', forced: '强制更新', unavailable: '检查失败' })[officialCheck.state] || '未知';
-      bits.push(`官方检查 ${esc(officialCheck.officialVersion)}（${label}）`);
+      const label = ({
+        verified: tr('compat.verified', '已验证'),
+        unverified: tr('compat.unverified', '未验证'),
+        forced: tr('compat.forced', '强制更新'),
+        unavailable: tr('compat.checkFailed', '检查失败')
+      })[officialCheck.state] || tr('compat.unknown', '未知');
+      bits.push(tr('compat.officialCheck', '官方检查 {v}（{label}）', { v: esc(officialCheck.officialVersion), label }));
     }
-    if (updatedText) bits.push(`更新于 ${esc(updatedText)}`);
+    if (updatedText) bits.push(tr('compat.updatedAt', '更新于 {time}', { time: esc(updatedText) }));
     return `<section class="compat-banner ${meta.cls}">
       <div class="compat-head">
         <span class="compat-badge"><span>${meta.icon}</span>${meta.label}</span>
-        <span class="compat-title">版本状态：${meta.title}</span>
-        <a class="btn ghost compat-link" href="https://code.danieluu.top/WuwaTappoNative/" target="_blank" rel="noreferrer">状态页</a>
+        <span class="compat-title">${tr('compat.title', '版本状态：{title}', { title: meta.title })}</span>
+        <a class="btn ghost compat-link" href="https://code.danieluu.top/WuwaTappoNative/" target="_blank" rel="noreferrer">${tr('compat.statusPage', '状态页')}</a>
       </div>
-      <div class="compat-sub">${esc(c.message || '暂无说明')}</div>
+      <div class="compat-sub">${esc(c.message || tr('compat.noMessage', '暂无说明'))}</div>
       <div class="compat-meta">${bits.join(' · ')}</div>
-      ${belowMinSafe ? `<div class="compat-force">当前 Native ${esc(currentNative)} 低于最低兼容版本 ${esc(native.minSafe)}，不保证兼容当前官方服务，请更新后再使用联机。</div>` : ''}
-      ${force ? `<div class="compat-force">安全模式：${esc(kill.reason || '维护者要求暂停联网')}</div>` : ''}
-      ${blocked ? `<div class="compat-force">已暂停联网操作：${esc(blocked)}房间、宝箱、合成、兑换与外观同步会直接拒绝，直到状态恢复安全。</div>` : ''}
-      ${forcedAccepted ? `<div class="compat-risk-note">已按你的选择允许联网（风险自负）：官方 ${esc(officialCheck.officialVersion || '新版本')} 尚未验证，出现异常请恢复限制并更新 Native。</div>` : ''}
-      ${protocol.breaking ? '<div class="compat-force">检测到破坏性协议变更，请尽快更新。</div>' : ''}
+      ${belowMinSafe ? `<div class="compat-force">${tr('compat.belowMin', '当前 Native {current} 低于最低兼容版本 {min}，不保证兼容当前官方服务，请更新后再使用联机。', { current: esc(currentNative), min: esc(native.minSafe) })}</div>` : ''}
+      ${force ? `<div class="compat-force">${tr('compat.safeMode', '安全模式：{reason}', { reason: esc(kill.reason || tr('compat.maintainerOffline', '维护者要求暂停联网')) })}</div>` : ''}
+      ${blocked ? `<div class="compat-force">${tr('compat.blocked', '已暂停联网操作：{reason}房间、宝箱、合成、兑换与外观同步会直接拒绝，直到状态恢复安全。', { reason: esc(blocked) })}</div>` : ''}
+      ${forcedAccepted ? `<div class="compat-risk-note">${tr('compat.riskAccepted', '已按你的选择允许联网（风险自负）：官方 {version} 尚未验证，出现异常请恢复限制并更新 Native。', { version: esc(officialCheck.officialVersion || tr('update.newVersionShort', '新版本')) })}</div>` : ''}
+      ${protocol.breaking ? `<div class="compat-force">${tr('compat.breaking', '检测到破坏性协议变更，请尽快更新。')}</div>` : ''}
     </section>`;
   }
 
@@ -5008,7 +5058,7 @@
     if (bytes >= 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
     if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
     if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' KB';
-    return bytes > 0 ? bytes + ' B' : '未知大小';
+    return bytes > 0 ? bytes + ' B' : tr('update.unknownSize', '未知大小');
   }
 
   function formatUpdateSpeed(value) {
@@ -5026,7 +5076,7 @@
       const progress = d.total > 0 ? ` · ${formatUpdateBytes(d.downloaded)} / ${formatUpdateBytes(d.total)}` : '';
       const speed = d.phase === 'downloading' && d.speed > 0 ? ` · ${formatUpdateSpeed(d.speed)}` : '';
       const source = d.source ? ` · ${esc(d.source)}` : '';
-      status.textContent = (d.message || '正在下载更新…') + progress + speed + source;
+      status.textContent = (d.message || tr('update.downloading', '正在下载更新…')) + progress + speed + source;
       status.classList.toggle('error', d.phase === 'error');
     }
     const bar = document.getElementById('updateProgressBar');
@@ -5039,7 +5089,7 @@
     const u = state.update;
     if (!u || state.updateDismissed) return '';
     // 兼容旧序列化：0.0.25 曾把 ReleaseInfo 的 PascalCase 属性直接推给前端，导致标题/内容为空。
-    const tag = u.tag || u.Tag || u.name || u.Name || '新版本';
+    const tag = u.tag || u.Tag || u.name || u.Name || tr('update.newVersionShort', '新版本');
     const displayVersion = u.displayVersion || u.DisplayVersion || tag;
     const body = u.body || u.Body || '';
     const dateValue = u.publishedAt || u.PublishedAt;
@@ -5065,30 +5115,30 @@
         }).join('')
       : releaseNotesHtml(body);
     const status = download?.message || (installer
-      ? `安装包 ${formatUpdateBytes(installer.size)}；下载后会自动校验 SHA-256`
-      : '此版本没有可自动下载的安装包，请手动前往 Release 下载');
+      ? tr('update.installerSize', '安装包 {size}；下载后会自动校验 SHA-256', { size: formatUpdateBytes(installer.size) })
+      : tr('update.noInstaller', '此版本没有可自动下载的安装包，请手动前往 Release 下载'));
     const meta = download?.source ? ' · ' + download.source : '';
     const downloadButton = !installer ? '' : canInstall
-      ? '<button class="btn" id="updateInstallBtn">立即安装</button>'
+      ? `<button class="btn" id="updateInstallBtn">${tr('update.installNow', '立即安装')}</button>`
       : running
-        ? '<button class="btn" id="updateDownloadBtn" disabled>下载中…</button><button class="btn ghost" id="updateCancelBtn">取消</button>'
-        : `<button class="btn" id="updateDownloadBtn">${phase === 'error' ? '重试下载' : '下载更新'}</button>`;
+        ? `<button class="btn" id="updateDownloadBtn" disabled>${tr('update.downloadingBtn', '下载中…')}</button><button class="btn ghost" id="updateCancelBtn">${tr('common.cancel', '取消')}</button>`
+        : `<button class="btn" id="updateDownloadBtn">${phase === 'error' ? tr('update.retryDownload', '重试下载') : tr('update.download', '下载更新')}</button>`;
     const progress = download && download.total > 0
       ? Math.max(0, Math.min(100, Math.round(download.downloaded / download.total * 100)))
       : 0;
     return `<section class="update-banner">
       <div class="update-banner-head">
         <div>
-          <div class="update-banner-title">发现新版本 ${esc(displayVersion)}</div>
-          <div class="update-banner-sub">当前版本 ${esc(state.boot?.displayVersion || state.boot?.version || '')}${date ? ' · ' + esc(date) : ''}${multi ? ` · 包含 ${entries.length} 个版本更新` : ''}</div>
+          <div class="update-banner-title">${tr('update.newVersion', '发现新版本 {version}', { version: esc(displayVersion) })}</div>
+          <div class="update-banner-sub">${tr('update.currentVersion', '当前版本 {version}', { version: esc(state.boot?.displayVersion || state.boot?.version || '') })}${date ? ' · ' + esc(date) : ''}${multi ? ' · ' + tr('update.includesVersions', '包含 {count} 个版本更新', { count: entries.length }) : ''}</div>
         </div>
-        ${running || canInstall ? '' : '<button class="update-dismiss" id="updateDismiss" title="本次启动不再显示">×</button>'}
+        ${running || canInstall ? '' : `<button class="update-dismiss" id="updateDismiss" title="${tr('update.dismissTitle', '本次启动不再显示')}">×</button>`}
       </div>
       <div class="update-notes">${notes}</div>
       <div class="update-banner-actions">
         ${downloadButton}
-        <a class="btn ghost" href="${esc(u.url || u.Url || 'https://github.com/DanielToyama/WuwaTappoNative/releases/latest')}" target="_blank" rel="noreferrer">手动下载</a>
-        <span class="update-qq">交流 QQ 群：<strong>1130030892</strong>，群文件也可下载</span>
+        <a class="btn ghost" href="${esc(u.url || u.Url || 'https://github.com/DanielToyama/WuwaTappoNative/releases/latest')}" target="_blank" rel="noreferrer">${tr('update.manualDownload', '手动下载')}</a>
+        <span class="update-qq">${tr('update.qqGroup', '交流 QQ 群：<strong>1130030892</strong>，群文件也可下载')}</span>
       </div>
       <div class="update-download-status ${phase === 'error' ? 'error' : ''}" id="updateDownloadStatus">${esc(status + meta)}</div>
       <div class="update-progress" id="updateProgress" style="${running || canInstall ? '' : 'display:none'}">
@@ -5204,7 +5254,7 @@
       }
     }
     if (empty) empty.classList.toggle('hidden', total > 0);
-    if (countHost) countHost.textContent = total > 0 ? `匹配 ${total} 项` : '无匹配';
+    if (countHost) countHost.textContent = total > 0 ? tr('settings.searchCount', '匹配 {count} 项', { count: total }) : tr('settings.searchNoMatch', '无匹配');
   }
 
   function createSettingsGroup(id, title, subtitle, primary = false) {
@@ -5251,8 +5301,7 @@
     const groups = [];
     const basic = createSettingsGroup('basic', tr('settings.group.basic', '基础辅助'), tr('settings.group.basicSub', '点击、自动补贴与自动开箱'), true);
     const basicBody = basic.querySelector('.settings-group-body');
-    const clickRows = [...scroller.querySelectorAll('.detail-row')]
-      .filter(row => /可用点击|累计点击|已消耗/.test(row.textContent || ''));
+    const clickRows = [...scroller.querySelectorAll('.detail-row[data-click-row]')];
     if (clickRows.length) {
       const clickPanel = document.createElement('div');
       clickPanel.className = 'panel-box settings-basic-clicks';
@@ -5292,16 +5341,16 @@
   }
 
   function themePresetPreviewHtml(preset, activeId) {
-    if (!preset) return '<div class="muted" style="font-size:12px;padding:8px 4px">点击或悬停预设，查看完整配色、底栏与背景图预览。</div>';
+    if (!preset) return `<div class="muted" style="font-size:12px;padding:8px 4px">${tr('theme.previewHint', '点击或悬停预设，查看完整配色、底栏与背景图预览。')}</div>`;
     const active = String(activeId || '') === String(preset.id);
     const bg = preset.backgroundImageSet && preset.backgroundImage
       ? `background-image:${cssBackgroundUrl(preset.backgroundImage)};background-size:cover;background-position:center`
       : `background:${normalizeHexColor(preset.accentColor, '#e7b77c')}`;
     const swatches = [
-      ['主题色', preset.accentColor],
-      ['字体', preset.fontColor],
-      ['底栏', preset.barFollowStandard ? '跟随主题' : (preset.barColor || '自动推导')],
-      ['底栏文字', preset.barTextFollowTheme ? '跟随主题' : (preset.barTextColor || '自动推导')],
+      [tr('theme.accent', '主题色'), preset.accentColor],
+      [tr('theme.font', '字体'), preset.fontColor],
+      [tr('theme.bar', '底栏'), preset.barFollowStandard ? tr('theme.followTheme', '跟随主题') : (preset.barColor || tr('theme.autoDerived', '自动推导'))],
+      [tr('theme.barText', '底栏文字'), preset.barTextFollowTheme ? tr('theme.followTheme', '跟随主题') : (preset.barTextColor || tr('theme.autoDerived', '自动推导'))],
     ].map(([label, value]) => {
       const solid = /^#[0-9a-f]{6}$/i.test(String(value || ''));
       return `<span class="theme-preview-chip">${solid ? `<i style="background:${value}"></i>` : ''}${esc(label)}：${esc(value)}</span>`;
@@ -5309,10 +5358,10 @@
     return `<div class="theme-preset-preview-card">
       <div class="theme-preset-preview-bg" style='${bg}'></div>
       <div class="theme-preset-preview-body">
-        <div class="theme-preset-preview-name">${esc(preset.name)}${active ? ' · 当前' : ''}</div>
+        <div class="theme-preset-preview-name">${esc(preset.name)}${active ? ' · ' + tr('theme.current', '当前') : ''}</div>
         <div class="theme-preset-preview-chips">${swatches}</div>
-        <div class="theme-preset-preview-meta">背景：${preset.backgroundImageSet ? '独立图片' : '纯配色'} · 透明度 ${Math.round((Number(preset.backgroundOpacity ?? 0.25)) * 100)}% · 模糊 ${Number(preset.backgroundBlur) || 0}px</div>
-        <div class="theme-preset-preview-meta">底栏：${preset.barFollowStandard ? '跟随标准主题' : '独立配色'}${preset.barTextFollowTheme ? ' · 文字跟随主题' : ' · 文字独立'}</div>
+        <div class="theme-preset-preview-meta">${tr('theme.bg', '背景：')}${preset.backgroundImageSet ? tr('theme.independentImage', '独立图片') : tr('theme.pureColor', '纯配色')} · ${tr('theme.opacity', '透明度 {pct}%', { pct: Math.round((Number(preset.backgroundOpacity ?? 0.25)) * 100) })} · ${tr('theme.blur', '模糊 {px}px', { px: Number(preset.backgroundBlur) || 0 })}</div>
+        <div class="theme-preset-preview-meta">${tr('theme.bar', '底栏')}：${preset.barFollowStandard ? tr('theme.barFollowStandard', '跟随标准主题') : tr('theme.barIndependent', '独立配色')}${preset.barTextFollowTheme ? ' · ' + tr('theme.textFollowTheme', '文字跟随主题') : ' · ' + tr('theme.textIndependent', '文字独立')}</div>
       </div>
     </div>`;
   }
@@ -5355,14 +5404,14 @@
     const forcedAccepted = forcedCheck?.state === 'forced' && forcedOnlineAccepted();
     const forcedOnlineRow = forcedCheck?.state === 'forced' ? `
           <div class="setting-item">
-            <div><div class="setting-title">官方强制更新后联网</div><div class="setting-sub">${forcedCanOptIn
+            <div><div class="setting-title">${tr('settings.forcedOnline.title', '官方强制更新后联网')}</div><div class="setting-sub">${forcedCanOptIn
               ? (forcedAccepted
-                ? `当前官方 ${esc(forcedCheck.officialVersion || '新版本')} 已允许按旧协议联网，所有功能正常运行。此授权仅在官方再次更新、维护者标记不安全/维护中，或验证基线更新到当前版本时自动失效；也可以在这里手动撤销。`
-                : `当前官方 ${esc(forcedCheck.officialVersion || '新版本')} 超出 Native 验证基线 ${esc(forcedCheck.testedVersion || '—')}。默认暂停联机；开启后按旧协议继续，可能出现功能异常或账号风险。`)
-              : '当前版本被维护者标记为不安全或维护中，无法通过风险确认绕过联网限制。'}</div></div>
+                ? tr('settings.forcedOnline.allowed', '当前官方 {version} 已允许按旧协议联网，所有功能正常运行。此授权仅在官方再次更新、维护者标记不安全/维护中，或验证基线更新到当前版本时自动失效；也可以在这里手动撤销。', { version: esc(forcedCheck.officialVersion || tr('update.newVersionShort', '新版本')) })
+                : tr('settings.forcedOnline.paused', '当前官方 {version} 超出 Native 验证基线 {tested}。默认暂停联机；开启后按旧协议继续，可能出现功能异常或账号风险。', { version: esc(forcedCheck.officialVersion || tr('update.newVersionShort', '新版本')), tested: esc(forcedCheck.testedVersion || '—') }))
+              : tr('settings.forcedOnline.blocked', '当前版本被维护者标记为不安全或维护中，无法通过风险确认绕过联网限制。')}</div></div>
             <div class="setting-content">
-              <span class="muted" style="font-size:12px">${forcedAccepted ? '已允许（风险自负）' : (forcedCanOptIn ? '已暂停' : '不可绕过')}</span>
-              ${forcedCanOptIn ? `<button class="btn ghost" id="forcedOnlineSettingBtn">${forcedAccepted ? '撤销风险授权' : '仍要联网…'}</button>` : ''}
+              <span class="muted" style="font-size:12px">${forcedAccepted ? tr('settings.forcedOnline.stateAllowed', '已允许（风险自负）') : (forcedCanOptIn ? tr('settings.forcedOnline.statePaused', '已暂停') : tr('settings.forcedOnline.stateBlocked', '不可绕过'))}</span>
+              ${forcedCanOptIn ? `<button class="btn ghost" id="forcedOnlineSettingBtn">${forcedAccepted ? tr('settings.forcedOnline.restore', '撤销风险授权') : tr('settings.forcedOnline.continue', '仍要联网…')}</button>` : ''}
             </div>
           </div>` : '';
     const themePalette = buildThemePalette(s);
@@ -5391,18 +5440,18 @@
       const swatchStyle = p.backgroundImageSet && p.backgroundImage
         ? `background-image:${cssBackgroundUrl(p.backgroundImage)};background-size:cover;background-position:center`
         : `background:${normalizeHexColor(p.accentColor, '#e7b77c')}`;
-      return `<div class="theme-preset-row${active ? ' active' : ''}" data-theme-preset-id="${esc(p.id)}" title="点击预览；当前预设可被覆盖保存">
+      return `<div class="theme-preset-row${active ? ' active' : ''}" data-theme-preset-id="${esc(p.id)}" title="${tr('theme.clickPreview', '点击预览；当前预设可被覆盖保存')}">
         <div class="theme-preset-swatch" style='${swatchStyle}'></div>
         <div class="theme-preset-info">
           <div class="theme-preset-name">${esc(p.name)}</div>
-          <div class="theme-preset-meta">${p.backgroundImageSet ? '含背景图' : '纯配色'} · ${p.barFollowStandard ? '底栏跟随主题' : '底栏独立'}${active ? ' · 当前' : ''}</div>
+          <div class="theme-preset-meta">${p.backgroundImageSet ? tr('theme.hasBg', '含背景图') : tr('theme.pureColor', '纯配色')} · ${p.barFollowStandard ? tr('theme.barFollowTheme', '底栏跟随主题') : tr('theme.barIndependentShort', '底栏独立')}${active ? ' · ' + tr('theme.current', '当前') : ''}</div>
         </div>
         <div class="theme-preset-actions">
-          <button class="btn ghost theme-preset-btn" data-theme-preset-up="${esc(p.id)}" ${index === 0 ? 'disabled' : ''} title="上移">↑</button>
-          <button class="btn ghost theme-preset-btn" data-theme-preset-down="${esc(p.id)}" ${index === themePresets.length - 1 ? 'disabled' : ''} title="下移">↓</button>
-          <button class="btn ghost theme-preset-btn" data-theme-preset-apply="${esc(p.id)}">应用</button>
-          <button class="btn ghost theme-preset-btn" data-theme-preset-rename="${esc(p.id)}">重命名</button>
-          <button class="btn danger theme-preset-btn" data-theme-preset-delete="${esc(p.id)}">删除</button>
+          <button class="btn ghost theme-preset-btn" data-theme-preset-up="${esc(p.id)}" ${index === 0 ? 'disabled' : ''} title="${tr('theme.moveUp', '上移')}">↑</button>
+          <button class="btn ghost theme-preset-btn" data-theme-preset-down="${esc(p.id)}" ${index === themePresets.length - 1 ? 'disabled' : ''} title="${tr('theme.moveDown', '下移')}">↓</button>
+          <button class="btn ghost theme-preset-btn" data-theme-preset-apply="${esc(p.id)}">${tr('common.apply', '应用')}</button>
+          <button class="btn ghost theme-preset-btn" data-theme-preset-rename="${esc(p.id)}">${tr('theme.rename', '重命名')}</button>
+          <button class="btn danger theme-preset-btn" data-theme-preset-delete="${esc(p.id)}">${tr('common.delete', '删除')}</button>
         </div>
       </div>`;
     }).join('');
@@ -5436,61 +5485,61 @@
           <div class="section-title">${tr('settings.section.account', '账号')}</div>
           <div class="panel-box" style="display:flex;flex-direction:column;gap:12px">
             <div class="setting-item" style="padding:0 0 10px 0;border-bottom:1px solid var(--border,#eee)">
-              <div><div class="setting-title">服务器区服</div><div class="setting-sub">选择官方桌宠所在的区服（切换后需重新登录）</div></div>
+              <div><div class="setting-title">${tr('settings.serverRegion.title', '服务器区服')}</div><div class="setting-sub">${tr('settings.serverRegion.sub', '选择官方桌宠所在的区服（切换后需重新登录）')}</div></div>
               <div class="setting-content">
                 <select class="select" id="setServerRegion">
-                  <option value="cn" ${(s.serverRegion || 'cn') === 'cn' ? 'selected' : ''}>国服（CN）</option>
-                  <option value="global" ${(s.serverRegion || 'cn') === 'global' ? 'selected' : ''}>国际服（Global）</option>
+                  <option value="cn" ${(s.serverRegion || 'cn') === 'cn' ? 'selected' : ''}>${tr('login.regionCn', '国服（CN）')}</option>
+                  <option value="global" ${(s.serverRegion || 'cn') === 'global' ? 'selected' : ''}>${tr('login.regionGlobal', '国际服（Global）')}</option>
                 </select>
               </div>
             </div>
             <div class="setting-item auth-status-row">
               <div>
-                <div class="setting-title">登录态</div>
-                <div class="setting-sub">${esc(authStatus)}${auth.lastCheckedAt ? ' · 上次检测 ' + new Date(Number(auth.lastCheckedAt)).toLocaleTimeString('zh-CN', { hour12: false }) : ''}</div>
+                <div class="setting-title">${tr('settings.auth.title', '登录态')}</div>
+                <div class="setting-sub">${esc(authStatus)}${auth.lastCheckedAt ? ' · ' + tr('settings.auth.lastChecked', '上次检测 {time}', { time: new Date(Number(auth.lastCheckedAt)).toLocaleTimeString('zh-CN', { hour12: false }) }) : ''}</div>
               </div>
               <div class="setting-content">
-                ${['conflict', 'invalid', 'network'].includes(currentAuthState) ? '<button class="btn ghost" data-auth-recheck>重新检测</button>' : ''}
-                ${currentAuthState === 'conflict' || (currentAuthState === 'invalid' && auth.credentialValid) ? '<button class="btn" data-auth-reconnect>重新连接</button>' : ''}
+                ${['conflict', 'invalid', 'network'].includes(currentAuthState) ? `<button class="btn ghost" data-auth-recheck>${tr('auth.recheck', '重新检测')}</button>` : ''}
+                ${currentAuthState === 'conflict' || (currentAuthState === 'invalid' && auth.credentialValid) ? `<button class="btn" data-auth-reconnect>${tr('auth.reconnect', '重新连接')}</button>` : ''}
               </div>
             </div>
             ${isLogged() ? `
-              <div class="detail-row"><span>昵称</span><span data-auth-nickname>${esc(auth.nickname || '—')}</span></div>
+              <div class="detail-row"><span>${tr('settings.auth.nickname', '昵称')}</span><span data-auth-nickname>${esc(auth.nickname || '—')}</span></div>
               <div class="detail-row"><span>UID</span><span data-auth-uid>${auth.uid || '—'}</span></div>
-              <div class="detail-row"><span>可用点击</span><span data-click-avail>${auth.clicks || 0}</span></div>
-              <div class="detail-row"><span>累计点击</span><span class="click-total"><span data-click-total>${auth.clickTotal ?? auth.clicks ?? 0}</span>${authOnlineAvailable() ? '<button class="btn ghost click-boost" id="boostClicks" title="本地增加 10000 次点击并立即上报；连续操作间隔至少 0.5 秒">+10000</button>' : ''}</span></div>
-              <div class="detail-row"><span>已消耗</span><span data-click-consume>${auth.clickConsume || 0}</span></div>
+              <div class="detail-row" data-click-row="avail"><span>${tr('settings.auth.availClicks', '可用点击')}</span><span data-click-avail>${auth.clicks || 0}</span></div>
+              <div class="detail-row" data-click-row="total"><span>${tr('settings.auth.totalClicks', '累计点击')}</span><span class="click-total"><span data-click-total>${auth.clickTotal ?? auth.clicks ?? 0}</span>${authOnlineAvailable() ? `<button class="btn ghost click-boost" id="boostClicks" title="${tr('settings.auth.boostTitle', '本地增加 10000 次点击并立即上报；连续操作间隔至少 0.5 秒')}">+10000</button>` : ''}</span></div>
+              <div class="detail-row" data-click-row="consume"><span>${tr('settings.auth.consumed', '已消耗')}</span><span data-click-consume>${auth.clickConsume || 0}</span></div>
               <div class="setting-item" style="padding:8px 0;border-top:1px solid var(--border,#eee);border-bottom:1px solid var(--border,#eee);background:transparent">
-                <div><div class="setting-title">自动补贴点击</div><div class="setting-sub">可用点击低于 1000 时自动补充 10000</div></div>
+                <div><div class="setting-title">${tr('settings.autoBoost.title', '自动补贴点击')}</div><div class="setting-sub">${tr('settings.autoBoost.sub', '可用点击低于 1000 时自动补充 10000')}</div></div>
                 <div class="switch ${s.autoClickBoost ? 'on' : ''}" data-switch="autoClickBoost"></div>
               </div>
               <div style="display:flex;gap:10px">
-                ${authOnlineAvailable() ? '<button class="btn ghost" id="userRefresh">刷新账号信息</button>' : ''}
-                <button class="btn danger" id="logoutBtn">退出登录</button>
+                ${authOnlineAvailable() ? `<button class="btn ghost" id="userRefresh">${tr('settings.auth.refresh', '刷新账号信息')}</button>` : ''}
+                <button class="btn danger" id="logoutBtn">${tr('settings.auth.logout', '退出登录')}</button>
               </div>` : ((s.serverRegion || 'cn') === 'global' ? `
-              <div class="detail-row"><span>登录</span><span class="muted">国际服请使用下方继承官方登录状态，或导入 Token</span></div>
+              <div class="detail-row"><span>${tr('settings.auth.login', '登录')}</span><span class="muted">${tr('settings.auth.globalHint', '国际服请使用下方继承官方登录状态，或导入 Token')}</span></div>
               <div style="display:flex;gap:10px">
-                <input class="input" id="setToken" placeholder="粘贴官方客户端 infoToken" style="flex:1" />
-                <button class="btn ghost" id="setTokenBtn">导入 token</button>
+                <input class="input" id="setToken" placeholder="${tr('settings.auth.pasteToken', '粘贴官方客户端 infoToken')}" style="flex:1" />
+                <button class="btn ghost" id="setTokenBtn">${tr('settings.auth.importToken', '导入 token')}</button>
               </div>` : `
-              <div class="detail-row"><span>登录</span><span class="muted">UID / 手机号 + 验证码（也可继承官方登录状态）</span></div>
+              <div class="detail-row"><span>${tr('settings.auth.login', '登录')}</span><span class="muted">${tr('settings.auth.uidHint', 'UID / 手机号 + 验证码（也可继承官方登录状态）')}</span></div>
               <div style="display:flex;gap:10px">
-                <input class="input" id="setUid" placeholder="游戏 UID（9-10 位）" style="width:180px" />
-                <input class="input" id="setCode" placeholder="6 位验证码" style="width:140px" />
-                <button class="btn ghost" id="setSend">发送验证码</button>
-                <button class="btn" id="setLogin">登录</button>
+                <input class="input" id="setUid" placeholder="${tr('login.uidPlaceholder', '游戏 UID（9-10 位）')}" style="width:180px" />
+                <input class="input" id="setCode" placeholder="${tr('login.codePlaceholder', '6 位验证码')}" style="width:140px" />
+                <button class="btn ghost" id="setSend">${tr('login.sendCode', '发送验证码')}</button>
+                <button class="btn" id="setLogin">${tr('login.loginButton', '登录')}</button>
               </div>
               <div style="display:flex;gap:10px;align-items:center">
-                <button class="btn ghost" id="setPhoneLoginOpen">手机号登录</button>
-                <span class="muted" style="font-size:12px">库洛通行证手机号 + 短信验证码</span>
+                <button class="btn ghost" id="setPhoneLoginOpen">${tr('login.phoneMode', '手机号登录')}</button>
+                <span class="muted" style="font-size:12px">${tr('settings.auth.phoneHint', '库洛通行证手机号 + 短信验证码')}</span>
               </div>
               <div style="display:flex;gap:10px">
-                <input class="input" id="setToken" placeholder="粘贴官方客户端 infoToken" style="flex:1" />
-                <button class="btn ghost" id="setTokenBtn">导入 token</button>
+                <input class="input" id="setToken" placeholder="${tr('settings.auth.pasteToken', '粘贴官方客户端 infoToken')}" style="flex:1" />
+                <button class="btn ghost" id="setTokenBtn">${tr('settings.auth.importToken', '导入 token')}</button>
               </div>`)}
             <div class="inherit-login">
-              <div class="setting-sub">建议在获取前先关闭本家程序的开机自动启动，以免下次开机因为 token 冲突导致掉线。</div>
-              <button class="btn ghost" id="inheritLogin">继承官方程序登录状态</button>
+              <div class="setting-sub">${tr('settings.auth.inheritHint', '建议在获取前先关闭本家程序的开机自动启动，以免下次开机因为 token 冲突导致掉线。')}</div>
+              <button class="btn ghost" id="inheritLogin">${tr('settings.auth.inherit', '继承官方程序登录状态')}</button>
             </div>
           </div>
         </div>
@@ -5498,18 +5547,18 @@
         <div class="section" data-section-id="window">
           <div class="section-title">${tr('settings.section.window', '窗口与桌宠')}</div>
           <div class="setting-item">
-            <div><div class="setting-title">桌宠大小</div><div class="setting-sub">拖动滑条以 1% 细调，或选择常用档位；缩放以猫底部中心为锚点</div></div>
+            <div><div class="setting-title">${tr('settings.window.scale.title', '桌宠大小')}</div><div class="setting-sub">${tr('settings.window.scale.sub', '拖动滑条以 1% 细调，或选择常用档位；缩放以猫底部中心为锚点')}</div></div>
             <div class="setting-content">
               <select class="select" id="setScale" style="width:96px">
                 ${[0.25, 0.5, 0.75, 1, 1.25, 1.5, 2].map(v => `<option value="${v}" ${Math.abs((s.scale || 1) - v) < 0.005 ? 'selected' : ''}>${Math.round(v * 100)}%</option>`).join('')}
-                <option value="custom" disabled ${scalePreset ? '' : 'selected'}>自定义</option>
+                <option value="custom" disabled ${scalePreset ? '' : 'selected'}>${tr('settings.custom', '自定义')}</option>
               </select>
               <input type="range" min="25" max="200" step="1" value="${scalePct}" id="setScaleRange" style="width:180px" />
               <span id="scaleVal">${scalePct}%</span>
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">默认显示屏幕</div><div class="setting-sub">程序启动、切换区服或托盘重置位置时使用的默认屏幕；F8 始终从桌宠当前实际所在屏幕开始切换，不受此处影响</div></div>
+            <div><div class="setting-title">${tr('settings.window.screen.title', '默认显示屏幕')}</div><div class="setting-sub">${tr('settings.window.screen.sub', '程序启动、切换区服或托盘重置位置时使用的默认屏幕；F8 始终从桌宠当前实际所在屏幕开始切换，不受此处影响')}</div></div>
             <div class="setting-content">
               <select class="select" id="setPetScreen" style="min-width:220px">
                 ${screens.map(x => `<option value="${esc(x.deviceName)}" ${x.deviceName === selectedScreen ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}
@@ -5517,100 +5566,100 @@
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">切换屏幕时的移动范围</div><div class="setting-sub">默认位置成员指最近一次重置排序后未手动拖动的成员；全部成员模式会在两屏都有成员时互相交换，分辨率不同时按屏幕比例换算</div></div>
+            <div><div class="setting-title">${tr('settings.window.screenSwitch.title', '切换屏幕时的移动范围')}</div><div class="setting-sub">${tr('settings.window.screenSwitch.sub', '默认位置成员指最近一次重置排序后未手动拖动的成员；全部成员模式会在两屏都有成员时互相交换，分辨率不同时按屏幕比例换算')}</div></div>
             <div class="setting-content">
               <select class="select" id="setScreenSwitchMode" style="min-width:240px">
-                <option value="default" ${screenSwitchMode === 'default' ? 'selected' : ''}>仅移动默认位置成员</option>
-                <option value="main" ${screenSwitchMode === 'main' ? 'selected' : ''}>只移动主角</option>
-                <option value="all" ${screenSwitchMode === 'all' ? 'selected' : ''}>全部成员一起移动</option>
+                <option value="default" ${screenSwitchMode === 'default' ? 'selected' : ''}>${tr('settings.window.screenSwitch.default', '仅移动默认位置成员')}</option>
+                <option value="main" ${screenSwitchMode === 'main' ? 'selected' : ''}>${tr('settings.window.screenSwitch.main', '只移动主角')}</option>
+                <option value="all" ${screenSwitchMode === 'all' ? 'selected' : ''}>${tr('settings.window.screenSwitch.all', '全部成员一起移动')}</option>
               </select>
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">联机桌宠大小</div><div class="setting-sub">默认跟随主角；取消勾选后可单独调整所有联机角色</div></div>
+            <div><div class="setting-title">${tr('settings.window.remoteScale.title', '联机桌宠大小')}</div><div class="setting-sub">${tr('settings.window.remoteScale.sub', '默认跟随主角；取消勾选后可单独调整所有联机角色')}</div></div>
             <div class="setting-content">
               <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);cursor:pointer;white-space:nowrap">
                 <input type="checkbox" id="remoteFollowMain" ${remoteFollowMain ? 'checked' : ''} style="width:16px;height:16px;accent-color:#e3a765" />
-                跟随主角
+                ${tr('settings.followMain', '跟随主角')}
               </label>
               <select class="select" id="setRemoteScale" style="width:96px" ${remoteFollowMain ? 'disabled' : ''}>
                 ${[0.25, 0.5, 0.75, 1, 1.25, 1.5, 2].map(v => `<option value="${v}" ${Math.abs(remoteScalePct / 100 - v) < 0.005 ? 'selected' : ''}>${Math.round(v * 100)}%</option>`).join('')}
-                <option value="custom" disabled ${remoteScalePreset ? '' : 'selected'}>自定义</option>
+                <option value="custom" disabled ${remoteScalePreset ? '' : 'selected'}>${tr('settings.custom', '自定义')}</option>
               </select>
               <input type="range" min="25" max="200" step="1" value="${remoteScalePct}" id="setRemoteScaleRange" style="width:150px" ${remoteFollowMain ? 'disabled' : ''} />
               <span id="remoteScaleVal">${remoteScalePct}%</span>
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">桌宠不透明度</div><div class="setting-sub">100% 为完全不透明</div></div>
+            <div><div class="setting-title">${tr('settings.window.opacity.title', '桌宠不透明度')}</div><div class="setting-sub">${tr('settings.window.opacity.sub', '100% 为完全不透明')}</div></div>
             <div class="setting-content">
               <input type="range" min="20" max="100" value="${opacityPct}" id="setOpacity" style="width:180px" />
               <span id="opacityVal">${opacityPct}%</span>
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">联机桌宠不透明度</div><div class="setting-sub">默认跟随主角；取消勾选后可单独调整所有联机角色</div></div>
+            <div><div class="setting-title">${tr('settings.window.remoteOpacity.title', '联机桌宠不透明度')}</div><div class="setting-sub">${tr('settings.window.remoteOpacity.sub', '默认跟随主角；取消勾选后可单独调整所有联机角色')}</div></div>
             <div class="setting-content">
               <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);cursor:pointer;white-space:nowrap">
                 <input type="checkbox" id="remoteFollowMainOpacity" ${remoteFollowMainOpacity ? 'checked' : ''} style="width:16px;height:16px;accent-color:#e3a765" />
-                跟随主角
+                ${tr('settings.followMain', '跟随主角')}
               </label>
               <input type="range" min="20" max="100" step="1" value="${remoteOpacityPct}" id="setRemoteOpacityRange" style="width:180px" ${remoteFollowMainOpacity ? 'disabled' : ''} />
               <span id="remoteOpacityVal">${remoteOpacityPct}%</span>
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">联机玩家名字大小</div><div class="setting-sub">相对默认字号 50%–200%，只影响联机成员昵称</div></div>
+            <div><div class="setting-title">${tr('settings.window.remoteNameScale.title', '联机玩家名字大小')}</div><div class="setting-sub">${tr('settings.window.remoteNameScale.sub', '相对默认字号 50%–200%，只影响联机成员昵称')}</div></div>
             <div class="setting-content">
               <input type="range" min="50" max="200" step="1" value="${remoteNameScalePct}" id="setRemoteNameScale" style="width:180px" />
               <span id="remoteNameScaleVal">${remoteNameScalePct}%</span>
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">按键气泡</div><div class="setting-sub">按键时在桌宠上方冒出键帽，默认开启</div></div>
+            <div><div class="setting-title">${tr('settings.window.keyBubbles.title', '按键气泡')}</div><div class="setting-sub">${tr('settings.window.keyBubbles.sub', '按键时在桌宠上方冒出键帽，默认开启')}</div></div>
             <div class="switch ${s.keyBubbles !== false ? 'on' : ''}" data-switch="keyBubbles"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">动画帧率</div><div class="setting-sub">表情和按键气泡的刷新帧率，默认 60；帧率越低占用越少</div></div>
+            <div><div class="setting-title">${tr('settings.window.fps.title', '动画帧率')}</div><div class="setting-sub">${tr('settings.window.fps.sub', '表情和按键气泡的刷新帧率，默认 60；帧率越低占用越少')}</div></div>
             <div class="setting-content">
               <div class="layout-switch" id="setAnimationFps">
-                ${[30, 60, 120].map(fps => `<button type="button" class="layout-choice ${(s.animationFps || 60) === fps ? 'active' : ''}" data-fps="${fps}">${fps} 帧</button>`).join('')}
+                ${[30, 60, 120].map(fps => `<button type="button" class="layout-choice ${(s.animationFps || 60) === fps ? 'active' : ''}" data-fps="${fps}">${tr('settings.window.fps.option', '{fps} 帧', { fps })}</button>`).join('')}
               </div>
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">窗口置顶</div><div class="setting-sub">桌宠始终显示在其他窗口上方</div></div>
+            <div><div class="setting-title">${tr('settings.window.topmost.title', '窗口置顶')}</div><div class="setting-sub">${tr('settings.window.topmost.sub', '桌宠始终显示在其他窗口上方')}</div></div>
             <div class="switch ${s.topmost ? 'on' : ''}" data-switch="topmost"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">游戏模式（鼠标穿透）</div><div class="setting-sub">开启后桌宠不响应鼠标，可从托盘菜单恢复</div></div>
+            <div><div class="setting-title">${tr('settings.window.gameMode.title', '游戏模式（鼠标穿透）')}</div><div class="setting-sub">${tr('settings.window.gameMode.sub', '开启后桌宠不响应鼠标，可从托盘菜单恢复')}</div></div>
             <div class="switch ${s.clickThrough ? 'on' : ''}" data-switch="clickThrough"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">全屏自动游戏模式</div><div class="setting-sub">检测到前台窗口全屏时自动开启鼠标穿透，退出全屏后恢复</div></div>
+            <div><div class="setting-title">${tr('settings.window.autoGameMode.title', '全屏自动游戏模式')}</div><div class="setting-sub">${tr('settings.window.autoGameMode.sub', '检测到前台窗口全屏时自动开启鼠标穿透，退出全屏后恢复')}</div></div>
             <div class="switch ${s.autoGameModeOnFullscreen !== false ? 'on' : ''}" data-switch="autoGameModeOnFullscreen"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">鼠标悬停时半透明</div><div class="setting-sub">便于看清桌宠后的内容</div></div>
+            <div><div class="setting-title">${tr('settings.window.hoverFade.title', '鼠标悬停时半透明')}</div><div class="setting-sub">${tr('settings.window.hoverFade.sub', '便于看清桌宠后的内容')}</div></div>
             <div class="switch ${s.hoverFade ? 'on' : ''}" data-switch="hoverFade"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">悬停隐藏程度</div><div class="setting-sub">鼠标停留后降到正常不透明度的百分比，默认 40%</div></div>
+            <div><div class="setting-title">${tr('settings.window.hoverOpacity.title', '悬停隐藏程度')}</div><div class="setting-sub">${tr('settings.window.hoverOpacity.sub', '鼠标停留后降到正常不透明度的百分比，默认 40%')}</div></div>
             <div class="setting-content">
               <input type="range" min="10" max="100" value="${Math.round((s.hoverFadeOpacity ?? 0.4) * 100)}" id="setHoverOpacity" style="width:180px" />
               <span id="hoverOpacityVal">${Math.round((s.hoverFadeOpacity ?? 0.4) * 100)}%</span>
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">允许角色重叠</div><div class="setting-sub">默认开启；关闭后检测到重叠的联机桌宠会自动挪到旁边</div></div>
+            <div><div class="setting-title">${tr('settings.window.allowOverlap.title', '允许角色重叠')}</div><div class="setting-sub">${tr('settings.window.allowOverlap.sub', '默认开启；关闭后检测到重叠的联机桌宠会自动挪到旁边')}</div></div>
             <div class="switch ${s.allowOverlap !== false ? 'on' : ''}" data-switch="allowOverlap"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">隐藏主角底栏</div><div class="setting-sub">只隐藏计数条、工具栏和手部压条，角色本体保持完整；隐藏后仍可通过快捷键恢复</div></div>
+            <div><div class="setting-title">${tr('settings.window.hideMainBar.title', '隐藏主角底栏')}</div><div class="setting-sub">${tr('settings.window.hideMainBar.sub', '只隐藏计数条、工具栏和手部压条，角色本体保持完整；隐藏后仍可通过快捷键恢复')}</div></div>
             <div class="switch ${s.hideMainBar ? 'on' : ''}" data-switch="hideMainBar"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">隐藏远程角色底栏</div><div class="setting-sub">只隐藏联机角色的昵称条和手部压条，角色本体与表情气泡保持显示；隐藏后仍可通过快捷键恢复</div></div>
+            <div><div class="setting-title">${tr('settings.window.hideRemoteBars.title', '隐藏远程角色底栏')}</div><div class="setting-sub">${tr('settings.window.hideRemoteBars.sub', '只隐藏联机角色的昵称条和手部压条，角色本体与表情气泡保持显示；隐藏后仍可通过快捷键恢复')}</div></div>
             <div class="switch ${s.hideRemoteBars ? 'on' : ''}" data-switch="hideRemoteBars"></div>
           </div>
         </div>
@@ -5618,11 +5667,11 @@
         <div class="section" data-section-id="obs">
           <div class="section-title">${tr('settings.section.obs', 'OBS 采集')}</div>
           <div class="setting-item">
-            <div><div class="setting-title">OBS 采集窗口</div><div class="setting-sub">主角完整 GUI（数字/计数条/宝箱/昵称）和键盘/手柄面板一起显示；可自定义背景色或设为透明</div></div>
+            <div><div class="setting-title">${tr('settings.obs.enable.title', 'OBS 采集窗口')}</div><div class="setting-sub">${tr('settings.obs.enable.sub', '主角完整 GUI（数字/计数条/宝箱/昵称）和键盘/手柄面板一起显示；可自定义背景色或设为透明')}</div></div>
             <div class="switch ${s.captureMode ? 'on' : ''}" data-switch="captureMode"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">采集窗口大小</div><div class="setting-sub">单位像素，指客户区大小；OBS 窗口采集选择 “Wuwatappo Capture”</div></div>
+            <div><div class="setting-title">${tr('settings.obs.size.title', '采集窗口大小')}</div><div class="setting-sub">${tr('settings.obs.size.sub', '单位像素，指客户区大小；OBS 窗口采集选择 “Wuwatappo Capture”')}</div></div>
             <div class="setting-content">
               <input class="input" id="captureW" type="number" min="160" max="1600" step="10" value="${s.captureWidth ?? 400}" style="width:86px" />
               <span class="muted">×</span>
@@ -5630,9 +5679,9 @@
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">采集背景颜色</div><div class="setting-sub">支持 #RRGGBB 色号；透明模式下不使用此颜色</div></div>
+            <div><div class="setting-title">${tr('settings.obs.bg.title', '采集背景颜色')}</div><div class="setting-sub">${tr('settings.obs.bg.sub', '支持 #RRGGBB 色号；透明模式下不使用此颜色')}</div></div>
             <div class="setting-content" style="flex-wrap:wrap;justify-content:flex-end">
-              <button type="button" class="color-picker-trigger" data-color-for="captureColorHex" title="选择颜色"></button>
+              <button type="button" class="color-picker-trigger" data-color-for="captureColorHex" title="${tr('color.title', '选择颜色')}"></button>
               <input class="input" id="captureColorHex" maxlength="7" value="${esc(s.captureColor || '#00FF00')}" style="width:86px;text-transform:uppercase" />
               <div class="capture-palette" id="capturePalette">
                 ${['#00FF00', '#0000FF', '#FF00FF', '#00FFFF', '#FFFFFF', '#000000'].map(c => `<button type="button" class="capture-swatch" data-capture-color="${c}" style="background:${c}" title="${c}"></button>`).join('')}
@@ -5640,15 +5689,15 @@
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">透明背景</div><div class="setting-sub">OBS 窗口采集需勾选「允许透明」；兼容模式下忽略透明，使用纯色背景</div></div>
+            <div><div class="setting-title">${tr('settings.obs.transparent.title', '透明背景')}</div><div class="setting-sub">${tr('settings.obs.transparent.sub', 'OBS 窗口采集需勾选「允许透明」；兼容模式下忽略透明，使用纯色背景')}</div></div>
             <div class="switch ${s.captureTransparent ? 'on' : ''}" data-switch="captureTransparent"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">OBS 兼容模式</div><div class="setting-sub">回退到 0.1.10 之前的普通窗口渲染；OBS 显示黑影/黑屏时开启</div></div>
+            <div><div class="setting-title">${tr('settings.obs.compat.title', 'OBS 兼容模式')}</div><div class="setting-sub">${tr('settings.obs.compat.sub', '回退到 0.1.10 之前的普通窗口渲染；OBS 显示黑影/黑屏时开启')}</div></div>
             <div class="switch ${s.captureCompatibilityMode ? 'on' : ''}" data-switch="captureCompatibilityMode"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">停止渲染桌面主角</div><div class="setting-sub">OBS 模式下隐藏桌面上的主角，采集窗口仍会显示主角</div></div>
+            <div><div class="setting-title">${tr('settings.obs.stopMain.title', '停止渲染桌面主角')}</div><div class="setting-sub">${tr('settings.obs.stopMain.sub', 'OBS 模式下隐藏桌面上的主角，采集窗口仍会显示主角')}</div></div>
             <div class="switch ${s.captureStopRenderingMain ? 'on' : ''}" data-switch="captureStopRenderingMain"></div>
           </div>
         </div>
@@ -5658,9 +5707,9 @@
           <div class="setting-item accessory-tuning">
             <div class="accessory-tuning-head">
               <div>
-                <div class="setting-title">当前头饰</div>
-                <div class="setting-sub">${accId ? '拖动滑条调整 X/Y、自由缩放与旋转，方向按钮微调位置；每个头饰独立保存' : '当前未佩戴头饰，先在背包 → 配件中选择一件'}</div>
-                <div class="setting-sub accessory-local-note">此调整仅本地生效，联机玩家看见的是默认样式</div>
+                <div class="setting-title">${tr('settings.accessory.title', '当前头饰')}</div>
+                <div class="setting-sub">${accId ? tr('settings.accessory.sub', '拖动滑条调整 X/Y、自由缩放与旋转，方向按钮微调位置；每个头饰独立保存') : tr('settings.accessory.none', '当前未佩戴头饰，先在背包 → 配件中选择一件')}</div>
+                <div class="setting-sub accessory-local-note">${tr('settings.accessory.localNote', '此调整仅本地生效，联机玩家看见的是默认样式')}</div>
               </div>
               <span class="accessory-coords" id="accessoryCoords">X ${accX} · Y ${accY} · ${accScale}% · ${accRotation}°</span>
             </div>
@@ -5669,40 +5718,40 @@
                 <label class="axis-control">
                   <span class="axis-label">X</span>
                   <span class="axis-slider-wrap">
-                    <input class="axis-range" id="accOffsetX" type="range" min="-160" max="160" step="1" value="${accX}" aria-label="头饰 X 轴偏移" ${accId ? '' : 'disabled'}>
+                    <input class="axis-range" id="accOffsetX" type="range" min="-160" max="160" step="1" value="${accX}" aria-label="${tr('settings.accessory.xAria', '头饰 X 轴偏移')}" ${accId ? '' : 'disabled'}>
                   </span>
                   <output class="axis-value" id="accOffsetXValue">${accX}</output>
                 </label>
                 <label class="axis-control">
                   <span class="axis-label">Y</span>
                   <span class="axis-slider-wrap">
-                    <input class="axis-range" id="accOffsetY" type="range" min="-160" max="160" step="1" value="${accY}" aria-label="头饰 Y 轴偏移" ${accId ? '' : 'disabled'}>
+                    <input class="axis-range" id="accOffsetY" type="range" min="-160" max="160" step="1" value="${accY}" aria-label="${tr('settings.accessory.yAria', '头饰 Y 轴偏移')}" ${accId ? '' : 'disabled'}>
                   </span>
                   <output class="axis-value" id="accOffsetYValue">${accY}</output>
                 </label>
                 <label class="axis-control">
-                  <span class="axis-label axis-label-text">缩放</span>
+                  <span class="axis-label axis-label-text">${tr('settings.accessory.scale', '缩放')}</span>
                   <span class="axis-slider-wrap" style="--axis-zero:50%">
-                    <input class="axis-range" id="accScale" type="range" min="25" max="175" step="1" value="${accScale}" aria-label="头饰自由缩放百分比" ${accId ? '' : 'disabled'}>
+                    <input class="axis-range" id="accScale" type="range" min="25" max="175" step="1" value="${accScale}" aria-label="${tr('settings.accessory.scaleAria', '头饰自由缩放百分比')}" ${accId ? '' : 'disabled'}>
                   </span>
                   <output class="axis-value axis-value-wide" id="accScaleValue">${accScale}%</output>
                 </label>
                 <label class="axis-control">
-                  <span class="axis-label axis-label-text">旋转</span>
+                  <span class="axis-label axis-label-text">${tr('settings.accessory.rotate', '旋转')}</span>
                   <span class="axis-slider-wrap">
-                    <input class="axis-range" id="accRotation" type="range" min="-180" max="180" step="1" value="${accRotation}" aria-label="头饰自由旋转角度" ${accId ? '' : 'disabled'}>
+                    <input class="axis-range" id="accRotation" type="range" min="-180" max="180" step="1" value="${accRotation}" aria-label="${tr('settings.accessory.rotateAria', '头饰自由旋转角度')}" ${accId ? '' : 'disabled'}>
                   </span>
                   <output class="axis-value axis-value-wide" id="accRotationValue">${accRotation}°</output>
                 </label>
               </div>
               <div class="accessory-actions">
                 <div class="nudge-pad">
-                  <button class="btn ghost nudge-btn" data-nudge="0,-1" ${accId ? '' : 'disabled'} title="上移">↑</button>
-                  <button class="btn ghost nudge-btn" data-nudge="-1,0" ${accId ? '' : 'disabled'} title="左移">←</button>
-                  <button class="btn ghost nudge-btn" data-nudge="0,1" ${accId ? '' : 'disabled'} title="下移">↓</button>
-                  <button class="btn ghost nudge-btn" data-nudge="1,0" ${accId ? '' : 'disabled'} title="右移">→</button>
+                  <button class="btn ghost nudge-btn" data-nudge="0,-1" ${accId ? '' : 'disabled'} title="${tr('settings.accessory.up', '上移')}">↑</button>
+                  <button class="btn ghost nudge-btn" data-nudge="-1,0" ${accId ? '' : 'disabled'} title="${tr('settings.accessory.left', '左移')}">←</button>
+                  <button class="btn ghost nudge-btn" data-nudge="0,1" ${accId ? '' : 'disabled'} title="${tr('settings.accessory.down', '下移')}">↓</button>
+                  <button class="btn ghost nudge-btn" data-nudge="1,0" ${accId ? '' : 'disabled'} title="${tr('settings.accessory.right', '右移')}">→</button>
                 </div>
-                <button class="btn ghost accessory-reset" id="resetAccessoryOffset" ${accId && (accX || accY || accScale !== 100 || accRotation !== 0) ? '' : 'disabled'}>归零</button>
+                <button class="btn ghost accessory-reset" id="resetAccessoryOffset" ${accId && (accX || accY || accScale !== 100 || accRotation !== 0) ? '' : 'disabled'}>${tr('settings.accessory.reset', '归零')}</button>
               </div>
             </div>
           </div>
@@ -5711,112 +5760,112 @@
         <div class="section" id="themeSection" data-section-id="theme">
           <div class="section-title">${tr('settings.section.theme', '主题与外观')}</div>
           <div class="setting-item">
-            <div><div class="setting-title">主题色</div><div class="setting-sub">作为主色自动生成整套面板配色，也用于桌宠底部信息条</div></div>
+            <div><div class="setting-title">${tr('settings.theme.accent.title', '主题色')}</div><div class="setting-sub">${tr('settings.theme.accent.sub', '作为主色自动生成整套面板配色，也用于桌宠底部信息条')}</div></div>
             <div class="setting-content">
-              <button type="button" class="color-picker-trigger" data-color-for="themeAccent" title="选择颜色"></button>
+              <button type="button" class="color-picker-trigger" data-color-for="themeAccent" title="${tr('color.title', '选择颜色')}"></button>
               <input class="input color-hex-input" id="themeAccent" maxlength="7" value="${themeAccent}" placeholder="#E7B77C" />
-              <button class="btn ghost" id="themeReset" title="恢复默认主题色和高级配色">恢复默认</button>
+              <button class="btn ghost" id="themeReset" title="${tr('settings.theme.reset.title', '恢复默认主题色和高级配色')}">${tr('settings.theme.reset', '恢复默认')}</button>
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">字体颜色</div><div class="setting-sub">应用于面板主要文字和桌宠底部信息条</div></div>
+            <div><div class="setting-title">${tr('settings.theme.font.title', '字体颜色')}</div><div class="setting-sub">${tr('settings.theme.font.sub', '应用于面板主要文字和桌宠底部信息条')}</div></div>
             <div class="setting-content">
-              <button type="button" class="color-picker-trigger" data-color-for="themeFont" title="选择颜色"></button>
+              <button type="button" class="color-picker-trigger" data-color-for="themeFont" title="${tr('color.title', '选择颜色')}"></button>
               <input class="input color-hex-input" id="themeFont" maxlength="7" value="${themeFont}" placeholder="#8E5E43" />
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">底栏跟随标准主题</div><div class="setting-sub">关闭后可单独设置主桌宠底栏和所有联机角色昵称条，不影响面板配色</div></div>
+            <div><div class="setting-title">${tr('settings.theme.barFollow.title', '底栏跟随标准主题')}</div><div class="setting-sub">${tr('settings.theme.barFollow.sub', '关闭后可单独设置主桌宠底栏和所有联机角色昵称条，不影响面板配色')}</div></div>
             <div class="switch ${themeBarFollow ? 'on' : ''}" data-switch="themeBarFollowStandard"></div>
           </div>
           ${themeBarFollow ? '' : `
           <div class="setting-item">
-            <div><div class="setting-title">底栏背景色</div><div class="setting-sub">主桌宠信息条与所有 RemoteCatWindow 昵称条共用</div></div>
+            <div><div class="setting-title">${tr('settings.theme.barColor.title', '底栏背景色')}</div><div class="setting-sub">${tr('settings.theme.barColor.sub', '主桌宠信息条与所有 RemoteCatWindow 昵称条共用')}</div></div>
             <div class="setting-content">
-              <button type="button" class="color-picker-trigger" data-color-for="themeBarColor" title="选择颜色"></button>
+              <button type="button" class="color-picker-trigger" data-color-for="themeBarColor" title="${tr('color.title', '选择颜色')}"></button>
               <input class="input color-hex-input" id="themeBarColor" maxlength="7" value="${themeBarColorValue}" placeholder="#F5E4CC" />
-              <button class="btn ghost" id="themeBarColorReset" title="清空独立底色，重新使用主题色推导">跟随主题推导</button>
+              <button class="btn ghost" id="themeBarColorReset" title="${tr('settings.theme.barColor.resetTitle', '清空独立底色，重新使用主题色推导')}">${tr('settings.theme.barColor.reset', '跟随主题推导')}</button>
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">底栏文字</div><div class="setting-sub">默认跟随主题字体色；也可以单独指定</div></div>
+            <div><div class="setting-title">${tr('settings.theme.barText.title', '底栏文字')}</div><div class="setting-sub">${tr('settings.theme.barText.sub', '默认跟随主题字体色；也可以单独指定')}</div></div>
             <div class="setting-content" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
               <label class="muted" style="display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap">
                 <input type="checkbox" id="themeBarTextFollowTheme" ${themeBarTextFollow ? 'checked' : ''} />
-                跟随主题字体色
+                ${tr('settings.theme.barText.follow', '跟随主题字体色')}
               </label>
               ${themeBarTextFollow
                 ? `<span class="muted" style="font-size:12px">${esc(s.themeBarEffectiveTextColor || themeFont)}</span>`
-                : `<button type="button" class="color-picker-trigger" data-color-for="themeBarTextColor" title="选择颜色"></button>
+                : `<button type="button" class="color-picker-trigger" data-color-for="themeBarTextColor" title="${tr('color.title', '选择颜色')}"></button>
               <input class="input color-hex-input" id="themeBarTextColor" maxlength="7" value="${themeBarTextColorValue}" placeholder="#8E5E43" />`}
             </div>
           </div>`}
           <div class="setting-item">
-            <div><div class="setting-title">背景图像</div><div class="setting-sub">支持 PNG/JPG/WebP/GIF，最大 20MB；超过 4MB 自动压缩并存入主题缓存</div></div>
+            <div><div class="setting-title">${tr('settings.theme.bg.title', '背景图像')}</div><div class="setting-sub">${tr('settings.theme.bg.sub', '支持 PNG/JPG/WebP/GIF，最大 20MB；超过 4MB 自动压缩并存入主题缓存')}</div></div>
             <div class="setting-content" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <input type="file" id="themeBgFile" accept="image/png,image/jpeg,image/webp,image/gif" style="max-width:220px;font-size:12px" />
-              <button class="btn ghost" id="themeBgClear" ${themeBgSet ? '' : 'disabled'}>移除</button>
-              <span class="muted" id="themeBgStatus" style="font-size:12px">${themeBgSet ? '已设置背景图' : '未设置'}</span>
+              <button class="btn ghost" id="themeBgClear" ${themeBgSet ? '' : 'disabled'}>${tr('common.remove', '移除')}</button>
+              <span class="muted" id="themeBgStatus" style="font-size:12px">${themeBgSet ? tr('settings.theme.bg.set', '已设置背景图') : tr('settings.theme.bg.unset', '未设置')}</span>
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">从图片提取配色</div><div class="setting-sub">采样背景图的主色、辅助色和明暗色，生成整套面板与桌宠底栏配色</div></div>
+            <div><div class="setting-title">${tr('settings.theme.extract.title', '从图片提取配色')}</div><div class="setting-sub">${tr('settings.theme.extract.sub', '采样背景图的主色、辅助色和明暗色，生成整套面板与桌宠底栏配色')}</div></div>
             <div class="setting-content" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-              <button class="btn ghost" id="themeExtract" ${themeBgSet ? '' : 'disabled'}>从图片提取配色</button>
+              <button class="btn ghost" id="themeExtract" ${themeBgSet ? '' : 'disabled'}>${tr('settings.theme.extract.button', '从图片提取配色')}</button>
               <label class="muted" style="display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap">
                 <input type="checkbox" id="themeAutoPalette" ${themeAutoPalette ? 'checked' : ''} />
-                选图后自动应用
+                ${tr('settings.theme.extract.auto', '选图后自动应用')}
               </label>
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">背景透明度</div><div class="setting-sub">背景图在面板底层的可见程度</div></div>
+            <div><div class="setting-title">${tr('settings.theme.opacity.title', '背景透明度')}</div><div class="setting-sub">${tr('settings.theme.opacity.sub', '背景图在面板底层的可见程度')}</div></div>
             <div class="setting-content">
               <input type="range" id="themeBgOpacity" min="0" max="100" step="1" value="${themeBgOpacityPct}" style="width:150px" />
               <span id="themeBgOpacityVal" class="muted" style="font-size:12px">${themeBgOpacityPct}%</span>
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">背景模糊</div><div class="setting-sub">背景图模糊半径，0 表示不模糊</div></div>
+            <div><div class="setting-title">${tr('settings.theme.blur.title', '背景模糊')}</div><div class="setting-sub">${tr('settings.theme.blur.sub', '背景图模糊半径，0 表示不模糊')}</div></div>
             <div class="setting-content">
               <input type="range" id="themeBgBlur" min="0" max="24" step="1" value="${themeBgBlur}" style="width:150px" />
               <span id="themeBgBlurVal" class="muted" style="font-size:12px">${themeBgBlur}px</span>
             </div>
           </div>
           <details class="theme-advanced">
-            <summary>高级配色微调 <span class="muted">自动生成的整套颜色</span></summary>
-            <div class="theme-advanced-note">修改任意颜色后会覆盖该颜色；恢复默认会清除所有覆盖。</div>
+            <summary>${tr('settings.theme.advanced', '高级配色微调')} <span class="muted">${tr('settings.theme.advancedSub', '自动生成的整套颜色')}</span></summary>
+            <div class="theme-advanced-note">${tr('settings.theme.advancedNote', '修改任意颜色后会覆盖该颜色；恢复默认会清除所有覆盖。')}</div>
             <div class="theme-advanced-grid">
               ${THEME_ADVANCED_FIELDS.map(([key, label]) => `
                 <label class="theme-advanced-field">
-                  <span>${label}</span>
-                  <button type="button" class="color-picker-trigger" data-color-for="themeAdv_${key}" title="选择颜色"></button>
+                  <span>${tr('theme.field.' + key, label)}</span>
+                  <button type="button" class="color-picker-trigger" data-color-for="themeAdv_${key}" title="${tr('color.title', '选择颜色')}"></button>
                   <input class="input color-hex-input" id="themeAdv_${key}" data-theme-key="${key}" value="${themePalette[key] || '#e7b77c'}" maxlength="7" />
                 </label>`).join('')}
             </div>
           </details>
 
           <div class="theme-subsection">
-            <div class="theme-subsection-title">主题预设</div>
+            <div class="theme-subsection-title">${tr('settings.theme.presets', '主题预设')}</div>
             <div class="setting-item" style="border-top:0">
-              <div><div class="setting-title">保存当前主题</div><div class="setting-sub">保存主题色、字体色、高级 palette、底栏独立色和当前背景图；预设背景图会独立复制保存</div></div>
+              <div><div class="setting-title">${tr('settings.theme.saveCurrent', '保存当前主题')}</div><div class="setting-sub">${tr('settings.theme.saveCurrent.sub', '保存主题色、字体色、高级 palette、底栏独立色和当前背景图；预设背景图会独立复制保存')}</div></div>
               <div class="setting-content" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                <input class="input" id="themePresetName" maxlength="40" placeholder="预设名称，例如：夜间森林" value="${currentThemePreset ? esc(currentThemePreset.name) : ''}" style="width:200px" />
-                ${currentThemePreset ? `<label class="muted" style="display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap"><input type="checkbox" id="themePresetOverwrite" checked /> 覆盖「${esc(currentThemePreset.name)}」</label>` : ''}
-                <button class="btn" id="themePresetSave">${currentThemePreset ? '覆盖当前预设' : '保存为预设'}</button>
+                <input class="input" id="themePresetName" maxlength="40" placeholder="${tr('settings.theme.presetNamePlaceholder', '预设名称，例如：夜间森林')}" value="${currentThemePreset ? esc(currentThemePreset.name) : ''}" style="width:200px" />
+                ${currentThemePreset ? `<label class="muted" style="display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap"><input type="checkbox" id="themePresetOverwrite" checked /> ${tr('settings.theme.overwritePreset', '覆盖「{name}」', { name: esc(currentThemePreset.name) })}</label>` : ''}
+                <button class="btn" id="themePresetSave">${currentThemePreset ? tr('settings.theme.overwriteCurrent', '覆盖当前预设') : tr('settings.theme.saveAsPreset', '保存为预设')}</button>
               </div>
             </div>
             <div class="theme-preset-list" id="themePresetList">
-              ${themePresetRows || '<div class="muted" style="font-size:12px;padding:6px 2px">还没有保存的主题预设。</div>'}
+              ${themePresetRows || `<div class="muted" style="font-size:12px;padding:6px 2px">${tr('settings.theme.noPresets', '还没有保存的主题预设。')}</div>`}
             </div>
             <div class="theme-preset-preview" id="themePresetPreview">${themePresetPreviewHtml(previewPreset, themeRotation.currentPresetId)}</div>
             <div class="setting-item">
-              <div><div class="setting-title">自动轮换</div><div class="setting-sub">按预设列表顺序应用；面板关闭或设置页重渲染不会中断。${rotationLast > 0 ? `上次应用：${rotationTime}` : ''}</div></div>
+              <div><div class="setting-title">${tr('settings.theme.rotation.title', '自动轮换')}</div><div class="setting-sub">${tr('settings.theme.rotation.sub', '按预设列表顺序应用；面板关闭或设置页重渲染不会中断。')}${rotationLast > 0 ? tr('settings.theme.rotation.last', '上次应用：{time}', { time: rotationTime }) : ''}</div></div>
               <div class="setting-content" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
                 <div class="switch ${themeRotation.enabled ? 'on' : ''}" id="themeRotationToggle"></div>
-                <span class="muted" style="font-size:12px">间隔</span>
+                <span class="muted" style="font-size:12px">${tr('settings.theme.rotation.interval', '间隔')}</span>
                 <input class="input" id="themeRotationInterval" type="number" min="1" max="1440" step="1" value="${rotationInterval}" style="width:84px" />
-                <span class="muted" style="font-size:12px">分钟</span>
+                <span class="muted" style="font-size:12px">${tr('settings.theme.rotation.minutes', '分钟')}</span>
               </div>
             </div>
           </div>
@@ -5825,11 +5874,11 @@
         <div class="section" data-section-id="keyboard">
           <div class="section-title">${tr('settings.section.keyboard', '桌面键盘')}</div>
           <div class="setting-item">
-            <div><div class="setting-title">音游模式</div><div class="setting-sub">把鸣潮专属指示器替换音游指示器；开启后立即切换</div></div>
+            <div><div class="setting-title">${tr('settings.keyboard.rhythm.title', '音游模式')}</div><div class="setting-sub">${tr('settings.keyboard.rhythm.sub', '把鸣潮专属指示器替换音游指示器；开启后立即切换')}</div></div>
             <div class="switch ${s.rhythmMode ? 'on' : ''}" data-switch="rhythmMode"></div>
           </div>
           ${s.rhythmMode ? `<div class="setting-item">
-            <div><div class="setting-title">音游键数</div><div class="setting-sub">选择 4K、5K 或 6K 键位布局</div></div>
+            <div><div class="setting-title">${tr('settings.keyboard.rhythmCount.title', '音游键数')}</div><div class="setting-sub">${tr('settings.keyboard.rhythmCount.sub', '选择 4K、5K 或 6K 键位布局')}</div></div>
             <div class="setting-content">
               <select class="select" id="setRhythmKeyCount">
                 ${[4, 5, 6].map(n => `<option value="${n}" ${rhythmCount === n ? 'selected' : ''}>${n}K</option>`).join('')}
@@ -5837,81 +5886,81 @@
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">音游触发键位</div><div class="setting-sub">从左到右 ${rhythmCount} 个键；支持字母、数字、空格和 ; ' , . / 等符号；空格显示为横过来的 [</div></div>
+            <div><div class="setting-title">${tr('settings.keyboard.rhythmKeys.title', '音游触发键位')}</div><div class="setting-sub">${tr('settings.keyboard.rhythmKeys.sub', '从左到右 {count} 个键；支持字母、数字、空格和 ; \' , . / 等符号；空格显示为横过来的 [', { count: rhythmCount })}</div></div>
             <div class="setting-content">
               ${Array.from({ length: rhythmCount }, (_, i) => `<input class="input" data-rhythm-key="${i}" value="${esc(rhythmDisplay(rhythmKeys[i] || rhythmDefaults[rhythmCount][i]))}" style="width:42px;text-align:center;text-transform:uppercase;font-weight:700" inputmode="text" autocomplete="off" spellcheck="false" />`).join('')}
             </div>
           </div>` : ''}
           <div class="setting-item">
-            <div><div class="setting-title">键盘映射</div><div class="setting-sub">桌面键盘完全穿透，不拦截输入</div></div>
+            <div><div class="setting-title">${tr('settings.keyboard.mapping.title', '键盘映射')}</div><div class="setting-sub">${tr('settings.keyboard.mapping.sub', '桌面键盘完全穿透，不拦截输入')}</div></div>
             <div class="setting-content">
-              ${[['hidden', '不显示'], ['letters', '26 键'], s.rhythmMode ? ['rhythm', '音游模式'] : ['wuwa', '鸣潮专属'], ['controller', '手柄']].map(([k, label]) =>
+              ${[['hidden', tr('tray.keyboardHidden', '不显示')], ['letters', tr('tray.keyboardLetters', '26 键')], s.rhythmMode ? ['rhythm', tr('tray.keyboardRhythm', '音游模式')] : ['wuwa', tr('tray.keyboardWuwa', '鸣潮专属')], ['controller', tr('tray.keyboardController', '手柄')]].map(([k, label]) =>
                 `<button class="pill ${s.keyboardMode === k ? 'active' : ''}" data-kb="${k}">${label}</button>`).join('')}
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">显示映射控制</div><div class="setting-sub">关闭后仅保留键位图案</div></div>
+            <div><div class="setting-title">${tr('settings.keyboard.controls.title', '显示映射控制')}</div><div class="setting-sub">${tr('settings.keyboard.controls.sub', '关闭后仅保留键位图案')}</div></div>
             <div class="switch ${s.showMappingControls ? 'on' : ''}" data-switch="showMappingControls"></div>
           </div>
         </div>
 
         <div class="section" data-section-id="hotkeys">
           <div class="section-title">${tr('settings.section.hotkeys', '快捷键')}</div>
-          <div class="hint muted" style="font-size:12px;margin:-4px 0 10px">点击输入框后按下新组合键；Esc 取消，退格清除（禁用该快捷键）。支持 Ctrl / Alt / Shift + 普通按键。快捷键为被动监听，不会拦截其他程序的按键，也不影响按键延迟。</div>
+          <div class="hint muted" style="font-size:12px;margin:-4px 0 10px">${tr('settings.hotkeys.intro', '点击输入框后按下新组合键；Esc 取消，退格清除（禁用该快捷键）。支持 Ctrl / Alt / Shift + 普通按键。快捷键为被动监听，不会拦截其他程序的按键，也不影响按键延迟。')}</div>
           <div class="setting-item">
-            <div><div class="setting-title">分开设置底栏快捷键</div><div class="setting-sub">关闭时用一个快捷键同时切换主角和远程角色底栏；开启后分别用两个快捷键控制。切换只影响当前显示和注册的行，另一模式已录制的绑定会保留。</div></div>
+            <div><div class="setting-title">${tr('settings.hotkeys.separate.title', '分开设置底栏快捷键')}</div><div class="setting-sub">${tr('settings.hotkeys.separate.sub', '关闭时用一个快捷键同时切换主角和远程角色底栏；开启后分别用两个快捷键控制。切换只影响当前显示和注册的行，另一模式已录制的绑定会保留。')}</div></div>
             <div class="switch ${s.separateBarHotkeys ? 'on' : ''}" data-switch="separateBarHotkeys"></div>
           </div>
           <div class="hotkey-list" id="hotkeyList">
             ${HOTKEY_ACTIONS.filter(a => !a.mode || a.mode === (s.separateBarHotkeys ? 'separate' : 'together')).map(a => `
               <div class="hotkey-row">
-                <span class="hotkey-label">${esc(a.label)}</span>
-                <input class="input hotkey-input" readonly data-hotkey="${a.id}" value="${esc((s.hotkeys || {})[a.id] || '未设置')}" />
-                <button class="btn ghost hotkey-clear" data-hotkey-clear="${a.id}">清除</button>
+                <span class="hotkey-label">${esc(hotkeyLabel(a))}</span>
+                <input class="input hotkey-input" readonly data-hotkey="${a.id}" data-value="${esc((s.hotkeys || {})[a.id] || '')}" value="${esc((s.hotkeys || {})[a.id] || tr('common.notSet', '未设置'))}" />
+                <button class="btn ghost hotkey-clear" data-hotkey-clear="${a.id}">${tr('settings.hotkeys.clear', '清除')}</button>
               </div>`).join('')}
           </div>
           <div style="display:flex;gap:10px;margin-top:10px;align-items:center">
-            <button class="btn ghost" id="hotkeysReset">恢复默认</button>
-            <span class="muted" style="font-size:12px">修改后自动保存</span>
+            <button class="btn ghost" id="hotkeysReset">${tr('settings.hotkeys.reset', '恢复默认')}</button>
+            <span class="muted" style="font-size:12px">${tr('settings.hotkeys.autoSave', '修改后自动保存')}</span>
           </div>
         </div>
 
         <div class="section" data-section-id="room">
           <div class="section-title">${tr('settings.section.room', '联机与宝箱')}</div>
           <div class="setting-item">
-            <div><div class="setting-title">联机桌宠排列</div><div class="setting-sub">横向贴底部排成一排；纵向贴屏幕右侧，排满后向左换列</div></div>
+            <div><div class="setting-title">${tr('settings.room.layout.title', '联机桌宠排列')}</div><div class="setting-sub">${tr('settings.room.layout.sub', '横向贴底部排成一排；纵向贴屏幕右侧，排满后向左换列')}</div></div>
             <div class="setting-content">
               <div class="layout-switch" id="setCatLayout">
-                <button type="button" class="layout-choice ${(s.catLayout || 'horizontal') !== 'vertical' ? 'active' : ''}" data-layout="horizontal">横向排列</button>
-                <button type="button" class="layout-choice ${(s.catLayout || 'horizontal') === 'vertical' ? 'active' : ''}" data-layout="vertical">纵向排列</button>
+                <button type="button" class="layout-choice ${(s.catLayout || 'horizontal') !== 'vertical' ? 'active' : ''}" data-layout="horizontal">${tr('room.horizontal', '横向排列')}</button>
+                <button type="button" class="layout-choice ${(s.catLayout || 'horizontal') === 'vertical' ? 'active' : ''}" data-layout="vertical">${tr('room.vertical', '纵向排列')}</button>
               </div>
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">隐藏其他成员桌宠</div><div class="setting-sub">本机显示设置，不影响他人<br><span class="hide-others-hotkey-note">${hideOthersHotkey ? `使用 ${esc(hideOthersHotkey)} 开关` : '当前未设置快捷键'}</span></div></div>
+            <div><div class="setting-title">${tr('room.hideOthers.title', '隐藏其他成员桌宠')}</div><div class="setting-sub">${tr('room.hideOthers.sub', '只影响本机显示')}<br><span class="hide-others-hotkey-note">${hideOthersHotkey ? tr('settings.hotkeys.useKey', '使用 {key} 开关', { key: esc(hideOthersHotkey) }) : tr('settings.hotkeys.notSet', '当前未设置快捷键')}</span></div></div>
             <div class="switch ${s.hideOtherPets ? 'on' : ''}" data-switch="hideOtherPets"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">总是显示宝箱</div><div class="setting-sub">显示宝箱倒计时</div></div>
+            <div><div class="setting-title">${tr('settings.room.alwaysChest.title', '总是显示宝箱')}</div><div class="setting-sub">${tr('settings.room.alwaysChest.sub', '显示宝箱倒计时')}</div></div>
             <div class="switch ${s.alwaysShowChest ? 'on' : ''}" data-switch="alwaysShowChest"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">自动领取宝箱</div><div class="setting-sub">倒计时结束后至少等待 5 秒再领取</div></div>
+            <div><div class="setting-title">${tr('settings.room.autoChest.title', '自动领取宝箱')}</div><div class="setting-sub">${tr('settings.room.autoChest.sub', '倒计时结束后至少等待 5 秒再领取')}</div></div>
             <div class="switch ${s.autoChest ? 'on' : ''}" data-switch="autoChest"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">自动升阶合成</div><div class="setting-sub">拥有 10 件以上相同类型和稀有度的多余材料时自动升阶合成（每种物品保留 1 份底物）</div></div>
+            <div><div class="setting-title">${tr('settings.room.autoSynth.title', '自动升阶合成')}</div><div class="setting-sub">${tr('settings.room.autoSynth.sub', '拥有 10 件以上相同类型和稀有度的多余材料时自动升阶合成（每种物品保留 1 份底物）')}</div></div>
             <div class="switch ${s.autoSynthUp ? 'on' : ''}" data-switch="autoSynthUp"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">手动开启宝箱</div><div class="setting-sub">每次消耗 1000 点击数，冷却 30 分钟，以服务器返回为准</div></div>
+            <div><div class="setting-title">${tr('settings.room.manualChest.title', '手动开启宝箱')}</div><div class="setting-sub">${tr('settings.room.manualChest.sub', '每次消耗 1000 点击数，冷却 30 分钟，以服务器返回为准')}</div></div>
             <div class="setting-content">
-              <button class="btn ghost" data-chest="left">开启左宝箱</button>
-              <button class="btn ghost" data-chest="right">开启右宝箱</button>
+              <button class="btn ghost" data-chest="left">${tr('settings.room.manualChest.left', '开启左宝箱')}</button>
+              <button class="btn ghost" data-chest="right">${tr('settings.room.manualChest.right', '开启右宝箱')}</button>
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">宝箱冷却</div><div class="setting-sub" id="chestStatus">正在读取…</div></div>
+            <div><div class="setting-title">${tr('settings.room.cooldown.title', '宝箱冷却')}</div><div class="setting-sub" id="chestStatus">${tr('settings.room.cooldown.reading', '正在读取…')}</div></div>
           </div>
           ${forcedOnlineRow}
         </div>
@@ -5919,41 +5968,41 @@
         <div class="section" data-section-id="auto">
           <div class="section-title">${tr('settings.section.auto', '自动化')}</div>
           <div class="setting-item">
-            <div><div class="setting-title">自动表情</div><div class="setting-sub">每次产生敲击时自动发送一个表情；受下方每秒上限限制</div></div>
+            <div><div class="setting-title">${tr('settings.auto.emote.title', '自动表情')}</div><div class="setting-sub">${tr('settings.auto.emote.sub', '每次产生敲击时自动发送一个表情；受下方每秒上限限制')}</div></div>
             <div class="switch ${s.autoEmoteEnabled ? 'on' : ''}" data-switch="autoEmoteEnabled"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">自动表情频率上限</div><div class="setting-sub">滚动一秒内最多发送数量，范围 1–20</div></div>
-            <div class="setting-content"><input class="input" id="autoEmoteRate" type="number" min="1" max="20" step="1" value="${s.autoEmoteMaxPerSecond ?? 20}" style="width:86px" /><span class="muted">个/秒</span></div>
+            <div><div class="setting-title">${tr('settings.auto.emoteRate.title', '自动表情频率上限')}</div><div class="setting-sub">${tr('settings.auto.emoteRate.sub', '滚动一秒内最多发送数量，范围 1–20')}</div></div>
+            <div class="setting-content"><input class="input" id="autoEmoteRate" type="number" min="1" max="20" step="1" value="${s.autoEmoteMaxPerSecond ?? 20}" style="width:86px" /><span class="muted">${tr('settings.unit.perSecond', '个/秒')}</span></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">表情来源</div><div class="setting-sub">快捷栏随机：只从自己的 5 个快捷表情中挑选</div></div>
+            <div><div class="setting-title">${tr('settings.auto.emoteSource.title', '表情来源')}</div><div class="setting-sub">${tr('settings.auto.emoteSource.sub', '快捷栏随机：只从自己的 5 个快捷表情中挑选')}</div></div>
             <div class="setting-content">
               <select class="select" id="autoEmoteMode">
-                <option value="quickbar" ${(s.autoEmoteMode || 'quickbar') === 'quickbar' ? 'selected' : ''}>快捷栏随机</option>
-                <option value="specific" ${s.autoEmoteMode === 'specific' ? 'selected' : ''}>指定表情</option>
-                <option value="library" ${s.autoEmoteMode === 'library' ? 'selected' : ''}>全部表情库随机</option>
+                <option value="quickbar" ${(s.autoEmoteMode || 'quickbar') === 'quickbar' ? 'selected' : ''}>${tr('settings.auto.emoteSource.quickbar', '快捷栏随机')}</option>
+                <option value="specific" ${s.autoEmoteMode === 'specific' ? 'selected' : ''}>${tr('settings.auto.emoteSource.specific', '指定表情')}</option>
+                <option value="library" ${s.autoEmoteMode === 'library' ? 'selected' : ''}>${tr('settings.auto.emoteSource.library', '全部表情库随机')}</option>
               </select>
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">指定表情</div><div class="setting-sub">「表情来源」选择指定表情时生效</div></div>
+            <div><div class="setting-title">${tr('settings.auto.specificEmote.title', '指定表情')}</div><div class="setting-sub">${tr('settings.auto.specificEmote.sub', '「表情来源」选择指定表情时生效')}</div></div>
             <div class="setting-content">
               <select class="select" id="autoEmoteId" style="max-width:260px">
-                <option value="0">请选择表情</option>
+                <option value="0">${tr('settings.auto.specificEmote.placeholder', '请选择表情')}</option>
               </select>
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">自动敲击</div><div class="setting-sub">自动产生敲击并上传；建议不超过 10 次/秒</div></div>
+            <div><div class="setting-title">${tr('settings.auto.click.title', '自动敲击')}</div><div class="setting-sub">${tr('settings.auto.click.sub', '自动产生敲击并上传；建议不超过 10 次/秒')}</div></div>
             <div class="switch ${s.autoClickEnabled ? 'on' : ''}" data-switch="autoClickEnabled"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">自动敲击频率</div><div class="setting-sub">每秒产生敲击次数，范围 1–10</div></div>
-            <div class="setting-content"><input class="input" id="autoClickRate" type="number" min="1" max="10" step="1" value="${s.autoClickPerSecond ?? 10}" style="width:86px" /><span class="muted">次/秒</span></div>
+            <div><div class="setting-title">${tr('settings.auto.clickRate.title', '自动敲击频率')}</div><div class="setting-sub">${tr('settings.auto.clickRate.sub', '每秒产生敲击次数，范围 1–10')}</div></div>
+            <div class="setting-content"><input class="input" id="autoClickRate" type="number" min="1" max="10" step="1" value="${s.autoClickPerSecond ?? 10}" style="width:86px" /><span class="muted">${tr('settings.unit.timesPerSecond', '次/秒')}</span></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">显示虚拟敲击动作</div><div class="setting-sub">关闭后只响应真实敲击；键位显示器始终不响应虚拟敲击</div></div>
+            <div><div class="setting-title">${tr('settings.auto.animate.title', '显示虚拟敲击动作')}</div><div class="setting-sub">${tr('settings.auto.animate.sub', '关闭后只响应真实敲击；键位显示器始终不响应虚拟敲击')}</div></div>
             <div class="switch ${s.autoClickAnimate !== false ? 'on' : ''}" data-switch="autoClickAnimate"></div>
           </div>
         </div>
@@ -5961,11 +6010,11 @@
         <div class="section" data-section-id="notify">
           <div class="section-title">${tr('settings.section.notify', '通知')}</div>
           <div class="setting-item">
-            <div><div class="setting-title">宝箱领取通知</div><div class="setting-sub">自动领取成功后发送 Windows 通知</div></div>
+            <div><div class="setting-title">${tr('settings.notify.chest.title', '宝箱领取通知')}</div><div class="setting-sub">${tr('settings.notify.chest.sub', '自动领取成功后发送 Windows 通知')}</div></div>
             <div class="switch ${s.notifyChestClaimed !== false ? 'on' : ''}" data-switch="notifyChestClaimed"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">快捷键操作通知</div><div class="setting-sub">触发刷新、游戏模式等快捷键时发送 Windows 通知</div></div>
+            <div><div class="setting-title">${tr('settings.notify.hotkeys.title', '快捷键操作通知')}</div><div class="setting-sub">${tr('settings.notify.hotkeys.sub', '触发刷新、游戏模式等快捷键时发送 Windows 通知')}</div></div>
             <div class="switch ${s.notifyHotkeys !== false ? 'on' : ''}" data-switch="notifyHotkeys"></div>
           </div>
         </div>
@@ -5973,69 +6022,69 @@
         <div class="section" data-section-id="redeem">
           <div class="section-title">${tr('settings.section.redeem', '兑换')}</div>
           <div class="panel-box" style="display:flex;gap:10px">
-            <input class="input" id="redeemCode" placeholder="输入兑换码" style="flex:1" />
-            <button class="btn" id="redeemBtn">兑换</button>
+            <input class="input" id="redeemCode" placeholder="${tr('settings.redeem.placeholder', '输入兑换码')}" style="flex:1" />
+            <button class="btn" id="redeemBtn">${tr('settings.redeem.button', '兑换')}</button>
           </div>
         </div>
 
         <div class="section" data-section-id="other">
           <div class="section-title">${tr('settings.section.other', '其他')}</div>
           <div class="setting-item">
-            <div><div class="setting-title">开机自动启动</div><div class="setting-sub">登录 Windows 后自动运行桌宠（仅当前用户；管理员模式使用最高权限计划任务）</div></div>
+            <div><div class="setting-title">${tr('settings.other.launch.title', '开机自动启动')}</div><div class="setting-sub">${tr('settings.other.launch.sub', '登录 Windows 后自动运行桌宠（仅当前用户；管理员模式使用最高权限计划任务）')}</div></div>
             <div class="switch ${s.launchAtLogin ? 'on' : ''}" data-switch="launchAtLogin"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">以管理员权限启动</div><div class="setting-sub">${s.isElevated ? '当前已是管理员权限' : '当前为普通权限'}；用于统计以管理员权限运行的游戏/程序中的按键。开启会请求 UAC 并重启；开机自启由最高权限计划任务完成，登录时不再提示</div></div>
+            <div><div class="setting-title">${tr('settings.other.admin.title', '以管理员权限启动')}</div><div class="setting-sub">${s.isElevated ? tr('settings.other.admin.elevated', '当前已是管理员权限') : tr('settings.other.admin.normal', '当前为普通权限')}${tr('settings.other.admin.hint', '；用于统计以管理员权限运行的游戏/程序中的按键。开启会请求 UAC 并重启；开机自启由最高权限计划任务完成，登录时不再提示')}</div></div>
             <div class="switch ${s.runAsAdmin ? 'on' : ''}" data-switch="runAsAdmin"></div>
           </div>
           <div class="setting-item" style="align-items:flex-start">
-            <div><div class="setting-title">游戏模式规则</div><div class="setting-sub">检测到以下进程启动时自动开启鼠标穿透，进程退出后恢复</div></div>
+            <div><div class="setting-title">${tr('settings.other.rules.title', '游戏模式规则')}</div><div class="setting-sub">${tr('settings.other.rules.sub', '检测到以下进程启动时自动开启鼠标穿透，进程退出后恢复')}</div></div>
             <div class="setting-content" style="flex-direction:column;align-items:stretch;gap:8px;min-width:280px">
               <div style="display:flex;gap:8px">
-                <input class="input" id="gameRuleInput" placeholder="进程名，如 WutheringWaves.exe" style="flex:1;min-width:180px" />
-                <button class="btn ghost" id="gameRuleAdd">添加</button>
+                <input class="input" id="gameRuleInput" placeholder="${tr('settings.other.rules.placeholder', '进程名，如 WutheringWaves.exe')}" style="flex:1;min-width:180px" />
+                <button class="btn ghost" id="gameRuleAdd">${tr('settings.other.rules.add', '添加')}</button>
               </div>
               <div id="gameRuleList" class="rule-list">
                 ${(s.gameModeRules || []).length
-                  ? (s.gameModeRules || []).map(name => `<span class="rule-chip">${esc(name)}<button type="button" data-remove-rule="${esc(name)}" title="删除规则">×</button></span>`).join('')
-                  : '<span class="muted" style="font-size:12px">暂无规则</span>'}
+                  ? (s.gameModeRules || []).map(name => `<span class="rule-chip">${esc(name)}<button type="button" data-remove-rule="${esc(name)}" title="${tr('settings.other.rules.delete', '删除规则')}">×</button></span>`).join('')
+                  : `<span class="muted" style="font-size:12px">${tr('settings.other.rules.empty', '暂无规则')}</span>`}
               </div>
-              <div class="setting-sub" style="margin-top:0">可填写任务管理器中的进程名，带不带 .exe 均可；匹配不区分大小写。</div>
+              <div class="setting-sub" style="margin-top:0">${tr('settings.other.rules.hint', '可填写任务管理器中的进程名，带不带 .exe 均可；匹配不区分大小写。')}</div>
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">日志与数据</div><div class="setting-sub">%LOCALAPPDATA%\\WuwatappoNative</div></div>
-            <div class="setting-content"><button class="btn ghost" id="openLog">打开日志目录</button></div>
+            <div><div class="setting-title">${tr('settings.other.logs.title', '日志与数据')}</div><div class="setting-sub">%LOCALAPPDATA%\\WuwatappoNative</div></div>
+            <div class="setting-content"><button class="btn ghost" id="openLog">${tr('settings.other.logs.open', '打开日志目录')}</button></div>
           </div>
         </div>
 
         <div class="section" data-section-id="update">
           <div class="section-title">${tr('settings.section.update', '更新')}</div>
           <div class="setting-item">
-            <div><div class="setting-title">更新通道</div><div class="setting-sub">正式版只接收正式版；测试版同时接收正式版和后续测试版</div></div>
+            <div><div class="setting-title">${tr('settings.update.channel.title', '更新通道')}</div><div class="setting-sub">${tr('settings.update.channel.sub', '正式版只接收正式版；测试版同时接收正式版和后续测试版')}</div></div>
             <div class="setting-content">
               <select class="select" id="updateChannel" style="width:180px">
-                <option value="stable" ${(s.updateChannel || 'stable') === 'stable' ? 'selected' : ''}>正式版</option>
-                <option value="beta" ${s.updateChannel === 'beta' ? 'selected' : ''}>测试版</option>
+                <option value="stable" ${(s.updateChannel || 'stable') === 'stable' ? 'selected' : ''}>${tr('settings.update.channel.stable', '正式版')}</option>
+                <option value="beta" ${s.updateChannel === 'beta' ? 'selected' : ''}>${tr('settings.update.channel.beta', '测试版')}</option>
               </select>
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">更新下载源</div><div class="setting-sub">自动模式固定按 GH-Proxy → GitHub 官方的顺序尝试，失败才回退；不会在下载中按速度中断</div></div>
+            <div><div class="setting-title">${tr('settings.update.source.title', '更新下载源')}</div><div class="setting-sub">${tr('settings.update.source.sub', '自动模式固定按 GH-Proxy → GitHub 官方的顺序尝试，失败才回退；不会在下载中按速度中断')}</div></div>
             <div class="setting-content">
               <select class="select" id="updateDownloadSource">
-                <option value="auto" ${(s.updateDownloadSource || 'auto') === 'auto' ? 'selected' : ''}>自动（GH-Proxy → GitHub）</option>
-                <option value="ghproxy" ${s.updateDownloadSource === 'ghproxy' ? 'selected' : ''}>GH-Proxy（第三方加速）</option>
-                <option value="github" ${s.updateDownloadSource === 'github' ? 'selected' : ''}>GitHub 直连</option>
+                <option value="auto" ${(s.updateDownloadSource || 'auto') === 'auto' ? 'selected' : ''}>${tr('settings.update.source.auto', '自动（GH-Proxy → GitHub）')}</option>
+                <option value="ghproxy" ${s.updateDownloadSource === 'ghproxy' ? 'selected' : ''}>${tr('settings.update.source.ghproxy', 'GH-Proxy（第三方加速）')}</option>
+                <option value="github" ${s.updateDownloadSource === 'github' ? 'selected' : ''}>${tr('settings.update.source.github', 'GitHub 直连')}</option>
               </select>
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">使用 HTTP 代理</div><div class="setting-sub">仅用于检查更新和下载安装包；关闭时使用系统代理，已填写地址会保留</div></div>
+            <div><div class="setting-title">${tr('settings.update.proxy.title', '使用 HTTP 代理')}</div><div class="setting-sub">${tr('settings.update.proxy.sub', '仅用于检查更新和下载安装包；关闭时使用系统代理，已填写地址会保留')}</div></div>
             <div class="switch ${s.updateUseProxy ? 'on' : ''}" id="updateUseProxy"></div>
           </div>
           <div class="setting-item ${s.updateUseProxy ? '' : 'hidden'}" id="updateProxyItem" style="align-items:flex-start">
-            <div><div class="setting-title">HTTP 代理地址</div><div class="setting-sub">修改后自动保存，例如 http://127.0.0.1:7890</div></div>
+            <div><div class="setting-title">${tr('settings.update.proxyAddress.title', 'HTTP 代理地址')}</div><div class="setting-sub">${tr('settings.update.proxyAddress.sub', '修改后自动保存，例如 http://127.0.0.1:7890')}</div></div>
             <div class="setting-content" style="flex-wrap:nowrap;align-items:center;min-width:min(420px,100%)">
               <input class="input" id="updateHttpProxy" value="${esc(s.updateHttpProxy || '')}" placeholder="http://127.0.0.1:7890" style="flex:1;min-width:0" ${s.updateUseProxy ? '' : 'disabled'} />
             </div>
@@ -6043,10 +6092,10 @@
         </div>
         ${compatibilityBannerHtml()}
         <div class="settings-footer">
-          <button class="btn ghost" id="checkUpdateBtn">检查更新</button>
-          <button class="btn ghost" id="compatRefreshBtn">刷新版本状态</button>
-          <button class="btn ghost" id="announcementHistoryBtn">公告历史</button>
-          <button class="btn ghost" id="aboutBtn">关于</button>
+          <button class="btn ghost" id="checkUpdateBtn">${tr('settings.footer.checkUpdate', '检查更新')}</button>
+          <button class="btn ghost" id="compatRefreshBtn">${tr('settings.footer.compatRefresh', '刷新版本状态')}</button>
+          <button class="btn ghost" id="announcementHistoryBtn">${tr('settings.footer.announcements', '公告历史')}</button>
+          <button class="btn ghost" id="aboutBtn">${tr('settings.footer.about', '关于')}</button>
           <span class="muted" id="updateCheckStatus"></span>
         </div>
       </div>`);
@@ -6097,23 +6146,26 @@
 
   // 与原版 Helper 一致的默认键位；实际值来自 boot.settings.hotkeys。
   const HOTKEY_ACTIONS = [
-    { id: 'game', label: '游戏模式（鼠标穿透）', def: 'F7' },
-    { id: 'monitor', label: '切换屏幕', def: 'F8' },
-    { id: 'visibility', label: '显示／隐藏桌宠', def: 'F9' },
-    { id: 'barToggle', label: '隐藏／显示底栏（主角+远程）', def: '', mode: 'together' },
-    { id: 'barToggleMain', label: '隐藏／显示主角底栏', def: '', mode: 'separate' },
-    { id: 'barToggleRemote', label: '隐藏／显示远程角色底栏', def: '', mode: 'separate' },
-    { id: 'reload', label: '刷新界面', def: 'F5' },
-    ...[1, 2, 3, 4, 5, 6].map(i => ({ id: 'emote' + i, label: '发送表情 · 槽位 ' + i, def: 'Ctrl+Alt+' + i })),
-    { id: 'capture', label: 'OBS 采集窗口', def: '' },
-    { id: 'mainPanel', label: '打开主面板', def: '' },
-    { id: 'catLayout', label: '切换横纵排列', def: '' },
-    { id: 'hideOtherPets', label: '开关隐藏其他成员桌宠', def: '' },
-    { id: 'keyBubbles', label: '开关按键气泡', def: '' },
-    { id: 'rhythmMode', label: '开关音游模式', def: '' },
-    { id: 'autoEmote', label: '开关自动表情', def: '' },
-    { id: 'autoClick', label: '开关自动敲击', def: '' },
+    { id: 'game', key: 'hotkey.game', label: '游戏模式（鼠标穿透）', def: 'F7' },
+    { id: 'monitor', key: 'hotkey.monitor', label: '切换屏幕', def: 'F8' },
+    { id: 'visibility', key: 'hotkey.visibility', label: '显示／隐藏桌宠', def: 'F9' },
+    { id: 'barToggle', key: 'hotkey.barToggle', label: '隐藏／显示底栏（主角+远程）', def: '', mode: 'together' },
+    { id: 'barToggleMain', key: 'hotkey.barToggleMain', label: '隐藏／显示主角底栏', def: '', mode: 'separate' },
+    { id: 'barToggleRemote', key: 'hotkey.barToggleRemote', label: '隐藏／显示远程角色底栏', def: '', mode: 'separate' },
+    { id: 'reload', key: 'hotkey.reload', label: '刷新界面', def: 'F5' },
+    ...[1, 2, 3, 4, 5, 6].map(i => ({ id: 'emote' + i, key: 'hotkey.emote', label: '发送表情 · 槽位 ' + i, def: 'Ctrl+Alt+' + i, slot: i })),
+    { id: 'capture', key: 'hotkey.capture', label: 'OBS 采集窗口', def: '' },
+    { id: 'mainPanel', key: 'hotkey.mainPanel', label: '打开主面板', def: '' },
+    { id: 'catLayout', key: 'hotkey.catLayout', label: '切换横纵排列', def: '' },
+    { id: 'hideOtherPets', key: 'hotkey.hideOtherPets', label: '开关隐藏其他成员桌宠', def: '' },
+    { id: 'keyBubbles', key: 'hotkey.keyBubbles', label: '开关按键气泡', def: '' },
+    { id: 'rhythmMode', key: 'hotkey.rhythmMode', label: '开关音游模式', def: '' },
+    { id: 'autoEmote', key: 'hotkey.autoEmote', label: '开关自动表情', def: '' },
+    { id: 'autoClick', key: 'hotkey.autoClick', label: '开关自动敲击', def: '' },
   ];
+  const hotkeyLabel = a => a.slot
+    ? tr('hotkey.emoteSlot', '发送表情 · 槽位 {slot}', { slot: a.slot })
+    : tr(a.key, a.label);
 
   function hotkeyFromEvent(e) {
     if (['Control', 'Alt', 'Shift', 'Meta', 'OS'].includes(e.key)) return null;
@@ -6145,14 +6197,14 @@
       for (const a of HOTKEY_ACTIONS) {
         const input = rows[a.id];
         if (!input) continue;
-        const v = input.dataset.value ?? ((state.boot?.settings?.hotkeys || {})[a.id] || '');
-        table[a.id] = input.value === '未设置' ? '' : v;
+        // 只读写 data-value，绝不把“未设置/请按下新快捷键”等可翻译显示文案当成逻辑值。
+        table[a.id] = input.dataset.value ?? '';
       }
       return table;
     };
     const refreshHideOthersHotkeyNote = () => {
       const key = String(state.boot?.settings?.hotkeys?.hideOtherPets || '').trim();
-      const text = key ? `使用 ${key} 开关` : '当前未设置快捷键';
+      const text = key ? tr('settings.hotkeys.useKey', '使用 {key} 开关', { key }) : tr('settings.hotkeys.notSet', '当前未设置快捷键');
       document.querySelectorAll('.hide-others-hotkey-note').forEach(el => { el.textContent = text; });
     };
     const save = async () => {
@@ -6164,11 +6216,11 @@
         const r = await tryCall('hotkeys.save', { hotkeys: collect() });
         if (r?.ok === false) {
           savePending = false;
-          return toast(r.error || '快捷键保存失败', 'err');
+          return toast(r.error || tr('toast.hotkeySaveFailed', '快捷键保存失败'), 'err');
         }
         await syncBoot();
         refreshHideOthersHotkeyNote();
-        toast('快捷键已自动保存');
+        toast(tr('toast.hotkeySaved', '快捷键已自动保存'));
       } catch {
         savePending = false;
       } finally {
@@ -6185,10 +6237,10 @@
       const id = input.dataset.hotkey;
       rows[id] = input;
       let listening = false;
-      input.addEventListener('focus', () => { listening = true; input.value = '请按下新快捷键…'; });
+      const display = () => input.dataset.value || tr('common.notSet', '未设置');
+      input.addEventListener('focus', () => { listening = true; input.value = tr('settings.hotkeys.pressNew', '请按下新快捷键…'); });
       input.addEventListener('blur', () => {
-        listening = false;
-        if (input.value === '请按下新快捷键…') input.value = (state.boot?.settings?.hotkeys || {})[id] || '未设置';
+        if (listening) { listening = false; input.value = display(); }
         if (savePending) save();
       });
       input.addEventListener('keydown', e => {
@@ -6196,15 +6248,15 @@
         e.preventDefault(); e.stopPropagation();
         if (e.key === 'Escape') { input.blur(); return; }
         if (e.key === 'Backspace' || e.key === 'Delete') {
-          input.value = '未设置'; input.dataset.value = '';
+          input.dataset.value = '';
           queueSave();
           input.blur();
           return;
         }
         const chord = hotkeyFromEvent(e);
         if (!chord) return;
-        input.value = chord;
         input.dataset.value = chord;
+        input.value = chord;
         queueSave();
         input.blur();
       });
@@ -6212,8 +6264,8 @@
     document.querySelectorAll('[data-hotkey-clear]').forEach(btn => btn.onclick = () => {
       const input = rows[btn.dataset.hotkeyClear];
       if (input) {
-        input.value = '未设置';
         input.dataset.value = '';
+        input.value = tr('common.notSet', '未设置');
         queueSave();
       }
     });
@@ -6221,12 +6273,12 @@
       for (const a of HOTKEY_ACTIONS) {
         const input = rows[a.id];
         if (!input) continue;
-        input.value = a.def || '未设置';
         input.dataset.value = a.def || '';
+        input.value = a.def || tr('common.notSet', '未设置');
       }
       queueSave();
       await save();
-      toast('已恢复默认快捷键');
+      toast(tr('toast.hotkeyReset', '已恢复默认快捷键'));
     });
   }
 
@@ -6276,7 +6328,7 @@
         await tryCall('settings.set', { petScreen: e.target.value });
         await syncBoot();
         renderSettings();
-        toast('已切换默认屏幕并移动桌宠');
+        toast(tr('toast.screenChanged', '已切换默认屏幕并移动桌宠'));
       } catch { }
     });
     document.getElementById('setScreenSwitchMode')?.addEventListener('change', async e => {
@@ -6284,7 +6336,7 @@
         await tryCall('settings.set', { screenSwitchMode: e.target.value });
         await syncBoot();
         renderSettings();
-        toast('已更新切换屏幕时的移动方式');
+        toast(tr('toast.screenSwitchUpdated', '已更新切换屏幕时的移动方式'));
       } catch { }
     });
 
@@ -6359,13 +6411,13 @@
       const current = (state.boot?.themePresets || []).find(p => String(p.id) === currentId);
       let name = String(input?.value || '').trim();
       if (!name && overwrite && current) name = current.name;
-      if (!name) { toast('请先输入预设名称', 'err'); input?.focus(); return; }
+      if (!name) { toast(tr('toast.presetNameRequired', '请先输入预设名称'), 'err'); input?.focus(); return; }
       try {
         await call('theme.presets.save', { name, id: overwrite && currentId ? currentId : '' });
         await syncBoot();
         renderSettings();
-        toast(overwrite && currentId ? '已覆盖当前主题预设' : '主题预设已保存');
-      } catch (err) { toast('保存预设失败：' + (err?.message || err), 'err'); }
+        toast(overwrite && currentId ? tr('toast.presetOverwritten', '已覆盖当前主题预设') : tr('toast.presetSaved', '主题预设已保存'));
+      } catch (err) { toast(tr('toast.presetSaveFailed', '保存预设失败：{error}', { error: err?.message || err }), 'err'); }
     });
     document.getElementById('themePresetList')?.addEventListener('click', async e => {
       const applyBtn = e.target.closest('[data-theme-preset-apply]');
@@ -6389,27 +6441,27 @@
           writeThemeBackgroundLocal('');
           await syncBoot();
           renderSettings();
-          toast('已应用主题预设');
+          toast(tr('toast.presetApplied', '已应用主题预设'));
         } else if (upBtn || downBtn) {
           const id = (upBtn || downBtn).dataset.themePresetUp || (upBtn || downBtn).dataset.themePresetDown;
           const direction = upBtn ? -1 : 1;
           await call('theme.presets.move', { id, direction });
           await syncBoot();
           renderSettings();
-          toast(direction < 0 ? '预设已上移' : '预设已下移');
+          toast(direction < 0 ? tr('toast.presetMovedUp', '预设已上移') : tr('toast.presetMovedDown', '预设已下移'));
         } else if (renameBtn) {
           const preset = (state.boot?.themePresets || []).find(p => String(p.id) === String(renameBtn.dataset.themePresetRename));
-          const next = window.prompt('新的预设名称', preset?.name || '');
+          const next = window.prompt(tr('toast.presetRenamePrompt', '新的预设名称'), preset?.name || '');
           if (next == null) return;
-          if (!String(next).trim()) { toast('预设名称不能为空', 'err'); return; }
+          if (!String(next).trim()) { toast(tr('toast.presetNameEmpty', '预设名称不能为空'), 'err'); return; }
           await call('theme.presets.rename', { id: renameBtn.dataset.themePresetRename, name: String(next).trim() });
           await syncBoot();
           renderSettings();
-          toast('预设已重命名');
+          toast(tr('toast.presetRenamed', '预设已重命名'));
         } else if (deleteBtn) {
           const id = String(deleteBtn.dataset.themePresetDelete || '').trim();
           if (!id) {
-            toast('主题预设缺少 id，已刷新列表', 'err');
+            toast(tr('toast.presetMissingId', '主题预设缺少 id，已刷新列表'), 'err');
             await syncBoot();
             renderSettings();
             return;
@@ -6440,14 +6492,14 @@
             // 以服务端真实状态为准：写盘失败时预设恢复，已被别处删除时保持消失。
             await syncBoot();
             renderSettings();
-            toast('主题预设删除失败', 'err');
+            toast(tr('toast.presetDeleteFailed', '主题预设删除失败'), 'err');
             return;
           }
           await syncBoot();
           renderSettings();
-          toast('主题预设已删除');
+          toast(tr('toast.presetDeleted', '主题预设已删除'));
         }
-      } catch (err) { toast('主题预设操作失败：' + (err?.message || err), 'err'); }
+      } catch (err) { toast(tr('toast.presetOpFailed', '主题预设操作失败：{error}', { error: err?.message || err }), 'err'); }
     });
     const presetListHost = document.getElementById('themePresetList');
     const showPresetPreview = id => {
@@ -6468,7 +6520,7 @@
       const el = e.currentTarget;
       const next = !el.classList.contains('on');
       if (next && !(state.boot?.themePresets || []).length) {
-        toast('请先保存一个主题预设再开启轮换', 'err');
+        toast(tr('toast.needPresetForRotation', '请先保存一个主题预设再开启轮换'), 'err');
         return;
       }
       el.classList.toggle('on', next);
@@ -6477,10 +6529,10 @@
         await call('theme.rotation.set', { enabled: next, intervalMinutes: interval });
         await syncBoot();
         renderSettings();
-        toast(next ? '已开启主题轮换' : '已关闭主题轮换');
+        toast(next ? tr('toast.rotationOn', '已开启主题轮换') : tr('toast.rotationOff', '已关闭主题轮换'));
       } catch (err) {
         el.classList.toggle('on', !next);
-        toast('主题轮换设置失败：' + (err?.message || err), 'err');
+        toast(tr('toast.rotationFailed', '主题轮换设置失败：{error}', { error: err?.message || err }), 'err');
       }
     });
     document.getElementById('themeRotationInterval')?.addEventListener('change', async e => {
@@ -6491,8 +6543,8 @@
         await call('theme.rotation.set', { enabled, intervalMinutes: interval });
         await syncBoot();
         renderSettings();
-        toast('轮换间隔已更新');
-      } catch (err) { toast('轮换间隔设置失败：' + (err?.message || err), 'err'); }
+        toast(tr('toast.rotationIntervalUpdated', '轮换间隔已更新'));
+      } catch (err) { toast(tr('toast.rotationIntervalFailed', '轮换间隔设置失败：{error}', { error: err?.message || err }), 'err'); }
     });
     const readAdvancedOverrides = () => readThemeAdvancedOverrides(state.boot?.settings);
     const setAdvancedOverride = (key, value, persist) => {
@@ -6515,7 +6567,7 @@
       previewTheme(patch);
       await saveTheme(patch);
       renderSettings();
-      toast('已恢复默认主题');
+      toast(tr('toast.themeReset', '已恢复默认主题'));
     });
     const themeOpacity = document.getElementById('themeBgOpacity');
     themeOpacity?.addEventListener('input', e => {
@@ -6560,8 +6612,8 @@
     };
     const applyImagePalette = async source => {
       const button = document.getElementById('themeExtract');
-      const oldText = button?.textContent || '从图片提取配色';
-      if (button) { button.disabled = true; button.textContent = '提取中…'; }
+      const oldText = button?.textContent || tr('settings.theme.extract.button', '从图片提取配色');
+      if (button) { button.disabled = true; button.textContent = tr('settings.theme.extract.busy', '提取中…'); }
       try {
         const image = await loadImageForSampling(source);
         const colors = sampleImageColors(image);
@@ -6576,10 +6628,10 @@
         previewTheme(patch);
         const saved = await saveTheme(patch, true);
         if (!saved) return false;
-        toast('已根据背景图生成配色');
+        toast(tr('toast.imagePaletteApplied', '已根据背景图生成配色'));
         return true;
       } catch (err) {
-        toast('图片配色提取失败：' + (err?.message || err), 'err');
+        toast(tr('toast.imagePaletteFailed', '图片配色提取失败：{error}', { error: err?.message || err }), 'err');
         return false;
       } finally {
         const current = document.getElementById('themeExtract');
@@ -6592,14 +6644,14 @@
     const maybeAutoApplyImagePalette = async source => {
       if (!autoImagePaletteEnabled()) return false;
       if (hasManualAdvancedPalette(state.boot?.settings)) {
-        toast('检测到手动高级配色，已保留；可点击「从图片提取配色」覆盖');
+        toast(tr('toast.manualPaletteKept', '检测到手动高级配色，已保留；可点击「从图片提取配色」覆盖'));
         return false;
       }
       return await applyImagePalette(source);
     };
     document.getElementById('themeExtract')?.addEventListener('click', async () => {
       const source = themeBackgroundSource(state.boot?.settings || {});
-      if (!source) { toast('请先选择背景图', 'err'); return; }
+      if (!source) { toast(tr('toast.chooseBgFirst', '请先选择背景图'), 'err'); return; }
       await applyImagePalette(source);
     });
     document.getElementById('themeAutoPalette')?.addEventListener('change', async e => {
@@ -6613,12 +6665,12 @@
       const file = e.target.files?.[0];
       if (!file) return;
       if (file.size > THEME_BG_MAX_BYTES) {
-        toast('背景图不能超过 20MB', 'err');
+        toast(tr('toast.bgTooLarge', '背景图不能超过 20MB'), 'err');
         e.target.value = '';
         return;
       }
       if (!/^image\/(?:png|jpe?g|webp|gif)$/i.test(file.type || '')) {
-        toast('仅支持 PNG / JPG / WebP / GIF 背景图', 'err');
+        toast(tr('toast.bgFormat', '仅支持 PNG / JPG / WebP / GIF 背景图'), 'err');
         e.target.value = '';
         return;
       }
@@ -6626,7 +6678,7 @@
         let dataUrl;
         let compressed = null;
         if (file.size > THEME_BG_COMPRESS_BYTES) {
-          toast('图片超过 4MB，正在压缩到主题缓存…');
+          toast(tr('toast.bgCompressing', '图片超过 4MB，正在压缩到主题缓存…'));
           compressed = await compressThemeImage(file);
           dataUrl = compressed.dataUrl;
         } else {
@@ -6649,16 +6701,16 @@
           applyTheme(state.boot?.settings || {});
           updateThemeBackgroundControls();
           toast(compressed
-            ? `背景图已压缩并保存（${formatBytes(file.size)} → ${formatBytes(compressed.bytes)}）`
-            : '背景图已保存');
+            ? tr('toast.bgSavedCompressed', '背景图已压缩并保存（{from} → {to}）', { from: formatBytes(file.size), to: formatBytes(compressed.bytes) })
+            : tr('toast.bgSaved', '背景图已保存'));
         } catch (err) {
           // C# 落盘失败时 localStorage 仍能保证本次/下次启动显示；提示但不回滚预览。
-          toast('背景图已应用，但备份保存失败：' + (err?.message || err), 'err');
+          toast(tr('toast.bgBackupFailed', '背景图已应用，但备份保存失败：{error}', { error: err?.message || err }), 'err');
         }
         // 没有手动高级配色时，选图后自动根据图片生成整套 palette。
         await maybeAutoApplyImagePalette(dataUrl);
       } catch (err) {
-        toast('读取背景图失败：' + (err?.message || err), 'err');
+        toast(tr('toast.bgReadFailed', '读取背景图失败：{error}', { error: err?.message || err }), 'err');
       } finally {
         e.target.value = '';
       }
@@ -6667,7 +6719,7 @@
       try {
         await call('theme.image.clear');
       } catch (err) {
-        toast('移除背景图失败：' + (err?.message || err), 'err');
+        toast(tr('toast.bgRemoveFailed', '移除背景图失败：{error}', { error: err?.message || err }), 'err');
         return;
       }
       writeThemeBackgroundLocal('');
@@ -6904,7 +6956,7 @@
       const key = el.dataset.switch;
       const next = !el.classList.contains('on');
       el.classList.toggle('on', next);
-      if (key === 'runAsAdmin' && next) toast('正在请求管理员权限…');
+      if (key === 'runAsAdmin' && next) toast(tr('toast.adminRequesting', '正在请求管理员权限…'));
       try {
         await tryCall('settings.set', { [key]: next });
         await syncBoot();
@@ -6913,9 +6965,9 @@
           const saved = !!state.boot?.settings?.runAsAdmin;
           const elevated = !!state.boot?.settings?.isElevated;
           renderSettings();
-          if (next && !saved) toast('已取消管理员授权，继续使用普通权限', 'err');
-          else if (!next && elevated) toast('已关闭，重启后以普通权限运行');
-          else if (next && elevated) toast('已启用管理员权限启动');
+          if (next && !saved) toast(tr('toast.adminCancelled', '已取消管理员授权，继续使用普通权限'), 'err');
+          else if (!next && elevated) toast(tr('toast.adminDisabledRestart', '已关闭，重启后以普通权限运行'));
+          else if (next && elevated) toast(tr('toast.adminEnabled', '已启用管理员权限启动'));
         }
       } catch { el.classList.toggle('on', !next); }
     });
@@ -7097,13 +7149,13 @@
       input.addEventListener('input', () => { if (!composing) input.value = rhythmNormalize(input.value); });
       input.addEventListener('change', async () => {
         const keys = rhythmInputs.map(x => rhythmToken(x.value));
-        if (keys.some(k => !(k === 'SPACE' || /^[A-Z0-9]$/.test(k) || ";',./[]=-`\\".includes(k)))) return toast('音游键位包含不支持的字符', 'err');
-        if (new Set(keys).size !== keys.length) return toast('触发键位不能重复', 'err');
+        if (keys.some(k => !(k === 'SPACE' || /^[A-Z0-9]$/.test(k) || ";',./[]=-`\\".includes(k)))) return toast(tr('toast.rhythmKeyInvalid', '音游键位包含不支持的字符'), 'err');
+        if (new Set(keys).size !== keys.length) return toast(tr('toast.rhythmKeyDuplicate', '触发键位不能重复'), 'err');
         try {
           await tryCall('settings.set', { rhythmKeys: keys });
           await syncBoot();
           renderSettings();
-          toast('音游键位已保存');
+          toast(tr('toast.rhythmKeySaved', '音游键位已保存'));
         } catch { }
       });
     });
@@ -7130,7 +7182,7 @@
         const check = await tryCall('update.check');
         if (check) state.update = check.update || null;
         renderSettings();
-        toast(value === 'beta' ? '更新通道：测试版（含后续测试版）' : '更新通道：正式版');
+        toast(value === 'beta' ? tr('toast.channelBeta', '更新通道：测试版（含后续测试版）') : tr('toast.channelStable', '更新通道：正式版'));
       } catch {
         select.value = state.boot?.settings?.updateChannel || 'stable';
         renderSettings();
@@ -7142,7 +7194,7 @@
       try {
         const boot = await tryCall('settings.set', { updateDownloadSource: value });
         if (boot?.settings) state.boot = boot;
-        toast(value === 'auto' ? '下载源：自动（GH-Proxy → GitHub）' : (value === 'ghproxy' ? '下载源：GH-Proxy' : '下载源：GitHub 直连'));
+        toast(value === 'auto' ? tr('toast.sourceAuto', '下载源：自动（GH-Proxy → GitHub）') : (value === 'ghproxy' ? tr('toast.sourceGhproxy', '下载源：GH-Proxy') : tr('toast.sourceGithub', '下载源：GitHub 直连')));
       } catch {
         select.value = state.boot?.settings?.updateDownloadSource || 'auto';
       }
@@ -7164,14 +7216,14 @@
           const parsed = new URL(value);
           if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('scheme');
         } catch {
-          return toast('代理格式应为 http://host:port 或 https://host:port', 'err');
+          return toast(tr('toast.proxyFormat', '代理格式应为 http://host:port 或 https://host:port'), 'err');
         }
       }
       proxyInput.value = value;
       try {
         const boot = await tryCall('settings.set', { updateHttpProxy: value });
         if (boot?.settings) state.boot = boot;
-        toast(value ? 'HTTP 代理已自动保存' : 'HTTP 代理地址已清空');
+        toast(value ? tr('toast.proxySaved', 'HTTP 代理已自动保存') : tr('toast.proxyCleared', 'HTTP 代理地址已清空'));
       } catch { }
     };
     if (proxyToggle) {
@@ -7197,12 +7249,12 @@
     proxyInput?.addEventListener('blur', saveProxyValue);
     document.getElementById('updateDownloadBtn')?.addEventListener('click', async () => {
       const btn = document.getElementById('updateDownloadBtn');
-      if (btn) { btn.disabled = true; btn.textContent = '准备下载…'; }
-      state.updateDownload = { phase: 'starting', tag: state.update?.tag || '', message: '正在准备下载…' };
+      if (btn) { btn.disabled = true; btn.textContent = tr('toast.prepareDownload', '准备下载…'); }
+      state.updateDownload = { phase: 'starting', tag: state.update?.tag || '', message: tr('toast.preparingDownload', '正在准备下载…') };
       renderSettings();
       try {
         await tryCall('update.download');
-        toast('开始下载更新');
+        toast(tr('toast.downloadStarted', '开始下载更新'));
       } catch {
         state.updateDownload = null;
         renderSettings();
@@ -7213,11 +7265,11 @@
     });
     document.getElementById('updateInstallBtn')?.addEventListener('click', () => {
       modal(`<div class="about">
-        <div class="about-title">安装更新</div>
-        <div class="about-note"><p>安装包已下载并通过 SHA-256 校验。将启动安装程序，当前程序可能需要关闭。</p></div>
+        <div class="about-title">${tr('update.installTitle', '安装更新')}</div>
+        <div class="about-note"><p>${tr('update.installBody', '安装包已下载并通过 SHA-256 校验。将启动安装程序，当前程序可能需要关闭。')}</p></div>
         <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
-          <button class="btn ghost" id="updateInstallCancel">稍后</button>
-          <button class="btn" id="updateInstallConfirm">立即安装</button>
+          <button class="btn ghost" id="updateInstallCancel">${tr('update.later', '稍后')}</button>
+          <button class="btn" id="updateInstallConfirm">${tr('update.installNow', '立即安装')}</button>
         </div>
       </div>`, host => {
         host.querySelector('#updateInstallCancel').onclick = closeModal;
@@ -7225,7 +7277,7 @@
           try {
             await tryCall('update.install');
             closeModal();
-            toast('正在启动安装程序…');
+            toast(tr('toast.installStarting', '正在启动安装程序…'));
           } catch { }
         };
       });
@@ -7233,42 +7285,42 @@
     document.getElementById('checkUpdateBtn')?.addEventListener('click', async () => {
       const btn = document.getElementById('checkUpdateBtn');
       btn.disabled = true;
-      btn.textContent = '检查中…';
+      btn.textContent = tr('toast.checking', '检查中…');
       try {
         const r = await tryCall('update.check');
         state.update = r?.update || null;
         state.updateDismissed = false;
         renderSettings();
         if (state.update) {
-          toast('发现新版本 ' + (state.update.tag || ''));
+          toast(tr('toast.updateFound', '发现新版本 {tag}', { tag: state.update.tag || '' }));
           requestAnimationFrame(() => { const scroller = document.querySelector('.settings-scroll'); if (scroller) scroller.scrollTop = 0; });
         } else {
-          toast('当前已经是最新版本');
+          toast(tr('toast.upToDate', '当前已经是最新版本'));
         }
       } catch {
         btn.disabled = false;
-        btn.textContent = '检查更新';
+        btn.textContent = tr('settings.footer.checkUpdate', '检查更新');
       }
     });
     document.getElementById('compatRefreshBtn')?.addEventListener('click', async () => {
       const btn = document.getElementById('compatRefreshBtn');
       btn.disabled = true;
-      btn.textContent = '刷新中…';
+      btn.textContent = tr('toast.refreshing', '刷新中…');
       try {
         const r = await tryCall('compatibility.check');
         if (r) {
           state.compatibility = r;
           renderNotices();
           renderSettings();
-          toast('版本状态已更新');
+          toast(tr('toast.compatUpdated', '版本状态已更新'));
         } else {
-          toast('暂时无法获取版本状态', 'err');
+          toast(tr('toast.compatUnavailable', '暂时无法获取版本状态'), 'err');
         }
       } catch {
-        toast('版本状态刷新失败', 'err');
+        toast(tr('toast.compatFailed', '版本状态刷新失败'), 'err');
       } finally {
         btn.disabled = false;
-        btn.textContent = '刷新版本状态';
+        btn.textContent = tr('settings.footer.compatRefresh', '刷新版本状态');
       }
     });
     bindHotkeys();
@@ -7276,7 +7328,7 @@
     document.getElementById('redeemBtn')?.addEventListener('click', async () => {
       const input = document.getElementById('redeemCode');
       const code = input.value.trim();
-      if (!code) return toast('请输入兑换码', 'err');
+      if (!code) return toast(tr('toast.redeemEmpty', '请输入兑换码'), 'err');
       try {
         await redeemCode(code);
         input.value = '';
@@ -7290,7 +7342,7 @@
       } catch { }
     });
     document.getElementById('userRefresh')?.addEventListener('click', async () => {
-      try { state.boot = await tryCall('user.refresh'); renderChrome(); renderSettings(); toast('已刷新'); } catch { }
+      try { state.boot = await tryCall('user.refresh'); renderChrome(); renderSettings(); toast(tr('toast.refreshed', '已刷新')); } catch { }
     });
     const boost = document.getElementById('boostClicks');
     if (boost) {
@@ -7304,9 +7356,9 @@
           const r = await tryCall('clicks.boost', { delta: 10000 });
           if (r?.accepted) {
             applyClicks(r);
-            toast('已加入待上报，联网后自动同步');
+            toast(tr('toast.clicksQueued', '已加入待上报，联网后自动同步'));
           } else {
-            toast('操作太快，请稍后再试', 'err');
+            toast(tr('toast.tooFast', '操作太快，请稍后再试'), 'err');
           }
         } catch { }
         // 原生层也有 500ms 限流；按钮保持禁用相同时间，避免连点堆积。
@@ -7319,12 +7371,31 @@
     }
     document.getElementById('setLocale')?.addEventListener('change', async e => {
       const val = ['zh', 'en', 'ja'].includes(e.target.value) ? e.target.value : 'zh';
-      const boot = await tryCall('settings.set', { locale: val });
-      if (boot?.settings) state.boot = boot;
+      const previous = state.boot?.settings?.locale || 'zh';
+      const previousBoot = state.boot;
+      // 先立即切换界面，后端目录重载放到后台；失败时再回滚下拉框和界面。
       applyLocale(val);
       renderChrome();
       renderSettings();
-      toast(tr('common.languageChanged', '界面语言已切换'));
+      try {
+        const boot = await tryCall('settings.set', { locale: val });
+        if (!boot?.settings) throw new Error('locale save failed');
+        state.boot = boot;
+        // 图鉴/背包名称来自后端 Catalog，切换语言后必须丢掉旧快照重新拉取。
+        state.bag = null;
+        state.atlas = {};
+        state.atlasSnapshot = null;
+        state.atlasAllCount = 0;
+        renderChrome();
+        renderSettings();
+        toast(tr('common.languageChanged', '界面语言已切换'));
+      } catch {
+        applyLocale(previous);
+        if (previousBoot) state.boot = previousBoot;
+        e.target.value = previous;
+        renderChrome();
+        renderSettings();
+      }
     });
     document.getElementById('setServerRegion')?.addEventListener('change', async e => {
       const val = e.target.value;
@@ -7341,7 +7412,7 @@
           await tryCall('settings.set', { animationFps: fps });
           if (state.boot?.settings) state.boot.settings.animationFps = fps;
           renderSettings();
-          toast(`动画帧率已设为 ${fps} 帧`);
+          toast(tr('toast.animFps', '动画帧率已设为 {fps} 帧', { fps }));
         } catch { }
       };
     });
@@ -7353,7 +7424,7 @@
           if (state.boot?.settings) state.boot.settings.catLayout = val;
           await tryCall('room.resetOrder');
           renderSettings();
-          toast(val === 'vertical' ? '已切换为纵向排列' : '已切换为横向排列');
+          toast(val === 'vertical' ? tr('toast.layoutVertical', '已切换为纵向排列') : tr('toast.layoutHorizontal', '已切换为横向排列'));
         } catch { }
       };
     });
@@ -7365,7 +7436,7 @@
     });
     document.getElementById('setLogin')?.addEventListener('click', async () => {
       const uid = val('setUid'), code = val('setCode');
-      if (!uid || !code) return toast('请输入游戏 UID 与验证码', 'err');
+      if (!uid || !code) return toast(tr('toast.uidCodeRequired', '请输入游戏 UID 与验证码'), 'err');
       if (!/^[0-9]{9,10}$/.test(uid)) return toast(tr('login.toastUidInvalid', '请输入 9-10 位游戏 UID'), 'err');
       if (!/^[0-9]{6}$/.test(code)) return toast(tr('login.toastCodeInvalid', '请输入 6 位数字验证码'), 'err');
       try { await tryCall('login.submit', { uid, code }); state.boot = await call('boot'); renderChrome(); navigate('bag'); toast(tr('login.toastSuccess', '登录成功')); } catch { }
@@ -7377,8 +7448,8 @@
     document.getElementById('inheritLogin')?.addEventListener('click', showInheritLogin);
     document.getElementById('setTokenBtn')?.addEventListener('click', async () => {
       const token = val('setToken');
-      if (!token) return toast('请输入 token', 'err');
-      try { await tryCall('login.token', { token }); state.boot = await call('boot'); renderChrome(); navigate('bag'); toast('已导入并登录'); } catch { }
+      if (!token) return toast(tr('toast.tokenRequired', '请输入 token'), 'err');
+      try { await tryCall('login.token', { token }); state.boot = await call('boot'); renderChrome(); navigate('bag'); toast(tr('toast.tokenImported', '已导入并登录')); } catch { }
     });
   }
 

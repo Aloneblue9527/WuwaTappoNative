@@ -114,7 +114,9 @@ public sealed class PanelWindow : Form
 
     void OnRoomForcedDisconnect(int code) => Safe(() =>
     {
-        string message = code == 90002 ? "账号已在其他设备登录，房间已断开" : $"房间已关闭（{code}）";
+        string message = code == 90002
+            ? Localization.T("room.forcedOtherDevice", "账号已在其他设备登录，房间已断开")
+            : Localization.F("room.forcedClosed", "房间已关闭（{0}）", code);
         Push("room.error", new { kind = "forced", message });
         Push("room", _app.RoomState());
     });
@@ -125,7 +127,9 @@ public sealed class PanelWindow : Form
         if (_app.Room.IsLeavingIntentionally) return;
         if (_app.Room.State != "joined" && string.IsNullOrEmpty(_app.Room.LastError)) return;
         string message = _app.Room.LastError;
-        if (string.IsNullOrWhiteSpace(message)) message = "连接断开：" + (string.IsNullOrWhiteSpace(reason) ? "网络异常" : reason);
+        if (string.IsNullOrWhiteSpace(message))
+            message = Localization.F("room.socketClosed", "连接断开：{0}",
+                string.IsNullOrWhiteSpace(reason) ? Localization.T("room.networkError", "网络异常") : reason);
         Push("room.error", new { kind = "socket", message });
         Push("room", _app.RoomState());
     });
@@ -512,6 +516,8 @@ public sealed class PanelWindow : Form
             string panelVersion = typeof(PanelWindow).Assembly.GetName().Version?.ToString(3) ?? "0";
             string url = "https://wuwatappo.local/index.html?v=" + Uri.EscapeDataString(panelVersion);
             if (_dwmCorners) url += "&dwm=1";
+            if (_app.Cfg.Locale == "en" || _app.Cfg.Locale == "ja")
+                url += "&lang=" + Uri.EscapeDataString(_app.Cfg.Locale);
             if (Array.IndexOf(Environment.GetCommandLineArgs(), "--demo") >= 0) url += "&demo=1";
             string page = ArgValue("--panel-page");
             string hash = "";
@@ -1479,6 +1485,7 @@ public sealed class PanelWindow : Form
                 bool hideOthersChanged = false;
                 bool barHotkeyModeChanged = false;
                 bool themeChanged = false;
+                bool localeChanged = false;
                 foreach (var kv in data)
                 {
                     switch (kv.Key)
@@ -1694,6 +1701,7 @@ public sealed class PanelWindow : Form
                         {
                             string locale = ApiClient.ReadString(kv.Value).Trim().ToLowerInvariant();
                             if (locale != "zh" && locale != "en" && locale != "ja") locale = "zh";
+                            if (cfg.Locale != locale) localeChanged = true;
                             cfg.Locale = locale;
                             break;
                         }
@@ -1704,7 +1712,14 @@ public sealed class PanelWindow : Form
                             if (cfg.ServerRegion != reg)
                             {
                                 bool announce = !data.ContainsKey("announce") || ApiClient.ReadBool(data["announce"]);
-                                await _app.SwitchServerRegionAsync(reg, announce);
+                                string regionName = reg == "global"
+                                    ? Localization.T("app.region.global", "国际服")
+                                    : Localization.T("app.region.cn", "国服");
+                                using var loading = new LoadingOverlay(
+                                    Localization.F("region.switching", "正在切换到{0}…", regionName));
+                                loading.ShowCentered(this);
+                                try { await _app.SwitchServerRegionAsync(reg, announce); }
+                                finally { loading.Close(); }
                             }
                             break;
                         }
@@ -1747,11 +1762,18 @@ public sealed class PanelWindow : Form
                 cfg.CaptureWidth = Math.Clamp(cfg.CaptureWidth, 160, 1600);
                 cfg.CaptureHeight = Math.Clamp(cfg.CaptureHeight, 160, 1600);
                 ConfigStore.Save(cfg);
+                if (localeChanged)
+                {
+                    _app.Auth.ApplyLocale(cfg.Locale);
+                    Localization.SetLocale(cfg.Locale);
+                    _ = _app.ReloadCatalogAsync();
+                }
                 _app.ApplyAutoSettings();
                 _app.Pet.BeginInvoke(new Action(() =>
                 {
                     // 主题相关设置变化时先刷新键盘调色板，隐藏状态下也会保存，下次显示直接生效。
                     if (themeChanged) _app.Keyboard.ApplyTheme(cfg);
+                    if (localeChanged) _app.Pet.ApplyLocale();
                     _app.Pet.ApplySettings();
                     _app.Pet.ApplyCaptureMode();
                     // 单/双底栏快捷键模式变化后立即换用对应的注册集合。
@@ -2391,7 +2413,7 @@ public sealed class PanelWindow : Form
 
     async Task<object> LoadAtlasAsync(string requested)
     {
-        var data = await _app.Auth.Api.GetAsync("api/common/atlas");
+        var data = await _app.Catalog.FetchAtlasAsync(_app.Auth.Api, _app.Cfg.Locale);
         var items = new List<object>();
         if (data is JsonArray arr)
         {

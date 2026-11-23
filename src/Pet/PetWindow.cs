@@ -94,6 +94,7 @@ public sealed class PetWindow : Form
     NotifyIcon _tray;
     ToolStripMenuItem _topmostItem, _passthroughItem, _passthroughOffItem, _hoverItem, _scaleMenuItem, _opacityMenuItem, _mirrorItem;
     ToolStripMenuItem _layoutHorizontalItem, _layoutVerticalItem;
+    ToolStripMenuItem _keyboardMenuItem;
     Icon _icon;
 
     bool _hiddenByHotkey;
@@ -148,15 +149,20 @@ public sealed class PetWindow : Form
         _room.MemberRemoved += id => Safe(() => RemoveCat(id));
         _room.MemberEmote += (id, name) => Safe(() => { if (_cats.TryGetValue(id, out var c)) c.ShowEmote(name); });
         _room.StateChanged += () => Safe(RefreshCats);
-        _room.ForcedDisconnect += code => Safe(() => Notify(code == 90002 ? "账号已在其他设备登录" : "房间已关闭"));
+        _room.ForcedDisconnect += code => Safe(() => Notify(code == 90002
+            ? Localization.T("notify.accountOtherDevice", "账号已在其他设备登录")
+            : Localization.T("notify.roomClosed", "房间已关闭")));
         _room.SocketClosed += reason => Safe(() =>
         {
             // 登录态异常由顶部条/未登录态统一提示，不再用气泡重复“连接断开”。
-            if (_auth.CanUseOnline && _room.State == "joined") Notify("连接断开：" + reason);
+            if (_auth.CanUseOnline && _room.State == "joined")
+                Notify(Localization.F("notify.connectionLost", "连接断开：{0}", reason));
         });
         _room.JoinRejected += message => Safe(() => Notify(message));
         _room.ServiceUnavailableChanged += down => Safe(() =>
-            Notify(down ? "联机服务暂不可用，正在自动重试…" : "联机服务已恢复"));
+            Notify(down
+                ? Localization.T("notify.serviceUnavailable", "联机服务暂不可用，正在自动重试…")
+                : Localization.T("notify.serviceRestored", "联机服务已恢复")));
 
         _auth.Changed += () => Safe(OnAuthChanged);
         _room.ClicksChanged += () => Safe(() => { CaptureChanged?.Invoke(); RequestCompose(); });
@@ -1546,11 +1552,12 @@ public sealed class PetWindow : Form
             try
             {
                 MessageBox.Show(_capture,
-                    "请务必在 OBS 的窗口采集属性中，把「采集方式」改为「Windows 10（1903 及以上）」。\n" +
-                    "默认的自动采集方式可能只显示黑影或黑屏。\n\n" +
-                    "透明背景还需要勾选「允许透明」。\n" +
-                    "如果仍然异常，可在设置中开启「兼容模式」，改用纯色背景 + 色度键。",
-                    "OBS 采集提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    Localization.T("obs.noticeBody",
+                        "请务必在 OBS 的窗口采集属性中，把「采集方式」改为「Windows 10（1903 及以上）」。\n" +
+                        "默认的自动采集方式可能只显示黑影或黑屏。\n\n" +
+                        "透明背景还需要勾选「允许透明」。\n" +
+                        "如果仍然异常，可在设置中开启「兼容模式」，改用纯色背景 + 色度键。"),
+                    Localization.T("obs.noticeTitle", "OBS 采集提示"), MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch { }
         }
@@ -2373,7 +2380,8 @@ public sealed class PetWindow : Form
     public static string ScreenLabel(Screen screen, int index)
     {
         var bounds = screen.Bounds;
-        return $"屏幕 {index + 1} · {bounds.Width}×{bounds.Height}{(screen.Primary ? "（主屏幕）" : "")}";
+        string primary = screen.Primary ? Localization.T("screen.primary", "（主屏幕）") : "";
+        return Localization.F("screen.label", "屏幕 {0} · {1}{2}", index + 1, $"{bounds.Width}×{bounds.Height}", primary);
     }
 
     /// <summary>
@@ -2417,7 +2425,7 @@ public sealed class PetWindow : Form
         NotifySettingsChanged();
         GeometryChanged?.Invoke();
         if (announce)
-            NotifyHotkey("已切换到 " + ScreenLabel(target, Array.IndexOf(screens, target)));
+            NotifyHotkey(Localization.F("notify.switchedToScreen", "已切换到 {0}", ScreenLabel(target, Array.IndexOf(screens, target))));
     }
 
     bool IsCustomCatPosition(long id)
@@ -2493,7 +2501,7 @@ public sealed class PetWindow : Form
         if (action == "reload")
         {
             RefreshRequested?.Invoke();
-            NotifyHotkey("已刷新界面");
+            NotifyHotkey(Localization.T("notify.uiRefreshed", "已刷新界面"));
         }
         else if (action == "game")
         {
@@ -2501,7 +2509,9 @@ public sealed class PetWindow : Form
             _cfg.ClickThrough = !_cfg.ClickThrough;
             Save();
             ApplySettings();
-            NotifyHotkey(_cfg.ClickThrough ? "已开启游戏模式（鼠标穿透）" : "已关闭游戏模式（鼠标穿透）");
+            NotifyHotkey(_cfg.ClickThrough
+                ? Localization.T("notify.gameModeOn", "已开启游戏模式（鼠标穿透）")
+                : Localization.T("notify.gameModeOff", "已关闭游戏模式（鼠标穿透）"));
             NotifySettingsChanged();
         }
         else if (action == "monitor")
@@ -2533,17 +2543,23 @@ public sealed class PetWindow : Form
             // 两边都已经隐藏时一起恢复，否则一起隐藏。
             bool show = _cfg.HideMainBar && _cfg.HideRemoteBars;
             SetBarsHidden(!show, !show);
-            NotifyHotkey(show ? "已显示主角与远程角色底栏" : "已隐藏主角与远程角色底栏");
+            NotifyHotkey(show
+                ? Localization.T("notify.barsShown", "已显示主角与远程角色底栏")
+                : Localization.T("notify.barsHidden", "已隐藏主角与远程角色底栏"));
         }
         else if (action == "barToggleMain")
         {
             SetBarsHidden(!_cfg.HideMainBar, _cfg.HideRemoteBars);
-            NotifyHotkey(_cfg.HideMainBar ? "已隐藏主角底栏" : "已显示主角底栏");
+            NotifyHotkey(_cfg.HideMainBar
+                ? Localization.T("notify.mainBarShown", "已显示主角底栏")
+                : Localization.T("notify.mainBarHidden", "已隐藏主角底栏"));
         }
         else if (action == "barToggleRemote")
         {
             SetBarsHidden(_cfg.HideMainBar, !_cfg.HideRemoteBars);
-            NotifyHotkey(_cfg.HideRemoteBars ? "已隐藏远程角色底栏" : "已显示远程角色底栏");
+            NotifyHotkey(_cfg.HideRemoteBars
+                ? Localization.T("notify.remoteBarShown", "已显示远程角色底栏")
+                : Localization.T("notify.remoteBarHidden", "已隐藏远程角色底栏"));
         }
         else if (action.StartsWith("emote", StringComparison.Ordinal) && int.TryParse(action[5..], out int slot))
         {
@@ -2555,7 +2571,9 @@ public sealed class PetWindow : Form
             _cfg.CaptureMode = !_cfg.CaptureMode;
             Save();
             ApplyCaptureMode();
-            NotifyHotkey(_cfg.CaptureMode ? "已开启 OBS 采集窗口" : "已关闭 OBS 采集窗口");
+            NotifyHotkey(_cfg.CaptureMode
+                ? Localization.T("notify.captureOn", "已开启 OBS 采集窗口")
+                : Localization.T("notify.captureOff", "已关闭 OBS 采集窗口"));
             NotifySettingsChanged();
         }
         else if (action == "mainPanel")
@@ -2571,7 +2589,9 @@ public sealed class PetWindow : Form
             _cfg.HideOtherPets = !_cfg.HideOtherPets;
             Save();
             RefreshMembers();
-            NotifyHotkey(_cfg.HideOtherPets ? "已隐藏其他成员桌宠" : "已显示其他成员桌宠");
+            NotifyHotkey(_cfg.HideOtherPets
+                ? Localization.T("notify.otherPetsHidden", "已隐藏其他成员桌宠")
+                : Localization.T("notify.otherPetsShown", "已显示其他成员桌宠"));
             NotifySettingsChanged();
         }
         else if (action == "keyBubbles")
@@ -2580,7 +2600,9 @@ public sealed class PetWindow : Form
             if (!_cfg.KeyBubbles) _keyBubbles.Clear();
             Save();
             Compose();
-            NotifyHotkey(_cfg.KeyBubbles ? "已开启按键气泡" : "已关闭按键气泡");
+            NotifyHotkey(_cfg.KeyBubbles
+                ? Localization.T("notify.keyBubblesOn", "已开启按键气泡")
+                : Localization.T("notify.keyBubblesOff", "已关闭按键气泡"));
             NotifySettingsChanged();
         }
         else if (action == "rhythmMode")
@@ -2591,7 +2613,9 @@ public sealed class PetWindow : Form
             Save();
             KeyboardModeChanged?.Invoke();
             Compose();
-            NotifyHotkey(_cfg.RhythmMode ? "已开启音游模式" : "已关闭音游模式");
+            NotifyHotkey(_cfg.RhythmMode
+                ? Localization.T("notify.rhythmOn", "已开启音游模式")
+                : Localization.T("notify.rhythmOff", "已关闭音游模式"));
             NotifySettingsChanged();
         }
         else if (action == "autoEmote")
@@ -2599,7 +2623,9 @@ public sealed class PetWindow : Form
             _cfg.AutoEmoteEnabled = !_cfg.AutoEmoteEnabled;
             Save();
             AutoSettingsChanged?.Invoke();
-            NotifyHotkey(_cfg.AutoEmoteEnabled ? "已开启自动表情" : "已关闭自动表情");
+            NotifyHotkey(_cfg.AutoEmoteEnabled
+                ? Localization.T("notify.autoEmoteOn", "已开启自动表情")
+                : Localization.T("notify.autoEmoteOff", "已关闭自动表情"));
             NotifySettingsChanged();
         }
         else if (action == "autoClick")
@@ -2607,7 +2633,9 @@ public sealed class PetWindow : Form
             _cfg.AutoClickEnabled = !_cfg.AutoClickEnabled;
             Save();
             AutoSettingsChanged?.Invoke();
-            NotifyHotkey(_cfg.AutoClickEnabled ? "已开启自动敲击" : "已关闭自动敲击");
+            NotifyHotkey(_cfg.AutoClickEnabled
+                ? Localization.T("notify.autoClickOn", "已开启自动敲击")
+                : Localization.T("notify.autoClickOff", "已关闭自动敲击"));
             NotifySettingsChanged();
         }
     }
@@ -2677,29 +2705,30 @@ public sealed class PetWindow : Form
 
     void BuildMenu()
     {
+        _menu?.Dispose();
         _menu = new ContextMenuStrip();
-        _menu.Items.Add("打开面板", null, (s, e) => OpenPanelRequested?.Invoke());
-        _menu.Items.Add("表情轮盘", null, (s, e) => ShowWheel());
-        _topmostItem = new ToolStripMenuItem("窗口置顶") { Checked = _cfg.Topmost };
+        _menu.Items.Add(Localization.T("tray.openPanel", "打开面板"), null, (s, e) => OpenPanelRequested?.Invoke());
+        _menu.Items.Add(Localization.T("tray.emoteWheel", "表情轮盘"), null, (s, e) => ShowWheel());
+        _topmostItem = new ToolStripMenuItem(Localization.T("tray.topmost", "窗口置顶")) { Checked = _cfg.Topmost };
         _topmostItem.Click += (s, e) => { _cfg.Topmost = _topmostItem.Checked = !_cfg.Topmost; Save(); ApplySettings(); NotifySettingsChanged(); };
         _menu.Items.Add(_topmostItem);
-        _mirrorItem = new ToolStripMenuItem("镜像角色") { Checked = _cfg.MainMirrored };
+        _mirrorItem = new ToolStripMenuItem(Localization.T("tray.mirror", "镜像角色")) { Checked = _cfg.MainMirrored };
         _mirrorItem.Click += (s, e) =>
         {
             SetMainMirrored(!_cfg.MainMirrored);
             _mirrorItem.Checked = _cfg.MainMirrored;
         };
         _menu.Items.Add(_mirrorItem);
-        _hoverItem = new ToolStripMenuItem("鼠标悬停时半透明") { Checked = _cfg.HoverFade };
+        _hoverItem = new ToolStripMenuItem(Localization.T("tray.hoverFade", "鼠标悬停时半透明")) { Checked = _cfg.HoverFade };
         _hoverItem.Click += (s, e) => { _cfg.HoverFade = _hoverItem.Checked = !_hoverItem.Checked; Save(); ApplySettings(); NotifySettingsChanged(); };
         _menu.Items.Add(_hoverItem);
-        _passthroughItem = new ToolStripMenuItem("鼠标穿透");
+        _passthroughItem = new ToolStripMenuItem(Localization.T("tray.clickThrough", "鼠标穿透"));
         _passthroughItem.Click += (s, e) => { _cfg.ClickThrough = true; Save(); ApplySettings(); NotifySettingsChanged(); };
         _menu.Items.Add(_passthroughItem);
-        _passthroughOffItem = new ToolStripMenuItem("取消鼠标穿透", null, (s, e) => { _cfg.ClickThrough = false; Save(); ApplySettings(); NotifySettingsChanged(); });
+        _passthroughOffItem = new ToolStripMenuItem(Localization.T("tray.cancelClickThrough", "取消鼠标穿透"), null, (s, e) => { _cfg.ClickThrough = false; Save(); ApplySettings(); NotifySettingsChanged(); });
         _menu.Items.Add(_passthroughOffItem);
 
-        _scaleMenuItem = new ToolStripMenuItem("桌宠大小");
+        _scaleMenuItem = new ToolStripMenuItem(Localization.T("tray.petScale", "桌宠大小"));
         foreach (var v in new[] { 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0 })
         {
             var item = new ToolStripMenuItem((int)(v * 100) + "%") { Tag = v };
@@ -2716,7 +2745,7 @@ public sealed class PetWindow : Form
         }
         _menu.Items.Add(_scaleMenuItem);
 
-        _opacityMenuItem = new ToolStripMenuItem("桌宠透明度");
+        _opacityMenuItem = new ToolStripMenuItem(Localization.T("tray.petOpacity", "桌宠透明度"));
         foreach (var v in new[] { 1.0, 0.9, 0.75, 0.5 })
         {
             var item = new ToolStripMenuItem((int)(v * 100) + "%") { Tag = v };
@@ -2732,18 +2761,26 @@ public sealed class PetWindow : Form
         }
         _menu.Items.Add(_opacityMenuItem);
 
-        var layout = new ToolStripMenuItem("排列方向");
-        _layoutHorizontalItem = new ToolStripMenuItem("横向排列", null, (s, e) => SetCatLayout("horizontal"));
-        _layoutVerticalItem = new ToolStripMenuItem("纵向排列", null, (s, e) => SetCatLayout("vertical"));
+        var layout = new ToolStripMenuItem(Localization.T("tray.layout", "排列方向"));
+        _layoutHorizontalItem = new ToolStripMenuItem(Localization.T("tray.layoutHorizontal", "横向排列"), null, (s, e) => SetCatLayout("horizontal"));
+        _layoutVerticalItem = new ToolStripMenuItem(Localization.T("tray.layoutVertical", "纵向排列"), null, (s, e) => SetCatLayout("vertical"));
         layout.DropDownItems.Add(_layoutHorizontalItem);
         layout.DropDownItems.Add(_layoutVerticalItem);
         _menu.Items.Add(layout);
 
-        var kb = new ToolStripMenuItem("桌面键盘");
-        foreach (var (key, label) in new[] { ("hidden", "不显示"), ("letters", "26 键"), ("wuwa", "鸣潮专属"), ("rhythm", "音游模式"), ("controller", "手柄") })
+        _keyboardMenuItem = new ToolStripMenuItem(Localization.T("tray.keyboard", "桌面键盘"));
+        foreach (var (key, label) in new[]
+                 {
+                     ("hidden", Localization.T("tray.keyboardHidden", "不显示")),
+                     ("letters", Localization.T("tray.keyboardLetters", "26 键")),
+                     ("wuwa", Localization.T("tray.keyboardWuwa", "鸣潮专属")),
+                     ("rhythm", Localization.T("tray.keyboardRhythm", "音游模式")),
+                     ("controller", Localization.T("tray.keyboardController", "手柄")),
+                 })
         {
             string k = key;
-            var item = new ToolStripMenuItem(label) { Checked = _cfg.KeyboardMode == key };
+            // 用稳定的模式 id 作为 Tag 做勾选判断，不再依赖可翻译的菜单文字。
+            var item = new ToolStripMenuItem(label) { Tag = key, Checked = _cfg.KeyboardMode == key };
             item.Click += (s, e) =>
             {
                 _cfg.KeyboardMode = k;
@@ -2757,15 +2794,16 @@ public sealed class PetWindow : Form
                 NotifySettingsChanged();
                 RefreshMenu();
             };
-            kb.DropDownItems.Add(item);
+            _keyboardMenuItem.DropDownItems.Add(item);
         }
-        _menu.Items.Add(kb);
+        _menu.Items.Add(_keyboardMenuItem);
 
         _menu.Items.Add(new ToolStripSeparator());
-        _menu.Items.Add("重置位置", null, (s, e) => { Location = DefaultLocation(); _cfg.PetX = Left; _cfg.PetY = Top; Save(); GeometryChanged?.Invoke(); });
-        _menu.Items.Add("重启桌宠", null, (s, e) => RestartPetApp());
-        _menu.Items.Add("退出", null, (s, e) => Close());
+        _menu.Items.Add(Localization.T("tray.resetPosition", "重置位置"), null, (s, e) => { Location = DefaultLocation(); _cfg.PetX = Left; _cfg.PetY = Top; Save(); GeometryChanged?.Invoke(); });
+        _menu.Items.Add(Localization.T("tray.restart", "重启桌宠"), null, (s, e) => RestartPetApp());
+        _menu.Items.Add(Localization.T("tray.exit", "退出"), null, (s, e) => Close());
         _menu.Opening += (s, e) => RefreshMenu();
+        if (_tray != null) _tray.ContextMenuStrip = _menu;
     }
 
     void RefreshMenu()
@@ -2779,7 +2817,7 @@ public sealed class PetWindow : Form
         if (_scaleMenuItem != null)
         {
             int scalePct = (int)Math.Round(Math.Clamp(_cfg.Scale, 0.25, 2.0) * 100);
-            _scaleMenuItem.Text = $"桌宠大小（{scalePct}%）";
+            _scaleMenuItem.Text = Localization.F("tray.petScalePct", "桌宠大小（{0}%）", scalePct);
             foreach (ToolStripItem sub in _scaleMenuItem.DropDownItems)
             {
                 if (sub is ToolStripMenuItem scaleItem && scaleItem.Tag is double preset)
@@ -2789,7 +2827,7 @@ public sealed class PetWindow : Form
         if (_opacityMenuItem != null)
         {
             int opacityPct = (int)Math.Round(Math.Clamp(_cfg.Opacity, 0.2, 1.0) * 100);
-            _opacityMenuItem.Text = $"桌宠透明度（{opacityPct}%）";
+            _opacityMenuItem.Text = Localization.F("tray.petOpacityPct", "桌宠透明度（{0}%）", opacityPct);
             foreach (ToolStripItem sub in _opacityMenuItem.DropDownItems)
             {
                 if (sub is ToolStripMenuItem opacityItem && opacityItem.Tag is double preset)
@@ -2799,25 +2837,34 @@ public sealed class PetWindow : Form
         bool verticalLayout = string.Equals(_cfg.CatLayout, "vertical", StringComparison.OrdinalIgnoreCase);
         if (_layoutHorizontalItem != null) _layoutHorizontalItem.Checked = !verticalLayout;
         if (_layoutVerticalItem != null) _layoutVerticalItem.Checked = verticalLayout;
-        foreach (ToolStripItem item in _menu.Items)
+        if (_keyboardMenuItem != null)
         {
-            if (item is not ToolStripMenuItem mi || mi.Text != "桌面键盘") continue;
-            string active = _cfg.KeyboardMode switch
-            {
-                "letters" => "26 键",
-                "wuwa" => "鸣潮专属",
-                "rhythm" => "音游模式",
-                "controller" => "手柄",
-                _ => "不显示"
-            };
-            foreach (ToolStripItem sub in mi.DropDownItems)
+            foreach (ToolStripItem sub in _keyboardMenuItem.DropDownItems)
             {
                 var subItem = (ToolStripMenuItem)sub;
                 // 鸣潮专属和音游模式常驻，不再根据 RhythmMode 隐藏其中一个。
                 subItem.Visible = true;
-                subItem.Checked = subItem.Text == active;
+                // 用 Tag 中的稳定模式 id 勾选，语言切换后不需要按中文文案反查。
+                subItem.Checked = string.Equals(subItem.Tag as string, _cfg.KeyboardMode, StringComparison.Ordinal);
             }
         }
+    }
+
+    /// <summary>界面语言切换后重建托盘/右键菜单，并同步已经打开的键盘、采集窗口和联机桌宠。</summary>
+    public void ApplyLocale()
+    {
+        if (!IsHandleCreated || IsDisposed) return;
+        BuildMenu();
+        RefreshMenu();
+        try { KeyboardUI?.RefreshLocale(); } catch { }
+        try { _capture?.ApplyLocale(); } catch { }
+        foreach (var cat in _cats.Values)
+        {
+            try { cat.ApplyLocale(); } catch { }
+        }
+        try { _frameCache.Dispose(); } catch { }
+        try { _keyBubbles.ClearCache(); } catch { }
+        Compose();
     }
 
     void RestartPetApp()
@@ -2839,7 +2886,7 @@ public sealed class PetWindow : Form
         catch (Exception ex)
         {
             Log.Write("重启桌宠失败 " + ex);
-            Notify("重启桌宠失败，请查看日志");
+            Notify(Localization.T("notify.restartFailed", "重启桌宠失败，请查看日志"));
             // 已经释放过单实例锁；启动失败时尽量重新拿回来，避免当前实例失去单实例保护。
             try
             {
@@ -3120,7 +3167,9 @@ public sealed class PetWindow : Form
         RefreshMenu();
         NotifySettingsChanged();
         if (announce)
-            NotifyHotkey(next == "vertical" ? "已切换为纵向排列" : "已切换为横向排列");
+            NotifyHotkey(next == "vertical"
+                ? Localization.T("notify.layoutVertical", "已切换为纵向排列")
+                : Localization.T("notify.layoutHorizontal", "已切换为横向排列"));
     }
 
     /// <summary>快捷键切换横纵排列。</summary>

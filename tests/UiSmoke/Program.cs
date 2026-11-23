@@ -858,6 +858,35 @@ internal static class Program
                         || jaUi["locale"]!.GetValue<string>() != "ja"
                         || !jaGroups.Contains("基本補助") || !jaGroups.Contains("アカウントと交換"))
                         throw new InvalidOperationException("Japanese i18n preview did not translate chrome/settings groups: " + jaUiJson);
+
+                    string roundTripJson = await core.ExecuteScriptAsync(@"
+                      (() => {
+                        const btn = document.getElementById('closeBtn');
+                        const theme = document.getElementById('themeBtn');
+                        const original = { title: btn?.title || '', aria: btn?.getAttribute('aria-label') || '' };
+                        I18N.setLocale('en');
+                        I18N.applyStatic(document);
+                        const en = { title: btn?.title || '', aria: btn?.getAttribute('aria-label') || '' };
+                        I18N.setLocale('ja');
+                        I18N.applyStatic(document);
+                        const ja = { title: btn?.title || '', aria: btn?.getAttribute('aria-label') || '' };
+                        I18N.setLocale('zh');
+                        I18N.applyStatic(document);
+                        const zh = { title: btn?.title || '', aria: btn?.getAttribute('aria-label') || '', lang: document.documentElement.lang, theme: theme?.title || '' };
+                        return JSON.stringify({ original, en, ja, zh });
+                      })()");
+                    var roundTrip = JsonNode.Parse(JsonSerializer.Deserialize<string>(roundTripJson)!)!.AsObject();
+                    var original = roundTrip["original"]!.AsObject();
+                    var enStatic = roundTrip["en"]!.AsObject();
+                    var jaStatic = roundTrip["ja"]!.AsObject();
+                    var zhStatic = roundTrip["zh"]!.AsObject();
+                    if (original["title"]!.GetValue<string>() != zhStatic["title"]!.GetValue<string>()
+                        || original["aria"]!.GetValue<string>() != zhStatic["aria"]!.GetValue<string>()
+                        || enStatic["title"]!.GetValue<string>() == original["title"]!.GetValue<string>()
+                        || jaStatic["title"]!.GetValue<string>() == original["title"]!.GetValue<string>()
+                        || zhStatic["lang"]!.GetValue<string>() != "zh-CN"
+                        || zhStatic["theme"]!.GetValue<string>() != "主题设置")
+                        throw new InvalidOperationException("i18n static title/aria did not round-trip back to Chinese: " + roundTripJson);
                     Console.WriteLine("PASS: English/Japanese i18n preview translates navigation, page title and settings groups.");
                     Console.WriteLine("screenshot=" + output);
                     form.Close();

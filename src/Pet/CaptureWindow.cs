@@ -25,6 +25,8 @@ public sealed class CaptureWindow : Form
     readonly PetWindow _pet;
     readonly Screen _screen;
     readonly LayeredSurface _surface = new();
+    ContextMenuStrip _menu;
+    ToolStripMenuItem _resetItem, _closeItem;
     readonly bool _compatibility;
     bool _detached;
     bool _updatingSize;
@@ -59,17 +61,34 @@ public sealed class CaptureWindow : Form
         Location = new Point(_screen.WorkingArea.Left + 40, _screen.WorkingArea.Top + 40);
         if (compatibility) BackColor = _backgroundColor;
 
-        var menu = new ContextMenuStrip();
-        menu.Items.Add("重置到左上角", null, (s, e) =>
-        {
-            Location = new Point(_screen.WorkingArea.Left + 40, _screen.WorkingArea.Top + 40);
-        });
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("关闭采集窗口", null, (s, e) => _pet.DisableCaptureMode());
-        ContextMenuStrip = menu;
+        BuildMenu();
 
         _pet.CaptureChanged += OnPetChanged;
         if (_pet.KeyboardUI != null) _pet.KeyboardUI.VisualChanged += OnPetChanged;
+    }
+
+    void BuildMenu()
+    {
+        _menu?.Dispose();
+        _menu = new ContextMenuStrip();
+        _resetItem = new ToolStripMenuItem(Localization.T("capture.resetTopLeft", "重置到左上角"));
+        _resetItem.Click += (s, e) =>
+        {
+            Location = new Point(_screen.WorkingArea.Left + 40, _screen.WorkingArea.Top + 40);
+        };
+        _menu.Items.Add(_resetItem);
+        _menu.Items.Add(new ToolStripSeparator());
+        _closeItem = new ToolStripMenuItem(Localization.T("capture.close", "关闭采集窗口"));
+        _closeItem.Click += (s, e) => _pet.DisableCaptureMode();
+        _menu.Items.Add(_closeItem);
+        ContextMenuStrip = _menu;
+    }
+
+    /// <summary>界面语言切换后更新右键菜单。</summary>
+    public void ApplyLocale()
+    {
+        if (IsDisposed) return;
+        BuildMenu();
     }
 
     protected override CreateParams CreateParams

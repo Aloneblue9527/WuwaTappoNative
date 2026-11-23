@@ -38,8 +38,11 @@ public sealed class AssetEntry
 /// </summary>
 public sealed class Catalog
 {
+    public const string GlobalAssetsHost = "https://wutheringwaves-wuwatappo.kurogames-global.com";
     public string AssetsHost { get; private set; } = "";
     public long AssetsJsonTs { get; private set; }
+    public string Locale { get; private set; } = "zh";
+    string _dictKey = "";
     public readonly Dictionary<string, Dictionary<long, AssetEntry>> ByType = new();
     public readonly Dictionary<long, string> Names = new();
     public readonly Dictionary<long, string> Series = new();
@@ -54,10 +57,41 @@ public sealed class Catalog
     public readonly Dictionary<string, string> DictEmote = new(StringComparer.OrdinalIgnoreCase);
     public bool DictReady { get; private set; }
     public event Action Loaded;
+    readonly System.Threading.SemaphoreSlim _loadGate = new(1, 1);
 
     public int Count(string type) => ByType.TryGetValue(type, out var m) ? m.Count : 0;
     public IEnumerable<AssetEntry> All(string type) => ByType.TryGetValue(type, out var m) ? m.Values : Enumerable.Empty<AssetEntry>();
     public AssetEntry Find(string type, long id) => ByType.TryGetValue(type, out var m) && m.TryGetValue(id, out var e) ? e : null;
+
+    static string NormalizeLocale(string locale)
+    {
+        string v = (locale ?? "").Trim().ToLowerInvariant();
+        return v == "en" || v == "ja" ? v : "zh";
+    }
+
+    static string DictionaryKey(string locale)
+        => locale == "en" ? "en" : locale == "ja" ? "jp" : "zh";
+
+    static string CacheSuffix(string locale)
+        => locale == "en" ? "en" : locale == "ja" ? "ja" : "";
+
+    static string AcceptLanguageFor(string locale)
+        => locale == "en" ? "en-US,en;q=0.9" : locale == "ja" ? "ja-JP,ja;q=0.9,en;q=0.8" : "zh-CN,zh;q=0.9,en;q=0.8";
+
+    static string CatalogCachePath(string locale)
+    {
+        string suffix = CacheSuffix(locale);
+        return string.IsNullOrEmpty(suffix) ? Paths.CatalogCache : Path.Combine(Paths.CacheDir, "appearance_asset_" + suffix + ".json");
+    }
+
+    static string CatalogMetaPath(string locale)
+    {
+        string suffix = CacheSuffix(locale);
+        return string.IsNullOrEmpty(suffix) ? Paths.CatalogMeta : Path.Combine(Paths.CacheDir, "appearance_meta_" + suffix + ".json");
+    }
+
+    static string DictionaryCachePath(string key)
+        => Path.Combine(Paths.CacheDir, "dict_" + key + ".json");
 
     public string CdnUrl(string relative)
     {
@@ -82,78 +116,134 @@ public sealed class Catalog
         return folder + "/" + assetName;
     }
 
-    public async Task<bool> LoadAsync(ApiClient api, Action<string> progress = null)
+    public async Task<bool> LoadAsync(ApiClient api, Action<string> progress = null, string locale = null)
     {
+        await _loadGate.WaitAsync();
+        try { return await LoadAsyncCore(api, progress, locale); }
+        finally { _loadGate.Release(); }
+    }
+
+    async Task<bool> LoadAsyncCore(ApiClient api, Action<string> progress, string locale)
+    {
+        string targetLocale = NormalizeLocale(locale);
+        Locale = targetLocale;
+        bool useGlobal = targetLocale != "zh";
         bool fromCdn = false;
+        ApiClient catalogApi = api;
+        ApiClient globalApi = null;
         try
         {
-            progress?.Invoke("读取活动配置…");
-            var cfg = await api.GetAsync("api/common/activity-config");
-            if (cfg is JsonObject o)
+            if (useGlobal)
             {
-                AssetsHost = ApiClient.ReadString(o["assets_host"]).TrimEnd('/');
-                AssetsJsonTs = ApiClient.ReadLong(o["assets_json_ts"]);
+                // 非中文界面固定读取国际服公开 JSON，才能拿到英文/日文图鉴数据。
+                globalApi = new ApiClient(api.Cid, ApiClient.GlobalBaseUrl, AcceptLanguageFor(targetLocale));
+                catalogApi = globalApi;
+                AssetsHost = GlobalAssetsHost;
+                AssetsJsonTs = 0;
             }
-            if (string.IsNullOrEmpty(AssetsHost)) throw new InvalidOperationException("activity-config 未返回 assets_host");
+            else
+            {
+                progress?.Invoke("读取活动配置…");
+                var cfg = await api.GetAsync("api/common/activity-config");
+                if (cfg is JsonObject o)
+                {
+                    AssetsHost = ApiClient.ReadString(o["assets_host"]).TrimEnd('/');
+                    AssetsJsonTs = ApiClient.ReadLong(o["assets_json_ts"]);
+                }
+                if (string.IsNullOrEmpty(AssetsHost)) throw new InvalidOperationException("activity-config 未返回 assets_host");
+            }
 
-            progress?.Invoke("读取素材目录地址…");
+            progress?.Invoke(useGlobal ? "读取国际服素材目录地址…" : "读取素材目录地址…");
             var hostFile = await GetJsonAsync($"{AssetsHost}/app/json-host/appearance_asset_host.json?v={DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}");
             string catalogUrl = ApiClient.ReadString(hostFile?["url"]);
             if (string.IsNullOrEmpty(catalogUrl)) throw new InvalidOperationException("appearance_asset_host.json 缺少 url");
 
-            progress?.Invoke("下载外观目录…");
+            progress?.Invoke(useGlobal ? "下载国际服外观目录…" : "下载外观目录…");
             var root = await GetJsonAsync(catalogUrl);
             Parse(root);
             try
             {
                 Directory.CreateDirectory(Paths.CacheDir);
-                File.WriteAllText(Paths.CatalogCache, root.ToJsonString());
-                File.WriteAllText(Paths.CatalogMeta, new JsonObject
+                File.WriteAllText(CatalogCachePath(targetLocale), root.ToJsonString());
+                File.WriteAllText(CatalogMetaPath(targetLocale), new JsonObject
                 {
                     ["host"] = AssetsHost,
-                    ["ts"] = AssetsJsonTs
+                    ["ts"] = AssetsJsonTs,
+                    ["locale"] = targetLocale
                 }.ToJsonString());
             }
             catch (Exception ex) { Log.Write("目录缓存写入失败 " + ex.Message); }
             fromCdn = true;
-            Log.Write($"目录加载完成 host={AssetsHost} skins={Count("character_skin")} accessories={Count("accessory")} emotes={Count("emote")}");
+            Log.Write($"目录加载完成 locale={targetLocale} host={AssetsHost} skins={Count("character_skin")} accessories={Count("accessory")} emotes={Count("emote")}");
         }
         catch (Exception ex)
         {
             Log.Write("CDN 目录失败，使用离线兜底：" + ex.Message);
             progress?.Invoke("CDN 不可用，使用离线目录");
-            LoadOffline();
+            LoadOffline(targetLocale);
         }
 
         try
         {
-            progress?.Invoke("读取中文名称字典…");
-            await LoadDictionariesAsync();
+            progress?.Invoke(targetLocale == "zh" ? "读取中文名称字典…" : "读取本地化名称字典…");
+            await LoadDictionariesAsync(targetLocale);
         }
-        catch (Exception ex) { Log.Write("名称字典加载失败 " + ex.Message); }
+        catch (Exception ex)
+        {
+            Log.Write("名称字典加载失败 " + ex.Message);
+            LoadCachedDictionary(targetLocale);
+        }
 
         try
         {
             progress?.Invoke("读取图鉴名称…");
-            await LoadNamesAsync(api);
+            bool namesLoaded = await LoadNamesAsync(catalogApi);
+            if (!namesLoaded && useGlobal)
+            {
+                try { await LoadNamesAsync(api); } catch (Exception fallback) { Log.Write("图鉴名称回退失败 " + fallback.Message); }
+            }
         }
-        catch (Exception ex) { Log.Write("图鉴名称加载失败 " + ex.Message); }
+        catch (Exception ex)
+        {
+            Log.Write("图鉴名称加载失败 " + ex.Message);
+            if (useGlobal)
+            {
+                try { await LoadNamesAsync(api); } catch (Exception fallback) { Log.Write("图鉴名称回退失败 " + fallback.Message); }
+            }
+        }
+        finally
+        {
+            globalApi?.Dispose();
+        }
 
         Loaded?.Invoke();
         return fromCdn;
     }
 
-    public void LoadOffline()
+    public void LoadOffline(string locale = null)
     {
-        if (!DictReady) LoadCachedDictionary();
+        string targetLocale = NormalizeLocale(locale ?? Locale);
+        Locale = targetLocale;
+        if (_dictKey != DictionaryKey(targetLocale) || !DictReady) LoadCachedDictionary(targetLocale);
         try
         {
-            string path = File.Exists(Paths.CatalogCache) ? Paths.CatalogCache : Paths.BundledCatalog;
-            if (File.Exists(Paths.CatalogMeta))
+            string path = File.Exists(CatalogCachePath(targetLocale))
+                ? CatalogCachePath(targetLocale)
+                : (targetLocale != "zh" && File.Exists(Paths.CatalogCache) ? Paths.CatalogCache : Paths.BundledCatalog);
+            string metaPath = File.Exists(CatalogMetaPath(targetLocale))
+                ? CatalogMetaPath(targetLocale)
+                : (targetLocale == "zh" && File.Exists(Paths.CatalogMeta) ? Paths.CatalogMeta : null);
+            if (!string.IsNullOrEmpty(metaPath))
             {
-                var meta = JsonNode.Parse(File.ReadAllText(Paths.CatalogMeta));
+                var meta = JsonNode.Parse(File.ReadAllText(metaPath));
                 AssetsHost = ApiClient.ReadString(meta?["host"]);
                 AssetsJsonTs = ApiClient.ReadLong(meta?["ts"]);
+            }
+            else if (targetLocale != "zh")
+            {
+                // 没有本语言缓存时也不能把国际服目录的资源 URL 指到国服域。
+                AssetsHost = GlobalAssetsHost;
+                AssetsJsonTs = 0;
             }
             if (File.Exists(path))
             {
@@ -204,28 +294,42 @@ public sealed class Catalog
         }
     }
 
-    async Task LoadDictionariesAsync()
+    async Task LoadDictionariesAsync(string locale)
     {
         if (string.IsNullOrEmpty(AssetsHost)) return;
+        string key = DictionaryKey(NormalizeLocale(locale));
         var host = await GetJsonAsync($"{AssetsHost}/app/json-host/dict_host.json");
-        string url = ApiClient.ReadString(host?["url"]?["zh"]).Trim();
-        if (string.IsNullOrEmpty(url)) throw new InvalidOperationException("dict_host.json 缺少 zh");
+        string url = ApiClient.ReadString(host?["url"]?[key]).Trim();
+        if (string.IsNullOrEmpty(url)) throw new InvalidOperationException("dict_host.json 缺少 " + key);
         var dict = await GetJsonAsync(url);
-        try { File.WriteAllText(System.IO.Path.Combine(Paths.CacheDir, "dict_zh.json"), dict.ToJsonString()); } catch { }
+        try { File.WriteAllText(DictionaryCachePath(key), dict.ToJsonString()); } catch { }
         ApplyDictionary(dict);
-        Log.Write($"名称字典 character={DictCharacter.Count} series={DictSeries.Count} accessory={DictAccessory.Count} emote={DictEmote.Count}");
+        _dictKey = key;
+        Log.Write($"名称字典 locale={key} character={DictCharacter.Count} series={DictSeries.Count} accessory={DictAccessory.Count} emote={DictEmote.Count}");
     }
 
-    public bool LoadCachedDictionary()
+    public bool LoadCachedDictionary(string locale = null)
     {
-        try
+        string key = DictionaryKey(NormalizeLocale(locale ?? Locale));
+        foreach (string candidate in new[] { key, "zh" })
         {
-            var path = System.IO.Path.Combine(Paths.CacheDir, "dict_zh.json");
-            if (!File.Exists(path)) return false;
-            ApplyDictionary(JsonNode.Parse(File.ReadAllText(path)));
-            return DictReady;
+            try
+            {
+                var path = DictionaryCachePath(candidate);
+                if (!File.Exists(path)) continue;
+                ApplyDictionary(JsonNode.Parse(File.ReadAllText(path)));
+                if (DictReady)
+                {
+                    _dictKey = candidate;
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Write("字典缓存读取失败 " + candidate + " " + ex.Message);
+            }
         }
-        catch (Exception ex) { Log.Write("字典缓存读取失败 " + ex.Message); return false; }
+        return false;
     }
 
     void ApplyDictionary(JsonNode dict)
@@ -348,16 +452,36 @@ public sealed class Catalog
         return a + "・" + b;
     }
 
-    async Task LoadNamesAsync(ApiClient api)
+    public async Task<JsonNode> FetchAtlasAsync(ApiClient fallbackApi, string locale = null)
+    {
+        string targetLocale = NormalizeLocale(locale ?? Locale);
+        if (fallbackApi == null) return null;
+        if (targetLocale == "zh") return await fallbackApi.GetAsync("api/common/atlas");
+        try
+        {
+            using var globalApi = new ApiClient(fallbackApi.Cid, ApiClient.GlobalBaseUrl, AcceptLanguageFor(targetLocale));
+            var data = await globalApi.GetAsync("api/common/atlas");
+            if (data is JsonArray) return data;
+            Log.Write("国际服图鉴列表返回非数组，回退当前区服");
+            return await fallbackApi.GetAsync("api/common/atlas");
+        }
+        catch (Exception ex)
+        {
+            Log.Write("国际服图鉴列表失败，回退当前区服：" + ex.Message);
+            return await fallbackApi.GetAsync("api/common/atlas");
+        }
+    }
+
+    async Task<bool> LoadNamesAsync(ApiClient api)
     {
         var data = await api.GetAsync("api/common/atlas");
-        if (data is not JsonArray arr) return;
-        Names.Clear();
-        Series.Clear();
-        Rarities.Clear();
-        AtlasIdByName.Clear();
-        IdByAssetName.Clear();
-        AssetNameById.Clear();
+        if (data is not JsonArray arr) return false;
+        var names = new Dictionary<long, string>();
+        var series = new Dictionary<long, string>();
+        var rarities = new Dictionary<long, string>();
+        var atlasIdByName = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        var idByAssetName = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        var assetNameById = new Dictionary<long, string>();
         foreach (var item in arr)
         {
             if (item is not JsonObject o) continue;
@@ -367,26 +491,34 @@ public sealed class Catalog
             string assetName = ApiClient.ReadString(o["asset_name"]);
             string rarity = ApiClient.ReadString(o["rarity"]).ToLowerInvariant();
             string display = DisplayName(type, assetName);
-            if (!string.IsNullOrEmpty(display)) Names[id] = display;
-            if (!string.IsNullOrEmpty(rarity)) Rarities[id] = rarity;
+            if (!string.IsNullOrEmpty(display)) names[id] = display;
+            if (!string.IsNullOrEmpty(rarity)) rarities[id] = rarity;
             if (!string.IsNullOrEmpty(assetName))
             {
-                AtlasIdByName[assetName] = id;
+                atlasIdByName[assetName] = id;
                 // 图鉴 atlas 条目的 height_light_id 指向正片 id，用于把 asset_name 反查成可渲染的皮肤/配件 id
                 if (ByType.TryGetValue(type, out var atlasMap) && atlasMap.TryGetValue(id, out var atlasEntry) && atlasEntry.HeightLightId > 0)
                 {
                     long baseId = atlasEntry.HeightLightId;
-                    IdByAssetName[assetName] = baseId;
-                    AssetNameById[baseId] = assetName;
+                    idByAssetName[assetName] = baseId;
+                    assetNameById[baseId] = assetName;
                     // 名称/稀有度同时挂到正片 id 上，catalog.list 才能显示中文名而不是数字 id。
-                    if (!string.IsNullOrEmpty(display)) Names[baseId] = display;
-                    if (!string.IsNullOrEmpty(rarity)) Rarities[baseId] = rarity;
-                    string series = SeriesName(type, assetName);
-                    if (!string.IsNullOrEmpty(series)) Series[baseId] = series;
+                    if (!string.IsNullOrEmpty(display)) names[baseId] = display;
+                    if (!string.IsNullOrEmpty(rarity)) rarities[baseId] = rarity;
+                    string seriesName = SeriesName(type, assetName);
+                    if (!string.IsNullOrEmpty(seriesName)) series[baseId] = seriesName;
                 }
             }
         }
+        // 只在完整成功后替换，瞬时网络失败不会清空默认中文模式的名称。
+        Names.Clear(); foreach (var pair in names) Names[pair.Key] = pair.Value;
+        Series.Clear(); foreach (var pair in series) Series[pair.Key] = pair.Value;
+        Rarities.Clear(); foreach (var pair in rarities) Rarities[pair.Key] = pair.Value;
+        AtlasIdByName.Clear(); foreach (var pair in atlasIdByName) AtlasIdByName[pair.Key] = pair.Value;
+        IdByAssetName.Clear(); foreach (var pair in idByAssetName) IdByAssetName[pair.Key] = pair.Value;
+        AssetNameById.Clear(); foreach (var pair in assetNameById) AssetNameById[pair.Key] = pair.Value;
         Log.Write("图鉴名称 " + Names.Count);
+        return true;
     }
 
     /// <summary>为条目补全显示名与稀有度（来自图鉴接口按 asset_id 索引）。</summary>

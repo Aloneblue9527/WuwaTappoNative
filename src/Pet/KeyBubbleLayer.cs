@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using WuwatappoNative.Core;
 
 namespace WuwatappoNative.Pet;
 
@@ -53,7 +54,7 @@ public sealed class KeyBubbleLayer : IDisposable
     {
         string label = LabelFor(vk);
         if (string.IsNullOrEmpty(label)) return false;
-        Image image = GetImage("vk:" + vk, label, KindFor(vk));
+        Image image = GetImage("vk:" + vk + ":" + Localization.Current, label, KindFor(vk));
         if (image == null) return false;
 
         var offset = Offsets[_seq++ % Offsets.Length];
@@ -76,7 +77,7 @@ public sealed class KeyBubbleLayer : IDisposable
         label = (label ?? "").Trim();
         if (label.Length == 0) return false;
         Kind kind = accent ? Kind.Modifier : PadKindFor(label);
-        Image image = GetImage("pad:" + label + ":" + (int)kind, label, kind);
+        Image image = GetImage("pad:" + label + ":" + (int)kind + ":" + Localization.Current, label, kind);
         if (image == null) return false;
 
         var offset = Offsets[_seq++ % Offsets.Length];
@@ -116,6 +117,14 @@ public sealed class KeyBubbleLayer : IDisposable
     {
         foreach (var bubble in _items) bubble.Sprite.Dispose();
         _items.Clear();
+    }
+
+    /// <summary>语言切换后丢弃带旧语言的键帽缓存。</summary>
+    public void ClearCache()
+    {
+        Clear();
+        foreach (var image in _cache.Values) image.Dispose();
+        _cache.Clear();
     }
 
     /// <summary>逻辑坐标命中当前键帽气泡；用于避免气泡挡住角色时误触发悬停。</summary>
@@ -238,8 +247,8 @@ public sealed class KeyBubbleLayer : IDisposable
 
     static string LabelFor(int vk) => vk switch
     {
-        0x01 => "左键",
-        0x02 => "右键",
+        0x01 => Localization.T("bubble.mouseLeft", "左键"),
+        0x02 => Localization.T("bubble.mouseRight", "右键"),
         0x08 => "Backspace",
         0x09 => "Tab",
         0x0D => "Enter",

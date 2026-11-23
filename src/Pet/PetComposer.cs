@@ -6,6 +6,7 @@ using System.Drawing.Imaging;
 using System.Drawing.Text;
 using System.Threading;
 using WuwatappoNative.Assets;
+using WuwatappoNative.Core;
 
 namespace WuwatappoNative.Pet;
 
@@ -395,7 +396,7 @@ public static class PetComposer
     {
         Bitmap _character, _strip;
         (Size Size, Image Head, Image Body, Image Accessory, double X, double Y, int ScalePercent, int RotationDegrees, bool Mirror) _characterKey;
-        (Size Size, bool ShowBar, bool ShowLoggedOut, Image Body, long Clicks, bool KeyboardOn, Color BarColor, Color BarTextColor, Color BarAccentColor, Color BarAccentMutedColor, Color LoggedOutColor, bool Mirror) _stripKey;
+        (Size Size, bool ShowBar, bool ShowLoggedOut, Image Body, long Clicks, bool KeyboardOn, Color BarColor, Color BarTextColor, Color BarAccentColor, Color BarAccentMutedColor, Color LoggedOutColor, bool Mirror, string Locale) _stripKey;
 
         internal void DrawCharacter(Graphics target, Size size, float scale, Image head, Image body, Image accessory,
             double offsetX, double offsetY, int accessoryScalePercent, int accessoryRotationDegrees, Rectangle cat,
@@ -416,7 +417,7 @@ public static class PetComposer
 
         internal void DrawStrip(Graphics target, Size size, float scale, Info info, Image body, Rectangle cat)
         {
-            var key = (size, info.ShowBar, info.ShowLoggedOut, body, info.Clicks, info.KeyboardOn, info.BarColor, info.BarTextColor, info.BarAccentColor, info.BarAccentMutedColor, info.LoggedOutColor, info.Mirror);
+            var key = (size, info.ShowBar, info.ShowLoggedOut, body, info.Clicks, info.KeyboardOn, info.BarColor, info.BarTextColor, info.BarAccentColor, info.BarAccentMutedColor, info.LoggedOutColor, info.Mirror, Localization.Current);
             if (_strip == null || _stripKey != key)
             {
                 Prepare(ref _strip, size);
@@ -491,7 +492,7 @@ public static class PetComposer
         using (var fmt = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center })
         {
             var textRect = new RectangleF(counter.X + 18 * s, bar.Y, counter.Width - 18 * s, bar.Height);
-            DrawClickCount(g, info.ShowLoggedOut ? "未登录" : FormatClicks(info.Clicks), font, brush.Color, textRect, fmt);
+            DrawClickCount(g, info.ShowLoggedOut ? Localization.T("pet.notLoggedIn", "未登录") : FormatClicks(info.Clicks), font, brush.Color, textRect, fmt);
         }
 
         // 键盘图标：描边粗细、可见高度和中心线与右侧菜单图标保持一致。

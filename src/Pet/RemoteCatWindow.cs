@@ -25,7 +25,7 @@ public sealed class RemoteCatWindow : Form
     PetFrames _frames;
     readonly EmoteBubbleLayer _bubbles = new(6);
     ContextMenuStrip _menu;
-    ToolStripMenuItem _scaleMenu, _opacityMenu, _mirrorItem;
+    ToolStripMenuItem _hideItem, _scaleMenu, _opacityMenu, _mirrorItem;
     double _remoteScale = 1.0, _remoteOpacity = 1.0, _remoteNameScale = 1.0;
     public event Action<double> RemoteScaleRequested;
     public event Action<double> RemoteOpacityRequested;
@@ -132,16 +132,17 @@ public sealed class RemoteCatWindow : Form
 
     void BuildRemoteMenu()
     {
+        _menu?.Dispose();
         _menu = new ContextMenuStrip();
-        var hideItem = new ToolStripMenuItem("隐藏该角色");
-        hideItem.Click += (s, e) => HideRequested?.Invoke(MemberId);
-        _menu.Items.Add(hideItem);
-        _mirrorItem = new ToolStripMenuItem("镜像角色") { Checked = _mirrored };
+        _hideItem = new ToolStripMenuItem(Localization.T("remote.hide", "隐藏该角色"));
+        _hideItem.Click += (s, e) => HideRequested?.Invoke(MemberId);
+        _menu.Items.Add(_hideItem);
+        _mirrorItem = new ToolStripMenuItem(Localization.T("remote.mirror", "镜像角色")) { Checked = _mirrored };
         _mirrorItem.Click += (s, e) => MirrorRequested?.Invoke(MemberId, !_mirrored);
         _menu.Items.Add(_mirrorItem);
         _menu.Items.Add(new ToolStripSeparator());
 
-        _scaleMenu = new ToolStripMenuItem("联机角色大小");
+        _scaleMenu = new ToolStripMenuItem(Localization.T("remote.scale", "联机角色大小"));
         foreach (var v in new[] { 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0 })
         {
             var item = new ToolStripMenuItem((int)(v * 100) + "%") { Tag = v };
@@ -151,7 +152,7 @@ public sealed class RemoteCatWindow : Form
         }
         _menu.Items.Add(_scaleMenu);
 
-        _opacityMenu = new ToolStripMenuItem("联机角色透明度");
+        _opacityMenu = new ToolStripMenuItem(Localization.T("remote.opacity", "联机角色透明度"));
         foreach (var v in new[] { 1.0, 0.9, 0.75, 0.5 })
         {
             var item = new ToolStripMenuItem((int)(v * 100) + "%") { Tag = v };
@@ -177,13 +178,16 @@ public sealed class RemoteCatWindow : Form
     void RefreshRemoteMenu()
     {
         if (_menu == null) return;
+        if (_hideItem != null) _hideItem.Text = Localization.T("remote.hide", "隐藏该角色");
         if (_mirrorItem != null)
         {
             _mirrorItem.Checked = _mirrored;
-            _mirrorItem.Text = _mirrored ? "取消镜像" : "镜像角色";
+            _mirrorItem.Text = _mirrored
+                ? Localization.T("remote.unmirror", "取消镜像")
+                : Localization.T("remote.mirror", "镜像角色");
         }
-        _scaleMenu.Text = $"联机角色大小（{(int)Math.Round(_remoteScale * 100)}%）";
-        _opacityMenu.Text = $"联机角色透明度（{(int)Math.Round(_remoteOpacity * 100)}%）";
+        _scaleMenu.Text = Localization.F("remote.scalePct", "联机角色大小（{0}%）", (int)Math.Round(_remoteScale * 100));
+        _opacityMenu.Text = Localization.F("remote.opacityPct", "联机角色透明度（{0}%）", (int)Math.Round(_remoteOpacity * 100));
         foreach (ToolStripItem sub in _scaleMenu.DropDownItems)
         {
             if (sub is ToolStripMenuItem item && item.Tag is double preset)
@@ -194,6 +198,14 @@ public sealed class RemoteCatWindow : Form
             if (sub is ToolStripMenuItem item && item.Tag is double preset)
                 item.Checked = Math.Abs(_remoteOpacity - preset) < 0.005;
         }
+    }
+
+    /// <summary>界面语言切换后重建右键菜单；昵称条无文字变更，无需重绘。</summary>
+    public void ApplyLocale()
+    {
+        if (_menu == null) return;
+        BuildRemoteMenu();
+        RefreshRemoteMenu();
     }
 
     double _opacity = 1.0, _opacityBase = 1.0;
@@ -569,7 +581,9 @@ public sealed class RemoteCatWindow : Form
                     using (var font = new Font("Microsoft YaHei UI", nameFontPx, FontStyle.Bold, GraphicsUnit.Pixel))
                     using (var brush = new SolidBrush(_pillTextColor))
                     using (var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter })
-                        g.DrawString(string.IsNullOrEmpty(_member.Nickname) ? "漂泊者" : _member.Nickname, font, brush, pill, fmt);
+                        g.DrawString(string.IsNullOrEmpty(_member.Nickname)
+                            ? Localization.T("remote.defaultNickname", "漂泊者")
+                            : _member.Nickname, font, brush, pill, fmt);
 
                     // 手/手臂要压住昵称条；角色头部和身体其余部分仍在 UI 后面。
                     if (body != null)

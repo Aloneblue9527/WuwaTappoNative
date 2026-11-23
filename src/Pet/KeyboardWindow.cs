@@ -19,6 +19,9 @@ public sealed class KeyboardWindow : Form
 {
     public enum Mode { Hidden, Letters, Wuwa, Rhythm, Controller }
 
+    /// <summary>工具栏按钮的稳定 id；显示文案可随语言变化，不能用文字做字典键。</summary>
+    enum ToolbarButton { Letters, WuwaRhythm, Controller, Close }
+
     const int W = 200;
     const int ToolbarH = 24;
     const int LettersH = ToolbarH + 121;
@@ -28,7 +31,7 @@ public sealed class KeyboardWindow : Form
     const float KeyW = 15, KeyH = 19, Gap = 3;
 
     readonly Dictionary<string, RectangleF> _keys = new();
-    readonly Dictionary<string, RectangleF> _buttons = new();
+    readonly Dictionary<ToolbarButton, RectangleF> _buttons = new();
     readonly List<RectangleF> _rhythmLanes = new();
     readonly HashSet<string> _down = new();
     bool _rhythmEnabled;
@@ -112,10 +115,10 @@ public sealed class KeyboardWindow : Form
         _keys.Clear();
         _buttons.Clear();
         _rhythmLanes.Clear();
-        _buttons["26键"] = new RectangleF(2, 2, 44, 18);
-        _buttons[_rhythmEnabled ? "音游模式" : "鸣潮专属"] = new RectangleF(50, 2, 64, 18);
-        _buttons["手柄"] = new RectangleF(118, 2, 40, 18);
-        _buttons["×"] = new RectangleF(W - 22, 2, 20, 18);
+        _buttons[ToolbarButton.Letters] = new RectangleF(2, 2, 44, 18);
+        _buttons[ToolbarButton.WuwaRhythm] = new RectangleF(50, 2, 64, 18);
+        _buttons[ToolbarButton.Controller] = new RectangleF(118, 2, 40, 18);
+        _buttons[ToolbarButton.Close] = new RectangleF(W - 22, 2, 20, 18);
 
         if (mode == Mode.Letters)
         {
@@ -643,10 +646,9 @@ public sealed class KeyboardWindow : Form
         foreach (var pair in _buttons)
         {
             var r = new RectangleF(pair.Value.X * s, pair.Value.Y * s, pair.Value.Width * s, pair.Value.Height * s);
-            bool active = (pair.Key == "26键" && _mode == Mode.Letters)
-                || (pair.Key == "鸣潮专属" && _mode == Mode.Wuwa)
-                || (pair.Key == "音游模式" && _mode == Mode.Rhythm)
-                || (pair.Key == "手柄" && _mode == Mode.Controller);
+            bool active = (pair.Key == ToolbarButton.Letters && _mode == Mode.Letters)
+                || (pair.Key == ToolbarButton.WuwaRhythm && (_mode == Mode.Wuwa || _mode == Mode.Rhythm))
+                || (pair.Key == ToolbarButton.Controller && _mode == Mode.Controller);
             using (var path = PetComposer.Rounded(r, 9 * s))
             using (var brush = new SolidBrush(active ? theme.ToolbarActive : theme.ToolbarBackground))
             using (var pen = new Pen(theme.ToolbarBorder, 1f * s))
@@ -656,9 +658,19 @@ public sealed class KeyboardWindow : Form
             }
             using var text = new SolidBrush(theme.ToolbarTextFor(active ? theme.ToolbarActive : theme.ToolbarBackground));
             using var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-            g.DrawString(pair.Key, font, text, r, fmt);
+            g.DrawString(ToolbarLabel(pair.Key), font, text, r, fmt);
         }
     }
+
+    string ToolbarLabel(ToolbarButton button) => button switch
+    {
+        ToolbarButton.Letters => Localization.T("keyboard.modeLetters", "26键"),
+        ToolbarButton.WuwaRhythm => _rhythmEnabled
+            ? Localization.T("keyboard.modeRhythm", "音游模式")
+            : Localization.T("keyboard.modeWuwa", "鸣潮专属"),
+        ToolbarButton.Controller => Localization.T("keyboard.modeController", "手柄"),
+        _ => "×"
+    };
 
     void DrawPlate(Graphics g, float s, int logicalHeight, KeyboardTheme theme)
     {
@@ -703,7 +715,13 @@ public sealed class KeyboardWindow : Form
             using var path = PetComposer.Rounded(r, radius);
             g.DrawPath(glow, path);
         }
-        string label = key switch { "MOUSE_L" => "左键", "MOUSE_R" => "右键", "SPACE" => "空格", _ => key };
+        string label = key switch
+        {
+            "MOUSE_L" => Localization.T("keyboard.mouseLeft", "左键"),
+            "MOUSE_R" => Localization.T("keyboard.mouseRight", "右键"),
+            "SPACE" => Localization.T("keyboard.space", "空格"),
+            _ => key
+        };
         float fs = rhythm
             ? (_rhythmKeys.Length >= 6 ? 16f : _rhythmKeys.Length == 5 ? 18f : 22f)
             : wuwa ? 14f : (key.StartsWith("MOUSE") || key == "SPACE") ? 9f : 9f;
@@ -754,7 +772,7 @@ public sealed class KeyboardWindow : Form
             using var font = new Font("Microsoft YaHei UI", 11f * s, FontStyle.Bold, GraphicsUnit.Pixel);
             using var brush = new SolidBrush(theme.PadText);
             using var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-            g.DrawString("未连接手柄（XInput）", font, brush, board, fmt);
+            g.DrawString(Localization.T("keyboard.noController", "未连接手柄（XInput）"), font, brush, board, fmt);
             return;
         }
 
@@ -1019,16 +1037,23 @@ public sealed class KeyboardWindow : Form
         foreach (var pair in _buttons)
         {
             if (!pair.Value.Contains(p)) continue;
-            if (pair.Key == "×") CloseRequested?.Invoke();
+            if (pair.Key == ToolbarButton.Close) CloseRequested?.Invoke();
             else ModeRequested?.Invoke(pair.Key switch
             {
-                "26键" => Mode.Letters,
-                "鸣潮专属" => Mode.Wuwa,
-                "音游模式" => Mode.Rhythm,
+                ToolbarButton.Letters => Mode.Letters,
+                ToolbarButton.WuwaRhythm => _rhythmEnabled ? Mode.Rhythm : Mode.Wuwa,
                 _ => Mode.Controller
             });
             return;
         }
+    }
+
+    /// <summary>界面语言切换后重建工具栏按钮与键帽文字；隐藏状态无需处理。</summary>
+    public void RefreshLocale()
+    {
+        if (_mode == Mode.Hidden || !IsHandleCreated) return;
+        BuildLayout(_mode);
+        Render();
     }
 
     protected override void OnClosed(EventArgs e)

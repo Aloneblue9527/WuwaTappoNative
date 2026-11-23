@@ -72,6 +72,8 @@ public sealed class App : ApplicationContext
     public App()
     {
         Cfg = ConfigStore.Load();
+        // 原生托盘/右键菜单/键盘文案跟随界面语言；字典缺失时自动回退中文。
+        Localization.SetLocale(Cfg.Locale);
         // 先迁移/加载独立状态文件，再保存 config.json 以移除旧的状态字段。
         StateStore.Load(Cfg);
         // 旧版主题图片放在 Root\theme；新版统一放到 cache\theme，先搬目录再迁移 data URL。
@@ -158,7 +160,9 @@ public sealed class App : ApplicationContext
             {
                 Panel?.Push("toast", new
                 {
-                    text = down ? "联机服务暂不可用，正在自动重试…" : "联机服务已恢复",
+                    text = down
+                        ? Localization.T("app.service.down", "联机服务暂不可用，正在自动重试…")
+                        : Localization.T("app.service.up", "联机服务已恢复"),
                     kind = down ? "err" : "ok",
                 });
             }
@@ -253,7 +257,7 @@ public sealed class App : ApplicationContext
     {
         try
         {
-            await Catalog.LoadAsync(Auth.Api, msg => Log.Write("目录：" + msg));
+            await Catalog.LoadAsync(Auth.Api, msg => Log.Write("目录：" + msg), Cfg.Locale);
             Pet.BeginInvoke(new Action(() => { Pet.ReloadAppearance(); Pet.RefreshMembers(); }));
             if (Auth.CanUseOnline)
             {
@@ -269,6 +273,21 @@ public sealed class App : ApplicationContext
             PushRoom();
         }
         catch (Exception ex) { Log.Write("刷新失败 " + ex.Message); }
+    }
+
+    /// <summary>界面语言切换后重载对应语言的图鉴/素材目录，不影响当前房间。</summary>
+    public async Task ReloadCatalogAsync()
+    {
+        try
+        {
+            await Catalog.LoadAsync(Auth.Api, msg => Log.Write("目录：" + msg), Cfg.Locale);
+            Pet.BeginInvoke(new Action(() => { Pet.ReloadAppearance(); Pet.RefreshMembers(); }));
+            try { Panel?.PushBoot(); } catch { }
+        }
+        catch (Exception ex)
+        {
+            Log.Write("切换语言后加载目录失败：" + ex.Message);
+        }
     }
 
     /// <summary>人数多场景的压测入口：--stress N [--stress-hz H]
@@ -519,7 +538,7 @@ public sealed class App : ApplicationContext
 
         try
         {
-            await Catalog.LoadAsync(Auth.Api, msg => Log.Write("目录：" + msg));
+            await Catalog.LoadAsync(Auth.Api, msg => Log.Write("目录：" + msg), Cfg.Locale);
             Pet.BeginInvoke(new Action(() => { Pet.ReloadAppearance(); Pet.RefreshMembers(); }));
         }
         catch (Exception ex)
@@ -535,7 +554,14 @@ public sealed class App : ApplicationContext
                 {
                     Panel.PushBoot();
                     if (announce)
-                        Panel.Push("toast", new { text = $"已切换至{(region == "global" ? "国际服" : "国服")}，请重新登录", kind = "ok" });
+                        Panel.Push("toast", new
+                        {
+                            text = Localization.F("app.switchRegion", "已切换至{0}，请重新登录",
+                                region == "global"
+                                    ? Localization.T("app.region.global", "国际服")
+                                    : Localization.T("app.region.cn", "国服")),
+                            kind = "ok",
+                        });
                 }));
             }
         }
@@ -804,8 +830,8 @@ public sealed class App : ApplicationContext
         catch (Exception ex)
         {
             Log.Write("开宝箱失败 " + place + "：" + ex.Message);
-            Pet.Notify("开宝箱失败：" + ex.Message);
-            Toast("开宝箱失败：" + ex.Message, "err");
+            Pet.Notify(Localization.F("app.chest.failed", "开宝箱失败：{0}", ex.Message));
+            Toast(Localization.F("app.chest.failed", "开宝箱失败：{0}", ex.Message), "err");
         }
     }
 
@@ -897,9 +923,12 @@ public sealed class App : ApplicationContext
             {
                 if (auto)
                 {
-                    string label = place == "left" ? "左" : "右";
-                    Toast("自动领取了" + label + "侧宝箱");
-                    if (Cfg.NotifyChestClaimed) Pet.Notify("自动领取了" + label + "侧宝箱");
+                    string label = place == "left"
+                        ? Localization.T("app.chest.left", "左")
+                        : Localization.T("app.chest.right", "右");
+                    string text = Localization.F("app.chest.auto", "自动领取了{0}侧宝箱", label);
+                    Toast(text);
+                    if (Cfg.NotifyChestClaimed) Pet.Notify(text);
                 }
             }
             catch (Exception ex) { Log.Write("宝箱提示失败 " + ex.Message); }
@@ -930,10 +959,10 @@ public sealed class App : ApplicationContext
 
     async Task BootAsync()
     {
-        Catalog.LoadOffline();
+        Catalog.LoadOffline(Cfg.Locale);
         try
         {
-            await Catalog.LoadAsync(Auth.Api, msg => Log.Write("目录：" + msg));
+            await Catalog.LoadAsync(Auth.Api, msg => Log.Write("目录：" + msg), Cfg.Locale);
         }
         catch (Exception ex) { Log.Write("目录加载异常 " + ex); }
 
@@ -1873,9 +1902,9 @@ public sealed class App : ApplicationContext
             if (!manual)
             {
                 if (string.IsNullOrEmpty(errorMessage))
-                    Toast($"自动升阶合成完成：共完成 {results.Count} 次合成，获得了【{lastName}】等");
+                    Toast(Localization.F("app.synth.complete", "自动升阶合成完成：共完成 {0} 次合成，获得了【{1}】等", results.Count, lastName));
                 else
-                    Toast($"自动升阶部分完成（{results.Count} 次）：{errorMessage}", "err");
+                    Toast(Localization.F("app.synth.partial", "自动升阶部分完成（{0} 次）：{1}", results.Count, errorMessage), "err");
             }
         }
         else if (processed > 0 && !manual)

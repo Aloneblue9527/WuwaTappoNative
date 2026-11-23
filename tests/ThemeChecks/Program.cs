@@ -467,14 +467,18 @@ internal static class Program
     static void CheckKeyboardMenuModes()
     {
         string pet = ReadRepoSource("src", "Pet", "PetWindow.cs");
-        Assert(pet.Contains("(\"wuwa\", \"鸣潮专属\"), (\"rhythm\", \"音游模式\")", StringComparison.Ordinal),
-            "Desktop keyboard context menu must keep both 鸣潮专属 and 音游模式 entries.");
+        Assert(pet.Contains("(\"wuwa\", Localization.T(\"tray.keyboardWuwa\"", StringComparison.Ordinal) &&
+               pet.Contains("(\"rhythm\", Localization.T(\"tray.keyboardRhythm\"", StringComparison.Ordinal),
+            "Desktop keyboard context menu must keep both Wuthering Waves and rhythm mode entries (localized labels).");
         Assert(!pet.Contains("subItem.Visible = !_cfg.RhythmMode", StringComparison.Ordinal) &&
                !pet.Contains("subItem.Visible = _cfg.RhythmMode", StringComparison.Ordinal),
-            "Desktop keyboard menu must not hide 鸣潮专属/音游模式 based on RhythmMode.");
+            "Desktop keyboard menu must not hide Wuthering Waves/rhythm entries based on RhythmMode.");
         Assert(pet.Contains("if (k == \"wuwa\") _cfg.RhythmMode = false;", StringComparison.Ordinal) &&
                pet.Contains("else if (k == \"rhythm\") _cfg.RhythmMode = true;", StringComparison.Ordinal),
-            "Selecting 鸣潮专属/音游模式 from the menu must update RhythmMode as well as KeyboardMode.");
+            "Selecting Wuthering Waves/rhythm mode from the menu must update RhythmMode as well as KeyboardMode.");
+        Assert(!pet.Contains("mi.Text != \"桌面键盘\"", StringComparison.Ordinal) &&
+               pet.Contains("subItem.Tag as string", StringComparison.Ordinal),
+            "Keyboard menu checks must use stable Tag ids, not translated menu text.");
         Console.WriteLine("PASS: desktop keyboard menu keeps both 鸣潮专属 and 音游模式 entries.");
     }
 
@@ -2627,6 +2631,12 @@ internal static class Program
                 && loginWindow.Contains("WindowCloseRequested", StringComparison.Ordinal)
                 && loginWindow.Contains("webview-login-", StringComparison.Ordinal),
             "Foreign login must bridge popup OAuth messages, close popup windows and isolate each attempt profile.");
+        Assert(loginWindow.Contains("_warmPopupReady", StringComparison.Ordinal)
+                && loginWindow.Contains("e.NewWindow = _warmPopupWeb.CoreWebView2", StringComparison.Ordinal),
+            "Foreign login must hand popups to a prewarmed WebView synchronously so one-time OAuth tokens are not consumed twice.");
+        Assert(loginWindow.Contains("XRedirectHintScript", StringComparison.Ordinal)
+                && loginWindow.Contains("webLogin.xRedirectHint", StringComparison.Ordinal),
+            "Foreign login must show a retry hint on the X redirect page.");
         string web = ReadRepoSource("wwwroot", "app.js");
         Assert(web.Contains("loginWeb", StringComparison.Ordinal)
                 && web.Contains("login.foreign.start", StringComparison.Ordinal),
@@ -2655,6 +2665,25 @@ internal static class Program
         string config = ReadRepoSource("src", "Core", "Config.cs");
         Assert(config.Contains("public string Locale", StringComparison.Ordinal),
             "Config must persist the selected locale.");
+        string catalog = ReadRepoSource("src", "Assets", "Catalog.cs");
+        Assert(catalog.Contains("GlobalAssetsHost", StringComparison.Ordinal)
+                && catalog.Contains("AcceptLanguageFor", StringComparison.Ordinal)
+                && catalog.Contains("appearance_asset_", StringComparison.Ordinal)
+                && catalog.Contains("DictionaryKey", StringComparison.Ordinal),
+            "Non-Chinese catalog loading must use the global host, localized dictionaries and isolated caches.");
+        string apiClient = ReadRepoSource("src", "Net", "ApiClient.cs");
+        Assert(apiClient.Contains("acceptLanguage", StringComparison.Ordinal),
+            "ApiClient must allow a locale-specific Accept-Language for global catalog/atlas requests.");
+        string appCs = ReadRepoSource("src", "App.cs");
+        Assert(appCs.Contains("ReloadCatalogAsync", StringComparison.Ordinal)
+                && appCs.Contains("Catalog.LoadAsync(Auth.Api, msg => Log.Write(\"目录：\" + msg), Cfg.Locale)", StringComparison.Ordinal),
+            "App must reload the catalog with the current locale.");
+        Assert(panel.Contains("localeChanged", StringComparison.Ordinal)
+                && panel.Contains("_app.ReloadCatalogAsync()", StringComparison.Ordinal),
+            "Changing locale in settings must trigger a catalog reload.");
+        Assert(panel.Contains("new LoadingOverlay", StringComparison.Ordinal)
+                && panel.Contains("region.switching", StringComparison.Ordinal),
+            "Switching server region must show a native loading overlay while the WebView2 reloads.");
         string index = ReadRepoSource("wwwroot", "index.html");
         Assert(index.Contains("i18n.js", StringComparison.Ordinal)
                 && index.Contains("data-i18n=\"common.notLoggedIn\"", StringComparison.Ordinal),
