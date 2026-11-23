@@ -1,3 +1,9 @@
+<p align="center">
+  <b>简体中文</b> ·
+  <a href="README.en.md">English</a> ·
+  <a href="README.ja.md">日本語</a>
+</p>
+
 # Wuwatappo Native
 
 Wuwatappo Native 是 WuwaTappo 1.0.2 的 Windows 原生实现，使用 C# / .NET 8、WinForms 和 WebView2 编写，连接库洛官方桌宠服务；本项目不是库洛官方项目。
@@ -8,6 +14,8 @@ Wuwatappo Native 是 WuwaTappo 1.0.2 的 Windows 原生实现，使用 C# / .NET
 
 - ✅ 支持原版全部在线内容与联机
 - ✅ 支持国服与国际服（Global）切换与官方登录继承
+- ✅ 支持国际服浏览器验证登录（邮箱 / X / Google 已验证可用，其他方式未验证需自测）
+- ✅ 支持简体中文 / English / 日本語界面（英/日为预览版，部分内容仍为中文）
 - ✅ 支持国服手机号 + 短信验证码登录（库洛通行证）
 - ✅ 支持自定义所有皮肤（他人房间中仅显示你实际拥有的皮肤，但本地可设置为任意皮肤）
 - ✅ 支持发送任意表情（无视拥有状态、无视角色限制，他人可见）
@@ -92,6 +100,7 @@ Wuwatappo Native 是 WuwaTappo 1.0.2 的 Windows 原生实现，使用 C# / .NET
 2. 在面板中登录：
    - **UID + 验证码**：输入 9–10 位游戏 UID，获取并填写 6 位验证码。
    - **手机号 + 短信验证码**：国服可在登录页切换到「手机号登录」，使用库洛通行证手机号登录。
+   - **国际服浏览器验证登录**：选择国际服后，按登录页提示在浏览器中完成邮箱 / X / Google 验证；其他登录方式未验证，需要自测。
    - **继承官方程序登录状态**：打开 `设置 → 账号 → 继承官方程序登录状态`，程序会读取本机官方 WuwaTappo 的登录数据并关闭正在运行的官方客户端。
    - **导入 token**：可用 `token-extractor/` 中的独立工具读取 `kuro_infoToken`，再粘贴到设置中导入。
 3. 在 `设置 → 账号 → 服务器区服` 选择国服（CN）或国际服（Global）；切换区服会退出当前账号并要求重新登录。
@@ -176,7 +185,7 @@ Wuwatappo Native 是 WuwaTappo 1.0.2 的 Windows 原生实现，使用 C# / .NET
 
 ### 更新
 
-设置页底部的“检查更新”会读取 GitHub Releases。当前版本落后多个版本时，更新说明会按从新到旧列出这些版本的更新内容，并在设置页更新横幅内滚动显示。程序不会自动安装更新，需要从 Release 页面下载新的 Setup 或便携版。
+设置页底部的“检查更新”会读取 GitHub Releases。当前版本落后多个版本时，更新说明会按从新到旧列出这些版本的更新内容，并在设置页更新横幅内滚动显示。更新说明支持中文 / English / 日本語，只显示当前界面语言对应的内容。程序不会自动安装更新，需要从 Release 页面下载新的 Setup 或便携版。
 
 版本兼容状态页：<https://code.danieluu.top/WuwaTappoNative/>。页面和客户端都会读取同一份 `docs/compatibility.json`，用于展示当前版本是否仍在安全兼容范围内。
 
@@ -198,9 +207,9 @@ dotnet run --project tests/AnimationChecks/AnimationChecks.csproj -c Release
 
 ## 限制
 
-- 手机号登录仅支持国服；国际服请使用继承官方客户端登录或导入 token。
+- 手机号登录仅支持国服；国际服请使用浏览器验证登录（邮箱 / X / Google 已验证可用，其他方式未验证需自测）、继承官方客户端登录或导入 token。
 - 国际服通行证账号即使没有绑定游戏角色，也可以换取账号级 token 登录；部分依赖角色/玩家信息的功能可能不可用。
-- 官方客户端使用 App-Bound Encryption（v20）时无法解密其 cookie，只能改用 UID 验证码或手机号登录。
+- 官方客户端使用 App-Bound Encryption（v20）时无法解密其 cookie，可改用 UID 验证码、手机号登录或国际服浏览器验证登录。
 - 普通权限进程无法接收管理员前台窗口的 Raw Input；需要该场景时请开启管理员权限启动。
 - 联机、开宝箱和账号信息依赖库洛服务器；网络不可达或服务器不可用时相关功能不可用。
 - 仅支持 Windows 10/11 x64。
@@ -239,14 +248,14 @@ dotnet run --project tests/SqliteChecks/SqliteChecks.csproj -c Release
 需要 PowerShell 7 和 Inno Setup 6.7 或更高版本。
 
 ```powershell
-pwsh -File .\installer\build.ps1 -Version 0.3.5
+pwsh -File .\installer\build.ps1 -Version 0.3.6
 ```
 
 输出：
 
 ```text
-dist/WuwatappoNative-0.3.5-Setup.exe
-dist/WuwatappoNative-0.3.5-portable.zip
+dist/WuwatappoNative-0.3.6-Setup.exe
+dist/WuwatappoNative-0.3.6-portable.zip
 dist/WuwatappoTokenExtractor-1.1.2-x64.zip
 ```
 

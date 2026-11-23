@@ -4660,7 +4660,7 @@
       let m;
       if ((m = line.match(/^#{1,4}\s+(.*)$/))) {
         // 下载说明由横幅底部统一提供，多个版本拼接时不要重复整段。
-        if (/下载说明|download/i.test(m[1])) { skipDownload = true; closeList(); continue; }
+        if (/下载说明|ダウンロード|download/i.test(m[1])) { skipDownload = true; closeList(); continue; }
         skipDownload = false;
         closeList();
         out.push(`<div class="update-h">${inline(m[1])}</div>`);
@@ -5053,6 +5053,14 @@
     </section>`;
   }
 
+  /** 更新横幅的日期跟随当前界面语言，不要固定使用中文格式。 */
+  function updateDateLocale() {
+    const raw = String(window.I18N?.locale || state.boot?.settings?.locale || 'zh').toLowerCase();
+    if (raw.startsWith('en')) return 'en-US';
+    if (raw.startsWith('ja') || raw.startsWith('jp')) return 'ja-JP';
+    return 'zh-CN';
+  }
+
   function formatUpdateBytes(value) {
     const bytes = Number(value) || 0;
     if (bytes >= 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
@@ -5093,7 +5101,7 @@
     const displayVersion = u.displayVersion || u.DisplayVersion || tag;
     const body = u.body || u.Body || '';
     const dateValue = u.publishedAt || u.PublishedAt;
-    const date = dateValue ? new Date(dateValue).toLocaleDateString('zh-CN') : '';
+    const date = dateValue ? new Date(dateValue).toLocaleDateString(updateDateLocale()) : '';
     const entries = Array.isArray(u.entries) ? u.entries : (Array.isArray(u.Entries) ? u.Entries : []);
     const multi = entries.length > 1;
     const installer = u.installer || u.Installer;
@@ -5102,18 +5110,20 @@
     const phase = download?.phase || '';
     const running = ['starting', 'downloading', 'verifying', 'fallback'].includes(phase);
     const canInstall = phase === 'done' && !!download?.path;
+    const emptyNotes = `<p class="update-empty">${tr('update.noNotes', '此版本暂无当前语言的更新说明')}</p>`;
     const notes = multi
       ? entries.map(e => {
           const etag = e.tag || e.Tag || '';
           const edisplay = e.displayVersion || e.DisplayVersion || etag;
           const edate = e.publishedAt || e.PublishedAt;
-          const edateText = edate ? new Date(edate).toLocaleDateString('zh-CN') : '';
+          const edateText = edate ? new Date(edate).toLocaleDateString(updateDateLocale()) : '';
+          const entryNotes = releaseNotesHtml(e.body || e.Body || '') || emptyNotes;
           return `<section class="update-entry">
             <div class="update-entry-head"><span>${esc(edisplay)}</span>${edateText ? `<span class="update-entry-date">${esc(edateText)}</span>` : ''}</div>
-            ${releaseNotesHtml(e.body || e.Body || '')}
+            ${entryNotes}
           </section>`;
         }).join('')
-      : releaseNotesHtml(body);
+      : (releaseNotesHtml(body) || emptyNotes);
     const status = download?.message || (installer
       ? tr('update.installerSize', '安装包 {size}；下载后会自动校验 SHA-256', { size: formatUpdateBytes(installer.size) })
       : tr('update.noInstaller', '此版本没有可自动下载的安装包，请手动前往 Release 下载'));

@@ -41,7 +41,7 @@ public sealed class AnnouncementPayload
 }
 
 /// <summary>
-/// 只读公告接口。请求不带 token/Cookie/用户信息/查询参数；阅读状态只保存在本地 state.json。
+/// 只读公告接口。请求不带 token/Cookie/用户信息，仅附加界面语言参数 lang；阅读状态只保存在本地 state.json。
 /// 公告失败只写日志，不影响登录、版本提示或任何单机功能。
 /// </summary>
 public sealed class AnnouncementService
@@ -62,6 +62,7 @@ public sealed class AnnouncementService
     // 服务器当前下发的全部有效公告（含已读），只存在于内存；不保存正文，也不是历史归档。
     List<AnnouncementItem> _board = new();
     string _etag = "";
+    string _lastLocale = "";
     int _busy;
 
     public AnnouncementService(Settings cfg)
@@ -106,9 +107,19 @@ public sealed class AnnouncementService
             string etag;
             lock (_gate) etag = _etag;
 
+            string locale = Localization.Normalize(_cfg.Locale);
+            bool localeChanged = !string.Equals(_lastLocale, locale, StringComparison.Ordinal);
+            if (localeChanged)
+            {
+                _lastLocale = locale;
+                lock (_gate) _etag = "";
+                force = true;
+            }
+
             string url = string.IsNullOrWhiteSpace(_cfg.AnnouncementApiUrl)
                 ? DefaultApiUrl
                 : _cfg.AnnouncementApiUrl.Trim();
+            url = WithLanguage(url, locale);
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
             req.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
             if (!force && !string.IsNullOrEmpty(etag))
@@ -144,6 +155,25 @@ public sealed class AnnouncementService
         {
             Interlocked.Exchange(ref _busy, 0);
         }
+    }
+
+    /// <summary>在公告接口地址上附加语言参数；保留调用方已有的查询参数，重复调用不会叠加 lang。</summary>
+    static string WithLanguage(string url, string locale)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return url;
+        var query = new List<string>();
+        foreach (string part in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            int split = part.IndexOf('=');
+            string key = split > 0 ? part[..split] : part;
+            string decoded;
+            try { decoded = Uri.UnescapeDataString(key); }
+            catch { decoded = key; }
+            if (string.Equals(decoded, "lang", StringComparison.OrdinalIgnoreCase)) continue;
+            query.Add(part);
+        }
+        query.Add("lang=" + Uri.EscapeDataString(locale));
+        return new UriBuilder(uri) { Query = string.Join("&", query) }.Uri.ToString();
     }
 
     /// <summary>用户关闭/确认/点击操作后标记已读，返回剩余未读公告。</summary>

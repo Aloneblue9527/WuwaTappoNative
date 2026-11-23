@@ -123,6 +123,7 @@ jobs:
           $curated = Join-Path (Get-Location) ".github/release-notes/$version.md"
           if (Test-Path -LiteralPath $curated) {
             # 版本说明文件优先，便于合并跨过未发布版本（例如 0.0.48）的改动。
+            # 多语言格式见 .github/release-notes/README.md（<!-- lang:zh/en/ja --> 分段）。
             $body = Get-Content -LiteralPath $curated -Raw -Encoding utf8
           } else {
             $template = @'

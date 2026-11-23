@@ -392,7 +392,19 @@ public sealed class PanelWindow : Form
         string current = CurrentDisplayVersion();
         bool includePrerelease = EffectiveUpdateChannel() == "beta";
         var info = await UpdateChecker.CheckAsync(current, false,
-            _app.Cfg.UpdateUseProxy ? _app.Cfg.UpdateHttpProxy : null, includePrerelease);
+            _app.Cfg.UpdateUseProxy ? _app.Cfg.UpdateHttpProxy : null, includePrerelease, _app.Cfg.Locale);
+        if (info == null) return;
+        _updateInfo = info;
+        Push("update", info);
+    }
+
+    /// <summary>切换界面语言后只重新选取更新日志语言；原始 Release 缓存仍在，不会额外联网。</summary>
+    async Task RefreshUpdateLocaleAsync()
+    {
+        string current = CurrentDisplayVersion();
+        bool includePrerelease = EffectiveUpdateChannel() == "beta";
+        var info = await UpdateChecker.CheckAsync(current, false,
+            _app.Cfg.UpdateUseProxy ? _app.Cfg.UpdateHttpProxy : null, includePrerelease, _app.Cfg.Locale);
         if (info == null) return;
         _updateInfo = info;
         Push("update", info);
@@ -1767,6 +1779,8 @@ public sealed class PanelWindow : Form
                     _app.Auth.ApplyLocale(cfg.Locale);
                     Localization.SetLocale(cfg.Locale);
                     _ = _app.ReloadCatalogAsync();
+                    _ = _app.RefreshAnnouncementsAsync(force: true);
+                    _ = RefreshUpdateLocaleAsync();
                 }
                 _app.ApplyAutoSettings();
                 _app.Pet.BeginInvoke(new Action(() =>
@@ -1934,7 +1948,7 @@ public sealed class PanelWindow : Form
                 string current = CurrentDisplayVersion();
                 bool includePrerelease = EffectiveUpdateChannel() == "beta";
                 var info = await UpdateChecker.CheckAsync(current, true,
-                    _app.Cfg.UpdateUseProxy ? _app.Cfg.UpdateHttpProxy : null, includePrerelease);
+                    _app.Cfg.UpdateUseProxy ? _app.Cfg.UpdateHttpProxy : null, includePrerelease, _app.Cfg.Locale);
                 _updateInfo = info;
                 Push("update", info);
                 return new { available = info != null, update = info, currentVersion = current };

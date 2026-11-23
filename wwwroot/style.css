@@ -883,6 +883,7 @@ body.panel-maximized #maxBtn .icon-restore { display: block; }
 .update-dismiss:hover { background: var(--theme-line-soft); color: var(--ink-strong); }
 .update-notes { max-height: 230px; overflow: auto; margin: 10px 0 8px; padding: 8px 12px; background: color-mix(in srgb, var(--cream-4) 70%, transparent); border: 1px solid color-mix(in srgb, var(--theme-accent) 45%, transparent); border-radius: 10px; font-size: 13px; line-height: 1.65; color: var(--ink); user-select: text; }
 .update-notes p { margin: 3px 0; }
+.update-notes .update-empty { color: var(--ink-dim); }
 .update-notes ul { margin: 4px 0 6px; padding-left: 20px; }
 .update-notes li { margin: 2px 0; }
 .update-notes code { background: var(--theme-line-soft); padding: 1px 4px; border-radius: 4px; font-size: 12px; }

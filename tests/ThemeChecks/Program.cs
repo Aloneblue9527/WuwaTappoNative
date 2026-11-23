@@ -43,6 +43,7 @@ internal static class Program
             CheckOfficialBaseline();
             CheckCompatibilityGate();
             CheckUpdateVersionOrdering();
+            CheckReleaseNotesLocalization();
             CheckAuthStateBasics();
             CheckBusinessErrorMessages();
             CheckAnnouncementBoard();
@@ -1680,6 +1681,48 @@ internal static class Program
         Console.WriteLine("PASS: beta/stable update version ordering and channel detection.");
     }
 
+    static void CheckReleaseNotesLocalization()
+    {
+        string notes = string.Join("\n", new[]
+        {
+            "<!-- lang:zh -->",
+            "## 更新内容",
+            "- 中文内容",
+            "<!-- /lang:zh -->",
+            "<!-- lang:en -->",
+            "## What's new",
+            "- English content",
+            "<!-- /lang:en -->",
+            "<!-- lang:ja -->",
+            "## 更新内容",
+            "- 日本語の内容",
+            "<!-- /lang:ja -->",
+        });
+
+        string zh = ReleaseNotesLocalizer.Select(notes, "zh");
+        string en = ReleaseNotesLocalizer.Select(notes, "en-US");
+        string ja = ReleaseNotesLocalizer.Select(notes, "ja-JP");
+        Assert(zh.Contains("中文内容", StringComparison.Ordinal) &&
+               !zh.Contains("English content", StringComparison.Ordinal) &&
+               !zh.Contains("日本語の内容", StringComparison.Ordinal),
+            "Chinese users must only receive the Chinese release-note section.");
+        Assert(en.Contains("English content", StringComparison.Ordinal) &&
+               !en.Contains("中文内容", StringComparison.Ordinal) &&
+               !en.Contains("日本語の内容", StringComparison.Ordinal),
+            "English users must only receive the English release-note section.");
+        Assert(ja.Contains("日本語の内容", StringComparison.Ordinal) &&
+               !ja.Contains("中文内容", StringComparison.Ordinal) &&
+               !ja.Contains("English content", StringComparison.Ordinal),
+            "Japanese users must only receive the Japanese release-note section.");
+        Assert(ReleaseNotesLocalizer.Select("## 旧格式\n- 旧内容", "zh").Contains("旧内容", StringComparison.Ordinal),
+            "Legacy Chinese release notes must remain readable in the Chinese UI.");
+        Assert(ReleaseNotesLocalizer.Select("## 旧格式\n- 旧内容", "en") == "",
+            "Legacy Chinese-only release notes must not leak into English UI.");
+        Assert(ReleaseNotesLocalizer.Select("<!-- lang:zh -->\n中文兜底\n<!-- /lang:zh -->", "en") == "",
+            "A missing language section must stay empty instead of showing another language.");
+        Console.WriteLine("PASS: multilingual release notes select only the configured language.");
+    }
+
     /// <summary>
     /// 登录态基础契约：没有 token 是未登录；有 token 但尚未确认时不能放行账号请求；
     /// ApiClient 门禁必须在落网之前拒绝，避免运行中 401 继续刷账号接口。
@@ -2679,8 +2722,14 @@ internal static class Program
                 && appCs.Contains("Catalog.LoadAsync(Auth.Api, msg => Log.Write(\"目录：\" + msg), Cfg.Locale)", StringComparison.Ordinal),
             "App must reload the catalog with the current locale.");
         Assert(panel.Contains("localeChanged", StringComparison.Ordinal)
-                && panel.Contains("_app.ReloadCatalogAsync()", StringComparison.Ordinal),
-            "Changing locale in settings must trigger a catalog reload.");
+                && panel.Contains("_app.ReloadCatalogAsync()", StringComparison.Ordinal)
+                && panel.Contains("RefreshAnnouncementsAsync(force: true)", StringComparison.Ordinal),
+            "Changing locale in settings must trigger catalog and announcement reloads.");
+        string announcementService = ReadRepoSource("src", "Core", "AnnouncementService.cs");
+        Assert(announcementService.Contains("WithLanguage", StringComparison.Ordinal)
+                && announcementService.Contains("lang=", StringComparison.Ordinal)
+                && announcementService.Contains("_lastLocale", StringComparison.Ordinal),
+            "Announcement requests must carry the configured language and invalidate ETag on locale change.");
         Assert(panel.Contains("new LoadingOverlay", StringComparison.Ordinal)
                 && panel.Contains("region.switching", StringComparison.Ordinal),
             "Switching server region must show a native loading overlay while the WebView2 reloads.");

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -116,6 +117,8 @@ public static class UpdateChecker
     const string ReleasesPage = "https://github.com/DanielToyama/WuwaTappoNative/releases/latest";
     const int MaxEntries = 20;
     static ReleaseInfo _cached;
+    static ReleaseInfo _cachedRaw;
+    static string _cachedLocale = "";
     static DateTimeOffset _cachedUntil;
     static bool _cachedPrerelease;
 
@@ -128,22 +131,34 @@ public static class UpdateChecker
     /// <summary>
     /// 检查更新。includePrerelease 为 true 时同时接收正式版和测试版；
     /// 为 false 时只接收正式版。为空时按当前构建类型自动选择。
+    /// locale 决定 Release 正文使用哪种语言；原始多语言正文会缓存，切换语言无需重新联网。
     /// </summary>
     public static async Task<ReleaseInfo> CheckAsync(
         string currentVersion,
         bool force = false,
         string httpProxy = null,
-        bool? includePrerelease = null)
+        bool? includePrerelease = null,
+        string locale = null)
     {
         if (!UpdateVersion.TryParse(currentVersion, out var current))
         {
             Log.Write("检查更新失败：无法解析当前版本 " + currentVersion);
             _cachedUntil = DateTimeOffset.UtcNow.AddMinutes(10);
+            _cachedRaw = null;
             return _cached = null;
         }
+        string normalizedLocale = Localization.Normalize(locale);
         bool betaChannel = includePrerelease ?? current.IsBeta;
         if (!force && _cachedPrerelease == betaChannel && DateTimeOffset.UtcNow < _cachedUntil)
+        {
+            if (_cachedRaw == null) return _cached = null;
+            if (!string.Equals(_cachedLocale, normalizedLocale, StringComparison.Ordinal))
+            {
+                _cachedLocale = normalizedLocale;
+                _cached = LocalizeReleaseInfo(_cachedRaw, normalizedLocale);
+            }
             return _cached;
+        }
         _cachedPrerelease = betaChannel;
         try
         {
@@ -154,6 +169,7 @@ public static class UpdateChecker
             if (JsonNode.Parse(json) is not JsonArray releases)
             {
                 _cachedUntil = DateTimeOffset.UtcNow.AddMinutes(10);
+                _cachedRaw = null;
                 return _cached = null;
             }
 
@@ -184,6 +200,7 @@ public static class UpdateChecker
             if (newer.Count == 0)
             {
                 _cachedUntil = DateTimeOffset.UtcNow.AddMinutes(30);
+                _cachedRaw = null;
                 return _cached = null;
             }
 
@@ -191,7 +208,7 @@ public static class UpdateChecker
             newer.Sort((a, b) => b.Version.CompareTo(a.Version));
             if (newer.Count > MaxEntries) newer.RemoveRange(MaxEntries, newer.Count - MaxEntries);
             var latest = newer[0].Entry;
-            var info = new ReleaseInfo
+            var rawInfo = new ReleaseInfo
             {
                 Tag = latest.Tag,
                 Name = latest.Name,
@@ -202,15 +219,45 @@ public static class UpdateChecker
                 Installer = latest.Installer,
                 Entries = newer.Select(x => x.Entry).ToArray(),
             };
+            _cachedRaw = rawInfo;
+            _cachedLocale = normalizedLocale;
             _cachedUntil = DateTimeOffset.UtcNow.AddMinutes(30);
-            return _cached = info;
+            return _cached = LocalizeReleaseInfo(rawInfo, normalizedLocale);
         }
         catch (Exception ex)
         {
             Log.Write("检查更新失败 " + ex.Message);
             _cachedUntil = DateTimeOffset.UtcNow.AddMinutes(10);
+            _cachedRaw = null;
             return _cached = null;
         }
+    }
+
+    /// <summary>按当前界面语言复制一份发布信息；原始的多语言日志仍留在缓存里，切换语言时无需重新联网。</summary>
+    static ReleaseInfo LocalizeReleaseInfo(ReleaseInfo source, string locale)
+    {
+        if (source == null) return null;
+        var entries = source.Entries ?? Array.Empty<ReleaseEntry>();
+        return new ReleaseInfo
+        {
+            Tag = source.Tag,
+            Name = source.Name,
+            DisplayVersion = source.DisplayVersion,
+            Body = ReleaseNotesLocalizer.Select(source.Body, locale),
+            Url = source.Url,
+            PublishedAt = source.PublishedAt,
+            Installer = source.Installer,
+            Entries = entries.Select(entry => new ReleaseEntry
+            {
+                Tag = entry.Tag,
+                Name = entry.Name,
+                DisplayVersion = entry.DisplayVersion,
+                Body = ReleaseNotesLocalizer.Select(entry.Body, locale),
+                Url = entry.Url,
+                PublishedAt = entry.PublishedAt,
+                Installer = entry.Installer,
+            }).ToArray(),
+        };
     }
 
     static bool TryParseReleaseVersion(string tag, string name, List<ReleaseAsset> assets, bool prerelease, out UpdateVersion version)
@@ -281,5 +328,64 @@ public static class UpdateChecker
     static bool ReadBool(JsonNode node)
     {
         try { return node?.GetValue<bool>() ?? false; } catch { return false; }
+    }
+}
+
+/// <summary>
+/// 从 Release 正文中选取当前语言段落。维护者在 release-notes/*.md 里用
+/// &lt;!-- lang:zh --&gt; ... &lt;!-- /lang:zh --&gt; 包裹各语言版本；
+/// 没有标记的旧 Release 视为中文说明，只对中文界面返回；缺失当前语言时返回空，
+/// 由前端显示本地化的“暂无当前语言说明”占位，避免把其他语言内容展示给用户。
+/// </summary>
+internal static class ReleaseNotesLocalizer
+{
+    static readonly Regex OpenMarker = new(
+        @"^\s*<!--\s*lang\s*:\s*(zh|en|ja)\s*-->\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    static readonly Regex CloseMarker = new(
+        @"^\s*<!--\s*/\s*lang\s*:\s*(zh|en|ja)\s*-->\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    public static string Select(string markdown, string locale)
+    {
+        string text = (markdown ?? "").Replace("\r\n", "\n").Replace('\r', '\n').Trim();
+        if (text.Length == 0) return "";
+
+        var sections = new Dictionary<string, StringBuilder>(StringComparer.Ordinal);
+        string current = null;
+        bool hasMarkers = false;
+        foreach (string line in text.Split('\n'))
+        {
+            Match open = OpenMarker.Match(line);
+            if (open.Success)
+            {
+                hasMarkers = true;
+                current = open.Groups[1].Value.ToLowerInvariant();
+                if (!sections.ContainsKey(current))
+                    sections[current] = new StringBuilder();
+                continue;
+            }
+
+            Match close = CloseMarker.Match(line);
+            if (close.Success)
+            {
+                hasMarkers = true;
+                current = null;
+                continue;
+            }
+
+            if (current != null) sections[current].AppendLine(line);
+        }
+
+        // 旧格式没有语言标记：历史 Release 只有中文，不能把它展示给英/日界面。
+        string wanted = Localization.Normalize(locale);
+        if (!hasMarkers) return wanted == "zh" ? text : "";
+
+        if (sections.TryGetValue(wanted, out StringBuilder section) &&
+            !string.IsNullOrWhiteSpace(section.ToString()))
+            return section.ToString().Trim();
+
+        // 当前语言没有对应段落时返回空，前端会显示本地化占位，不混入其他语言。
+        return "";
     }
 }
