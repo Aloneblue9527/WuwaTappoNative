@@ -5,6 +5,15 @@
 - 项目主页（含版本状态）：<https://code.danieluu.top/WuwaTappoNative/>
 - 状态 JSON：<https://code.danieluu.top/WuwaTappoNative/compatibility.json>
 
+## 页面语言
+
+`index.html` 内置中文 / English / 日本語 三种界面：
+
+- 首次访问按浏览器语言自动选择；右上角可手动切换。
+- 手动选择后保存到 `localStorage`，也可以通过 `?lang=zh|en|ja` 指定并分享。
+- 页面文案、状态说明、日期格式和页面的 SEO metadata 会随语言切换。
+- 翻译文案在 `i18n.js`；修改页面文案时请同步更新三套字典。
+
 ## 更新状态
 
 直接编辑 `compatibility.json` 并提交到 `main`，GitHub Pages 会自动更新；不需要发布新的 Native 版本。
@@ -17,6 +26,7 @@
 |---|---|
 | `status` | `safe` / `warning` / `unsafe` / `maintenance` |
 | `message` | 状态页和客户端显示的说明 |
+| `messageEn` / `messageJa` | 状态页英文/日文说明；缺失时回退 `message` |
 | `messageLocked` | 为 `true` 时，自动同步脚本不覆盖手动维护的 `message` |
 | `official.cn.minOtaLocked` / `official.global.minOtaLocked` | 为 `true` 时，自动同步脚本不覆盖该区服的 `minOta` |
 | `native.latest` | 当前已发布的最新 Native 版本，每次发版更新 |

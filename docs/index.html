@@ -3,10 +3,63 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Wuwatappo Native：WuwaTappo 的 Windows 原生实现，支持国服/国际服联机、官方登录继承、桌宠互动和 OBS 绿幕采集。" />
+  <meta name="description" content="Wuwatappo Native：WuwaTappo 的 Windows 原生实现，支持国服/国际服联机、官方登录继承、桌宠互动和 OBS 绿幕采集，提供中文 / English / 日本語 界面。" />
+  <meta name="keywords" content="WuwaTappo, Wuwatappo Native, 鸣潮桌宠, 鸣潮 WuwaTappo, 鸣潮辅助工具, 国际服桌宠, 国服桌宠, 鸣潮联机, Wuthering Waves desktop pet, Wuthering Waves companion, Wuthering Waves multiplayer, 鳴潮 デスクトップペット, 鳴潮 マルチプレイ, OBS 桌面采集, Windows 桌宠" />
+  <meta name="robots" content="index,follow" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Wuwatappo Native · Windows 原生桌宠" />
+  <meta property="og:description" content="WuwaTappo 的 Windows 原生实现，支持国服/国际服联机、官方登录继承、桌宠互动和 OBS 采集。" />
+  <meta property="og:url" content="https://code.danieluu.top/WuwaTappoNative/" />
+  <meta property="og:image" content="https://code.danieluu.top/WuwaTappoNative/assets/pet-hero-1.png" />
+  <meta property="og:locale" content="zh_CN" />
+  <meta property="og:locale:alternate" content="en_US" />
+  <meta property="og:locale:alternate" content="ja_JP" />
+  <meta name="twitter:card" content="summary_large_image" />
   <link rel="canonical" href="https://code.danieluu.top/WuwaTappoNative/" />
+  <link rel="icon" type="image/png" href="assets/pet-hero-1.png" />
+  <link rel="alternate" hreflang="zh-CN" href="https://code.danieluu.top/WuwaTappoNative/?lang=zh" />
+  <link rel="alternate" hreflang="en" href="https://code.danieluu.top/WuwaTappoNative/?lang=en" />
+  <link rel="alternate" hreflang="ja" href="https://code.danieluu.top/WuwaTappoNative/?lang=ja" />
+  <link rel="alternate" hreflang="x-default" href="https://code.danieluu.top/WuwaTappoNative/" />
   <meta name="theme-color" content="#fff8e9" />
   <title>Wuwatappo Native · Windows 原生桌宠</title>
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Wuwatappo Native",
+      "alternateName": "WuwaTappo Native",
+      "applicationCategory": "UtilitiesApplication",
+      "operatingSystem": "Windows 10, Windows 11",
+      "inLanguage": ["zh-CN", "en", "ja"],
+      "description": "WuwaTappo 的 Windows 原生实现，支持国服/国际服联机、官方登录继承、桌宠互动和 OBS 采集。",
+      "downloadUrl": "https://github.com/DanielToyama/WuwaTappoNative/releases/latest",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" }
+    }
+  </script>
+  <script>
+    (() => {
+      const key = 'wuwatappo_docs_locale_v1';
+      const normalize = value => {
+        const v = String(value || '').toLowerCase();
+        if (v.startsWith('zh')) return 'zh';
+        if (v.startsWith('ja') || v.startsWith('jp')) return 'ja';
+        if (v.startsWith('en')) return 'en';
+        return '';
+      };
+      try {
+        const params = new URLSearchParams(location.search);
+        const candidates = [params.get('lang'), localStorage.getItem(key),
+          ...(navigator.languages || [navigator.language || ''])];
+        const locale = candidates.map(normalize).find(Boolean) || 'zh';
+        window.__docsLocale = locale;
+        document.documentElement.lang = locale === 'zh' ? 'zh-CN' : locale;
+        document.documentElement.dataset.locale = locale;
+      } catch {
+        window.__docsLocale = 'zh';
+      }
+    })();
+  </script>
   <style>
     :root {
       --bg: #fff8e9;
@@ -63,6 +116,23 @@
       color: var(--bg); background: var(--ink); font-weight: 600;
     }
     .nav .nav-download:hover { background: #5f4231; color: var(--bg); }
+    .lang-switch {
+      display: flex; align-items: center; gap: 6px; flex: none;
+      color: var(--faint); font-size: 12px;
+    }
+    .lang-switch .lang-icon { font-size: 14px; line-height: 1; }
+    .lang-switch select {
+      appearance: none; -webkit-appearance: none;
+      border: 1px solid var(--line); border-radius: 999px;
+      background: var(--panel); color: var(--muted);
+      font: inherit; font-size: 12px; padding: 7px 26px 7px 10px;
+      cursor: pointer; outline: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238e7767' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 9px center;
+      transition: border-color .15s, background-color .15s;
+    }
+    .lang-switch select:hover { border-color: var(--line-strong); background-color: var(--gold-soft); }
+    .lang-switch select:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(217, 111, 134, .14); }
 
     /* ---------- hero ---------- */
     .hero {
@@ -246,6 +316,7 @@
       .topbar { height: 64px; }
       .brand-sub { display: none; }
       .nav { display: none; }
+      .lang-switch { margin-left: auto; }
       .hero { grid-template-columns: 1fr; gap: 12px; min-height: auto; padding: 48px 0 48px; }
       .hero-copy { padding: 0; }
       .hero h1 { font-size: clamp(38px, 10vw, 54px); }
@@ -283,17 +354,25 @@
 <body>
   <div class="site">
     <header class="topbar">
-      <a class="brand" href="#top" aria-label="Wuwatappo Native 首页">
+      <a class="brand" href="#top" aria-label="Wuwatappo Native 首页" data-i18n-aria="nav.home">
         <span class="brand-name">Wuwatappo Native</span>
         <span class="brand-sub">WINDOWS APP</span>
       </a>
-      <nav class="nav" aria-label="页面导航">
-        <a href="#features">功能</a>
-        <a href="#details">细节</a>
-        <a href="#status">版本状态</a>
+      <nav class="nav" aria-label="页面导航" data-i18n-aria="nav.label">
+        <a href="#features" data-i18n="nav.features">功能</a>
+        <a href="#details" data-i18n="nav.details">细节</a>
+        <a href="#status" data-i18n="nav.status">版本状态</a>
         <a href="https://github.com/DanielToyama/WuwaTappoNative" target="_blank" rel="noreferrer">GitHub</a>
-        <a class="nav-download" href="https://github.com/DanielToyama/WuwaTappoNative/releases/latest" target="_blank" rel="noreferrer">下载</a>
+        <a class="nav-download" href="https://github.com/DanielToyama/WuwaTappoNative/releases/latest" target="_blank" rel="noreferrer" data-i18n="nav.download">下载</a>
       </nav>
+      <label class="lang-switch">
+        <span class="lang-icon" aria-hidden="true">◎</span>
+        <select id="langSelect" aria-label="界面语言" data-i18n-aria="lang.label">
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+          <option value="ja">日本語</option>
+        </select>
+      </label>
     </header>
 
     <main id="top">
@@ -301,27 +380,27 @@
         <div class="hero-copy">
           <div class="hero-kicker"><span class="dot"></span> Wuwatappo Native / Windows</div>
           <h1>
-            <span class="line">更轻更快，</span>
-            <span class="line">更多自定义的</span>
-            <span class="line accent">鸣潮 WuwaTappo</span>
+            <span class="line" data-i18n="hero.title1">更轻更快，</span>
+            <span class="line" data-i18n="hero.title2">更多自定义的</span>
+            <span class="line accent" data-i18n="hero.title3">鸣潮 WuwaTappo</span>
           </h1>
-          <p class="hero-lead">
+          <p class="hero-lead" data-i18n="hero.lead">
             WuwaTappo 1.0.2 的 Windows 原生实现。使用 C# / .NET 8、WinForms 和 WebView2 编写，连接库洛官方桌宠服务。
             支持国服与国际服联机、官方登录继承、桌宠互动和主播采集。
           </p>
           <div class="hero-actions">
-            <a class="btn primary" href="https://github.com/DanielToyama/WuwaTappoNative/releases/latest" target="_blank" rel="noreferrer">下载最新版</a>
-            <a class="btn" href="https://github.com/DanielToyama/WuwaTappoNative" target="_blank" rel="noreferrer">GitHub 仓库</a>
+            <a class="btn primary" href="https://github.com/DanielToyama/WuwaTappoNative/releases/latest" target="_blank" rel="noreferrer" data-i18n="hero.download">下载最新版</a>
+            <a class="btn" href="https://github.com/DanielToyama/WuwaTappoNative" target="_blank" rel="noreferrer" data-i18n="hero.repo">GitHub 仓库</a>
           </div>
           <div class="hero-meta">
-            <span>Windows 10 / 11 x64</span>
-            <span>自包含发布</span>
-            <span>国服 / 国际服</span>
+            <span data-i18n="hero.meta.os">Windows 10 / 11 x64</span>
+            <span data-i18n="hero.meta.self">自包含发布</span>
+            <span data-i18n="hero.meta.regions">国服 / 国际服</span>
           </div>
         </div>
 
         <div class="hero-art">
-          <div class="pet-frame" role="img" aria-label="Wuwatappo Native 桌宠预览：粉色头发角色与奶油色底栏，计数为 114514">
+          <div class="pet-frame" role="img" aria-label="Wuwatappo Native 桌宠预览：粉色头发角色与奶油色底栏，计数为 114514" data-i18n-aria="hero.artAria">
             <img src="assets/pet-hero-1.png" alt="" />
             <img class="pet-pat pat-a" src="assets/pet-hero-2.png" alt="" aria-hidden="true" />
             <img class="pet-pat pat-b" src="assets/pet-hero-3.png" alt="" aria-hidden="true" />
@@ -329,23 +408,23 @@
           <span class="art-caption">CURRENT SKIN / 114514</span>
         </div>
 
-        <aside class="hero-side" aria-label="项目要点">
+        <aside class="hero-side" aria-label="项目要点" data-i18n-aria="hero.sideAria">
           <div class="side-item">
             <span class="side-label">01 / NATIVE</span>
-            <span class="side-value">原生 Windows 程序，不是网页套壳</span>
+            <span class="side-value" data-i18n="hero.side1">原生 Windows 程序，不是网页套壳</span>
           </div>
           <div class="side-item">
             <span class="side-label">02 / ONLINE</span>
-            <span class="side-value">国服与国际服联机，官方登录继承</span>
+            <span class="side-value" data-i18n="hero.side2">国服与国际服联机，官方登录继承</span>
           </div>
           <div class="side-item">
             <span class="side-label">03 / LIGHT</span>
-            <span class="side-value">12 人同屏约 80 MB 内存占用</span>
+            <span class="side-value" data-i18n="hero.side3">12 人同屏约 80 MB 内存占用</span>
           </div>
         </aside>
       </section>
 
-      <div class="tech-strip" aria-label="技术栈">
+      <div class="tech-strip" aria-label="技术栈" data-i18n-aria="tech.aria">
         <span class="tech-label">BUILT WITH</span>
         <span>C#</span>
         <span>.NET 8</span>
@@ -359,49 +438,49 @@
         <div class="section-head">
           <div>
             <div class="section-kicker">01 — FEATURES</div>
-            <h2>已经实现的功能</h2>
+            <h2 data-i18n="features.title">已经实现的功能</h2>
           </div>
-          <p>保留原版在线内容和联机体验，同时把桌宠、登录、直播采集和多人排列做成了更适合桌面长期使用的原生版本。</p>
+          <p data-i18n="features.lead">保留原版在线内容和联机体验，同时把桌宠、登录、直播采集和多人排列做成了更适合桌面长期使用的原生版本。</p>
         </div>
         <div class="feature-grid">
           <article class="feature-card">
             <div class="feature-top"><span class="feature-no">01 / ONLINE</span><span class="feature-glyph">◇</span></div>
-            <h3>联机与账号</h3>
+            <h3 data-i18n="features.c1.title">联机与账号</h3>
             <ul class="check-list">
-              <li>支持原版全部在线内容与联机</li>
-              <li>支持国服与国际服（Global）切换与官方登录继承</li>
-              <li>支持国服手机号 + 短信验证码登录（库洛通行证）</li>
-              <li>支持一键继承官方登录状态</li>
+              <li data-i18n="features.c1.i1">支持原版全部在线内容与联机</li>
+              <li data-i18n="features.c1.i2">支持国服与国际服（Global）切换与官方登录继承</li>
+              <li data-i18n="features.c1.i3">支持国服手机号 + 短信验证码登录（库洛通行证）</li>
+              <li data-i18n="features.c1.i4">支持一键继承官方登录状态</li>
             </ul>
           </article>
           <article class="feature-card">
             <div class="feature-top"><span class="feature-no">02 / LOOK</span><span class="feature-glyph">✦</span></div>
-            <h3>外观与互动</h3>
+            <h3 data-i18n="features.c2.title">外观与互动</h3>
             <ul class="check-list">
-              <li>支持自定义所有皮肤</li>
-              <li>支持发送任意表情（无视拥有状态、无视角色限制，他人可见）</li>
-              <li>支持本地微调头饰位置</li>
-              <li>支持自动领取宝箱</li>
+              <li data-i18n="features.c2.i1">支持自定义所有皮肤</li>
+              <li data-i18n="features.c2.i2">支持发送任意表情（无视拥有状态、无视角色限制，他人可见）</li>
+              <li data-i18n="features.c2.i3">支持本地微调头饰位置</li>
+              <li data-i18n="features.c2.i4">支持自动领取宝箱</li>
             </ul>
           </article>
           <article class="feature-card">
             <div class="feature-top"><span class="feature-no">03 / PLAY</span><span class="feature-glyph">⌘</span></div>
-            <h3>桌面玩法</h3>
+            <h3 data-i18n="features.c3.title">桌面玩法</h3>
             <ul class="check-list">
-              <li>支持自动表情、自动敲击和游戏模式规则</li>
-              <li>支持快捷键</li>
-              <li>支持显示当前键盘/手柄键位（含鸣潮专属键位）</li>
-              <li>音游模式支持 4K / 5K / 6K，每个模式分别保存键位</li>
-              <li>支持刷 Key 数量（一键 +10000）</li>
+              <li data-i18n="features.c3.i1">支持自动表情、自动敲击和游戏模式规则</li>
+              <li data-i18n="features.c3.i2">支持快捷键</li>
+              <li data-i18n="features.c3.i3">支持显示当前键盘/手柄键位（含鸣潮专属键位）</li>
+              <li data-i18n="features.c3.i4">音游模式支持 4K / 5K / 6K，每个模式分别保存键位</li>
+              <li data-i18n="features.c3.i5">支持刷 Key 数量（一键 +10000）</li>
             </ul>
           </article>
           <article class="feature-card">
             <div class="feature-top"><span class="feature-no">04 / MULTI</span><span class="feature-glyph">◌</span></div>
-            <h3>多人体验</h3>
+            <h3 data-i18n="features.c4.title">多人体验</h3>
             <ul class="check-list">
-              <li>支持联机角色自动避让、横向/纵向排列与重置排序</li>
-              <li>多人联机保存每一个人的位置，掉线、重进、重启软件都保持原位</li>
-              <li>支持主播模式 OBS 采集窗口，自定义背景色或透明背景</li>
+              <li data-i18n="features.c4.i1">支持联机角色自动避让、横向/纵向排列与重置排序</li>
+              <li data-i18n="features.c4.i2">多人联机保存每一个人的位置，掉线、重进、重启软件都保持原位</li>
+              <li data-i18n="features.c4.i3">支持主播模式 OBS 采集窗口，自定义背景色或透明背景</li>
             </ul>
           </article>
         </div>
@@ -412,25 +491,25 @@
           <div class="section-head">
             <div>
               <div class="section-kicker">02 — WHY NATIVE</div>
-              <h2>为长时间挂桌面而做的细节</h2>
+              <h2 data-i18n="details.title">为长时间挂桌面而做的细节</h2>
             </div>
-            <p>不是简单套一层网页壳：桌宠窗口、点击账本、多人位置和直播采集都按长时间运行场景处理。</p>
+            <p data-i18n="details.lead">不是简单套一层网页壳：桌宠窗口、点击账本、多人位置和直播采集都按长时间运行场景处理。</p>
           </div>
           <div class="detail-grid">
             <article class="detail-card">
-              <div class="detail-number">80 MB <small>vs 650 MB</small></div>
-              <h3>更轻的同屏占用</h3>
-              <p>12 人同屏场景下，官方版本约 650 MB，本版本约 80 MB，长时间挂着更安心。</p>
+              <div class="detail-number">80 MB <small data-i18n="details.d1.small">vs 650 MB</small></div>
+              <h3 data-i18n="details.d1.title">更轻的同屏占用</h3>
+              <p data-i18n="details.d1.body">12 人同屏场景下，官方版本约 650 MB，本版本约 80 MB，长时间挂着更安心。</p>
             </article>
             <article class="detail-card">
-              <div class="detail-number">100% <small>位置记忆</small></div>
-              <h3>每个人都在原位</h3>
-              <p>联机成员的位置独立保存；对方掉线、重新进房，或你重启软件，都不会把所有人打回默认位置。</p>
+              <div class="detail-number">100% <small data-i18n="details.d2.small">位置记忆</small></div>
+              <h3 data-i18n="details.d2.title">每个人都在原位</h3>
+              <p data-i18n="details.d2.body">联机成员的位置独立保存；对方掉线、重新进房，或你重启软件，都不会把所有人打回默认位置。</p>
             </article>
             <article class="detail-card">
-              <div class="detail-number">OBS <small>采集窗口</small></div>
-              <h3>独立采集窗口</h3>
-              <p>使用独立可采集窗口，自定义采集分辨率和背景色，也可以使用透明背景；支持兼容模式回退，首次开启会提示 OBS 选择 Windows 10 采集方式，避免把整个桌面或低画质画面推给直播软件。</p>
+              <div class="detail-number">OBS <small data-i18n="details.d3.small">采集窗口</small></div>
+              <h3 data-i18n="details.d3.title">独立采集窗口</h3>
+              <p data-i18n="details.d3.body">使用独立可采集窗口，自定义采集分辨率和背景色，也可以使用透明背景；支持兼容模式回退，首次开启会提示 OBS 选择 Windows 10 采集方式，避免把整个桌面或低画质画面推给直播软件。</p>
             </article>
           </div>
         </div>
@@ -440,19 +519,19 @@
         <div class="section-head">
           <div>
             <div class="section-kicker">03 — STATUS</div>
-            <h2>版本状态</h2>
+            <h2 data-i18n="status.title">版本状态</h2>
           </div>
-          <p>查看 Native 最新版本、最低兼容版本，以及当前官方国服/国际服客户端版本。状态仅供参考，最终以实际使用情况为准。</p>
+          <p data-i18n="status.lead">查看 Native 最新版本、最低兼容版本，以及当前官方国服/国际服客户端版本。状态仅供参考，最终以实际使用情况为准。</p>
         </div>
         <div class="status-panel">
           <div class="status-head unknown" id="statusHead">
             <div class="status-icon" id="statusIcon">…</div>
             <div>
-              <h3 id="statusTitle">正在读取版本状态…</h3>
-              <p class="status-message" id="statusMessage">页面会请求 compatibility.json 获取最新状态。</p>
+              <h3 id="statusTitle" data-i18n="status.loadingTitle">正在读取版本状态…</h3>
+              <p class="status-message" id="statusMessage" data-i18n="status.loadingMessage">页面会请求 compatibility.json 获取最新状态。</p>
               <div class="updated" id="updatedAt">—</div>
             </div>
-            <span class="badge unknown" id="statusBadge"><span class="dot"></span><span id="statusBadgeText">读取中</span></span>
+            <span class="badge unknown" id="statusBadge"><span class="dot"></span><span id="statusBadgeText" data-i18n="status.loadingBadge">读取中</span></span>
           </div>
           <div class="force" id="forceBox"></div>
           <div class="status-grid">
@@ -464,7 +543,7 @@
             <div class="card">
               <div class="card-label">MIN COMPATIBLE</div>
               <div class="card-value" id="nativeMinSafe">—</div>
-              <div class="card-note">低于此版本不保证兼容当前官方服务</div>
+              <div class="card-note" data-i18n="status.nativeMinNote">低于此版本不保证兼容当前官方服务</div>
             </div>
             <div class="card">
               <div class="card-label">OFFICIAL / CN</div>
@@ -488,9 +567,9 @@
             </div>
           </div>
           <div class="status-actions">
-            <a class="btn primary" href="https://github.com/DanielToyama/WuwaTappoNative/releases/latest" target="_blank" rel="noreferrer">下载最新版</a>
-            <a class="btn" href="https://github.com/DanielToyama/WuwaTappoNative" target="_blank" rel="noreferrer">GitHub 仓库</a>
-            <button class="btn" id="refreshBtn" type="button">刷新状态</button>
+            <a class="btn primary" href="https://github.com/DanielToyama/WuwaTappoNative/releases/latest" target="_blank" rel="noreferrer" data-i18n="status.download">下载最新版</a>
+            <a class="btn" href="https://github.com/DanielToyama/WuwaTappoNative" target="_blank" rel="noreferrer" data-i18n="status.repo">GitHub 仓库</a>
+            <button class="btn" id="refreshBtn" type="button" data-i18n="status.refresh">刷新状态</button>
             <span class="muted" id="fetchHint"></span>
           </div>
         </div>
@@ -500,68 +579,148 @@
         <div class="section-head">
           <div>
             <div class="section-kicker">04 — GET STARTED</div>
-            <h2>三步开始使用</h2>
+            <h2 data-i18n="start.title">三步开始使用</h2>
           </div>
-          <p>下载发布包，登录账号，然后创建或加入房间。Setup 安装版和 portable 绿色版都可以直接使用。</p>
+          <p data-i18n="start.lead">下载发布包，登录账号，然后创建或加入房间。Setup 安装版和 portable 绿色版都可以直接使用。</p>
         </div>
         <div class="steps">
           <article class="step">
             <div class="step-no">01 / DOWNLOAD</div>
-            <h3>下载安装包</h3>
-            <p>从 GitHub Releases 下载 Setup 安装包；也可以使用 portable ZIP 解压即用。发布包自包含，不需要安装 .NET 8 Runtime。</p>
+            <h3 data-i18n="start.s1.title">下载安装包</h3>
+            <p data-i18n="start.s1.body">从 GitHub Releases 下载 Setup 安装包；也可以使用 portable ZIP 解压即用。发布包自包含，不需要安装 .NET 8 Runtime。</p>
           </article>
           <article class="step">
             <div class="step-no">02 / LOGIN</div>
-            <h3>登录账号</h3>
-            <p>在面板选择国服或国际服，使用 UID、手机号，或直接继承本机官方 WuwaTappo 的登录状态。</p>
+            <h3 data-i18n="start.s2.title">登录账号</h3>
+            <p data-i18n="start.s2.body">在面板选择国服或国际服，使用 UID、手机号，或直接继承本机官方 WuwaTappo 的登录状态。</p>
           </article>
           <article class="step">
             <div class="step-no">03 / PLAY</div>
-            <h3>创建或加入房间</h3>
-            <p>打开「联机」创建房间或输入房间号。联机桌宠会按当前横向/纵向排列方案自动就位。</p>
+            <h3 data-i18n="start.s3.title">创建或加入房间</h3>
+            <p data-i18n="start.s3.body">打开「联机」创建房间或输入房间号。联机桌宠会按当前横向/纵向排列方案自动就位。</p>
           </article>
         </div>
-        <p class="requirements">Windows 10/11 x64 · WebView2 Runtime（通常已内置）· 发布包无需安装 .NET Runtime · 首次启动创建 <code>%LOCALAPPDATA%\WuwatappoNative</code></p>
+        <p class="requirements"><span data-i18n="start.requirements">Windows 10/11 x64 · WebView2 Runtime（通常已内置）· 发布包无需安装 .NET Runtime · 首次启动创建</span> <code>%LOCALAPPDATA%\WuwatappoNative</code></p>
       </section>
     </main>
 
     <footer>
       <div class="footer-row">
-        <span>Wuwatappo Native · 本项目不是库洛官方项目，角色素材版权归库洛游戏所有。</span>
+        <span data-i18n="footer.disclaimer">Wuwatappo Native · 本项目不是库洛官方项目，角色素材版权归库洛游戏所有。</span>
         <span class="footer-spacer"></span>
         <a href="https://github.com/DanielToyama/WuwaTappoNative" target="_blank" rel="noreferrer">GitHub</a>
         <a href="https://github.com/DanielToyama/WuwaTappoNative/releases" target="_blank" rel="noreferrer">Releases</a>
-        <a href="https://www.bilibili.com/video/BV1nRxk6dERS/" target="_blank" rel="noreferrer">演示视频</a>
+        <a href="https://www.bilibili.com/video/BV1nRxk6dERS/" target="_blank" rel="noreferrer" data-i18n="footer.demo">演示视频</a>
         <a href="https://github.com/DanielToyama/WuwaTappoNative/blob/main/NOTICE.md" target="_blank" rel="noreferrer">NOTICE</a>
       </div>
       <div class="footer-row" style="margin-top:7px">
-        <span>状态页只读取静态 compatibility.json，不会上传任何数据。交流 QQ 群：1130030892。</span>
+        <span data-i18n="footer.note">状态页只读取静态 compatibility.json，不会上传任何数据。交流 QQ 群：1130030892。</span>
       </div>
     </footer>
   </div>
 
+  <script src="i18n.js"></script>
   <script>
     (() => {
       const JSON_URL = './compatibility.json';
       const CACHE_KEY = 'wuwatappo_compat_cache_v1';
+      const LOCALE_KEY = 'wuwatappo_docs_locale_v1';
+      const messages = window.DOCS_I18N || {};
       const statusMap = {
-        safe: { label: '安全', icon: '✓', title: '当前版本可继续使用' },
-        warning: { label: '注意', icon: '!', title: '当前版本需要关注' },
-        unsafe: { label: '不安全', icon: '×', title: '当前版本不建议继续联网' },
-        maintenance: { label: '维护中', icon: '…', title: '官方服务可能正在维护' },
-        unknown: { label: '未知', icon: '?', title: '暂时无法确认版本状态' }
+        safe: { labelKey: 'status.safe.label', icon: '✓', titleKey: 'status.safe.title' },
+        warning: { labelKey: 'status.warning.label', icon: '!', titleKey: 'status.warning.title' },
+        unsafe: { labelKey: 'status.unsafe.label', icon: '×', titleKey: 'status.unsafe.title' },
+        maintenance: { labelKey: 'status.maintenance.label', icon: '…', titleKey: 'status.maintenance.title' },
+        unknown: { labelKey: 'status.unknown.label', icon: '?', titleKey: 'status.unknown.title' }
       };
 
       const $ = id => document.getElementById(id);
-      const text = (id, value) => { const el = $(id); if (el) el.textContent = value == null || value === '' ? '—' : String(value); };
+      const normalize = value => {
+        const v = String(value || '').toLowerCase();
+        if (v.startsWith('zh')) return 'zh';
+        if (v.startsWith('ja') || v.startsWith('jp')) return 'ja';
+        if (v.startsWith('en')) return 'en';
+        return '';
+      };
+      const detectBrowserLocale = () => {
+        const list = navigator.languages && navigator.languages.length
+          ? navigator.languages : [navigator.language || ''];
+        for (const item of list) {
+          const found = normalize(item);
+          if (found) return found;
+        }
+        return 'zh';
+      };
+      let locale = normalize(window.__docsLocale) || detectBrowserLocale();
+      let lastData = null;
+      let lastFromCache = false;
+
+      const t = (key, vars) => {
+        const dict = messages[locale] || messages.zh || {};
+        let value = dict[key] ?? (messages.zh && messages.zh[key]) ?? key;
+        if (vars) {
+          for (const [name, replacement] of Object.entries(vars)) {
+            value = value.replace(new RegExp('\\{' + name + '\\}', 'g'), String(replacement));
+          }
+        }
+        return value;
+      };
+      const setMeta = (name, content, attribute = 'name') => {
+        const el = document.querySelector(`meta[${attribute}="${name}"]`);
+        if (el) el.setAttribute('content', content);
+      };
+      const applyMeta = () => {
+        document.title = t('meta.title');
+        setMeta('description', t('meta.description'));
+        setMeta('keywords', t('meta.keywords'));
+        setMeta('og:title', t('meta.title'), 'property');
+        setMeta('og:description', t('meta.description'), 'property');
+      };
+      const applyStaticText = () => {
+        document.querySelectorAll('[data-i18n]').forEach(el => {
+          const key = el.dataset.i18n;
+          const value = t(key);
+          if (value !== key) el.textContent = value;
+        });
+        document.querySelectorAll('[data-i18n-aria]').forEach(el => {
+          const key = el.dataset.i18nAria;
+          const value = t(key);
+          if (value !== key) el.setAttribute('aria-label', value);
+        });
+      };
+      const text = (id, value) => {
+        const el = $(id);
+        if (el) el.textContent = value == null || value === '' ? '—' : String(value);
+      };
+      const dateLocale = () => locale === 'en' ? 'en-US' : locale === 'ja' ? 'ja-JP' : 'zh-CN';
       const fmt = s => {
         if (!s) return '—';
         const d = new Date(s);
-        return Number.isNaN(d.getTime()) ? String(s) : d.toLocaleString('zh-CN', { hour12: false });
+        return Number.isNaN(d.getTime()) ? String(s) : d.toLocaleString(dateLocale(), { hour12: false });
       };
       const statusOf = s => statusMap[String(s || '').toLowerCase()] ? String(s).toLowerCase() : 'unknown';
+      const localizedMessage = data => {
+        const key = locale === 'en' ? 'messageEn' : locale === 'ja' ? 'messageJa' : 'message';
+        return data[key] || data.message || t('status.noMessage');
+      };
+      const localizedReason = kill => {
+        const key = locale === 'en' ? 'reasonEn' : locale === 'ja' ? 'reasonJa' : 'reason';
+        return kill[key] || kill.reason || t('status.forceDefault');
+      };
+
+      function showLoading() {
+        $('statusHead').className = 'status-head unknown';
+        $('statusBadge').className = 'badge unknown';
+        $('statusIcon').textContent = '…';
+        $('statusBadgeText').textContent = t('status.loadingBadge');
+        $('statusTitle').textContent = t('status.loadingTitle');
+        $('statusMessage').textContent = t('status.loadingMessage');
+        $('updatedAt').textContent = '—';
+      }
 
       function render(data, fromCache) {
+        lastData = data;
+        lastFromCache = fromCache;
         const st = statusOf(data.status);
         const meta = statusMap[st];
         const head = $('statusHead');
@@ -569,10 +728,12 @@
         head.className = 'status-head ' + st;
         badge.className = 'badge ' + st;
         $('statusIcon').textContent = meta.icon;
-        $('statusBadgeText').textContent = meta.label;
-        $('statusTitle').textContent = meta.title;
-        $('statusMessage').textContent = data.message || '暂无说明。';
-        $('updatedAt').textContent = data.updatedAt ? 'STATUS UPDATED ' + fmt(data.updatedAt) : 'STATUS UPDATED —';
+        $('statusBadgeText').textContent = t(meta.labelKey);
+        $('statusTitle').textContent = t(meta.titleKey);
+        $('statusMessage').textContent = localizedMessage(data);
+        $('updatedAt').textContent = data.updatedAt
+          ? t('status.updated', { time: fmt(data.updatedAt) })
+          : t('status.updated', { time: '—' });
 
         const native = data.native || {};
         const official = data.official || {};
@@ -587,29 +748,29 @@
         text('nativeLatest', native.latest);
         text('nativeMinSafe', native.minSafe);
         text('officialCn', cn.latest);
-        text('officialCnNote', cn.minOta ? '官方最低 OTA 版本：' + cn.minOta : '官方更新清单');
-        text('officialGlobal', globalLatest || '未发布');
+        text('officialCnNote', cn.minOta ? t('status.officialMinOta', { v: cn.minOta }) : t('status.officialList'));
+        text('officialGlobal', globalLatest || t('status.notPublished'));
         text('officialGlobalNote', globalLatest
           ? (globalUsesCn
-              ? '沿用国服判断（未单独校验）' + (globalMinOta ? ' · 最低 OTA ' + globalMinOta : '')
-              : (globalMinOta ? '官方最低 OTA 版本：' + globalMinOta : '官方更新清单'))
-          : '当前无 Global 更新清单');
+              ? t('status.globalInherit') + (globalMinOta ? ' · ' + t('status.minOtaShort', { v: globalMinOta }) : '')
+              : (globalMinOta ? t('status.officialMinOta', { v: globalMinOta }) : t('status.officialList')))
+          : t('status.noGlobal'));
         text('testedOfficial', protocol.testedOfficial);
         text('protocolNote', protocol.breaking
-          ? '检测到破坏性协议变更（第 ' + (protocol.generation ?? '?') + ' 代）'
-          : '协议代次：' + (protocol.generation ?? '—'));
+          ? t('status.protocolBreaking', { n: protocol.generation ?? '?' })
+          : t('status.protocolGeneration', { n: protocol.generation ?? '—' }));
         text('updatedShort', fmt(data.updatedAt));
-        text('sourceNote', fromCache ? '缓存数据，网络不可用' : 'compatibility.json');
+        text('sourceNote', fromCache ? t('status.cacheOffline') : 'compatibility.json');
 
         const force = $('forceBox');
         const forceOn = !!kill.forceOffline;
         force.classList.toggle('show', forceOn);
         force.textContent = forceOn
-          ? '安全模式已启用：' + (kill.reason || '维护者要求暂停联网，请更新或等待通知。')
+          ? t('status.force', { reason: localizedReason(kill) })
           : '';
 
-        $('fetchHint').textContent = fromCache ? 'CACHE / OFFLINE' : 'LIVE / compatibility.json';
-        document.title = 'Wuwatappo Native · Windows 原生桌宠 · ' + meta.label;
+        $('fetchHint').textContent = fromCache ? t('status.cacheOffline') : t('status.live');
+        document.title = t('meta.title') + ' · ' + t(meta.labelKey);
       }
 
       function readCache() {
@@ -625,7 +786,7 @@
       async function load(force) {
         const btn = $('refreshBtn');
         btn.disabled = true;
-        btn.textContent = '读取中…';
+        btn.textContent = t('status.reading');
         try {
           const url = JSON_URL + '?v=' + Date.now() + (force ? '&force=1' : '');
           const res = await fetch(url, { cache: 'no-store' });
@@ -640,18 +801,43 @@
             const st = 'unknown';
             $('statusHead').className = 'status-head ' + st;
             $('statusBadge').className = 'badge ' + st;
-            $('statusBadgeText').textContent = '读取失败';
-            $('statusTitle').textContent = '暂时无法读取版本状态';
-            $('statusMessage').textContent = '请检查网络后重试，或直接前往 GitHub Releases 查看最新版本。';
-            $('fetchHint').textContent = 'FETCH FAILED';
+            $('statusBadgeText').textContent = t('status.failed');
+            $('statusTitle').textContent = t('status.failedTitle');
+            $('statusMessage').textContent = t('status.failedMessage');
+            $('fetchHint').textContent = t('status.fetchFailed');
           }
         } finally {
           btn.disabled = false;
-          btn.textContent = '刷新状态';
+          btn.textContent = t('status.refresh');
         }
       }
 
+      function updateLanguageUrl() {
+        try {
+          const url = new URL(location.href);
+          url.searchParams.set('lang', locale);
+          history.replaceState(null, '', url);
+        } catch { }
+      }
+
+      function applyLocale(next, persist = true) {
+        locale = normalize(next) || locale || 'zh';
+        document.documentElement.lang = locale === 'zh' ? 'zh-CN' : locale;
+        document.documentElement.dataset.locale = locale;
+        if (persist) {
+          try { localStorage.setItem(LOCALE_KEY, locale); } catch { }
+        }
+        $('langSelect').value = locale;
+        applyStaticText();
+        applyMeta();
+        if (lastData) render(lastData, lastFromCache);
+        else showLoading();
+        if (persist) updateLanguageUrl();
+      }
+
+      $('langSelect').addEventListener('change', event => applyLocale(event.target.value, true));
       $('refreshBtn').addEventListener('click', () => load(true));
+      applyLocale(locale, false);
       load(false);
       setInterval(() => load(false), 60000);
     })();
