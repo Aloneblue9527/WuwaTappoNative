@@ -2622,6 +2622,10 @@ internal static class Program
         Assert(loginWindow.Contains("CoreWebView2Environment.CreateAsync", StringComparison.Ordinal)
                 && !loginWindow.Contains("CreationProperties", StringComparison.Ordinal),
             "Foreign login must use an explicit WebView2 environment; CreationProperties leaves the window blank.");
+        Assert(loginWindow.Contains("PopupMessageBridge", StringComparison.Ordinal)
+                && loginWindow.Contains("WindowCloseRequested", StringComparison.Ordinal)
+                && loginWindow.Contains("webview-login-", StringComparison.Ordinal),
+            "Foreign login must bridge popup OAuth messages, close popup windows and isolate each attempt profile.");
         string web = ReadRepoSource("wwwroot", "app.js");
         Assert(web.Contains("loginWeb", StringComparison.Ordinal)
                 && web.Contains("login.foreign.start", StringComparison.Ordinal),

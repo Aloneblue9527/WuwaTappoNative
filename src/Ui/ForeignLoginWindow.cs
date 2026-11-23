@@ -22,6 +22,15 @@ public sealed class ForeignLoginWindow : Form
     const string LoginHost = "login-wutheringwaves-wuwatappo.kurogames-global.com";
     const string LoginUrlBase = "https://" + LoginHost + "/login/";
     static readonly TimeSpan LoginTimeout = TimeSpan.FromMinutes(10);
+    // 第三方登录的 redirect 页会执行 window.parent.opener.postMessage(...)（X/Line/Naver
+    // 的 code 是 123123，Facebook/Apple 的载荷不同）。WebView2 的弹出窗口有时把
+    // opener 指到顶层登录页而不是 H5 SDK iframe，这里统一把弹窗消息转发给 SDK iframe。
+    const string PopupMessageBridge =
+        "(()=>{if(window.top!==window)return;" +
+        "window.addEventListener('message',function(e){try{" +
+        "var f=document.getElementById('sdk-frame');" +
+        "if(!f||!f.contentWindow||e.source===f.contentWindow)return;" +
+        "f.contentWindow.postMessage(e.data,'*');}catch(x){}},false);})();";
 
     readonly string _expectedState;
     readonly string _profileDir;
@@ -37,7 +46,8 @@ public sealed class ForeignLoginWindow : Form
     public ForeignLoginWindow()
     {
         _expectedState = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-        _profileDir = Path.Combine(Paths.CacheDir, "webview-login");
+        CleanupStaleProfiles();
+        _profileDir = Path.Combine(Paths.CacheDir, "webview-login-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_profileDir);
         Text = "国际服网页登录";
         StartPosition = FormStartPosition.CenterParent;
@@ -68,8 +78,9 @@ public sealed class ForeignLoginWindow : Form
             Log.Info("网页登录：初始化 WebView2，profile=" + _profileDir, "webview2");
             _environment = await CoreWebView2Environment.CreateAsync(null, _profileDir);
             await _web.EnsureCoreWebView2Async(_environment);
+            try { _web.CoreWebView2.Profile.PreferredTrackingPreventionLevel = CoreWebView2TrackingPreventionLevel.None; } catch { }
             Log.Info("网页登录：WebView2 已初始化 runtime=" + (_environment.BrowserVersionString ?? "unknown"), "webview2");
-            ConfigureCore(_web.CoreWebView2);
+            await ConfigureCoreAsync(_web.CoreWebView2, this);
             _timeoutTimer = new System.Windows.Forms.Timer { Interval = (int)LoginTimeout.TotalMilliseconds };
             _timeoutTimer.Tick += (s, args) =>
             {
@@ -95,7 +106,7 @@ public sealed class ForeignLoginWindow : Form
         }
     }
 
-    void ConfigureCore(CoreWebView2 core)
+    async Task ConfigureCoreAsync(CoreWebView2 core, Form closeTarget)
     {
         core.Settings.AreDevToolsEnabled = false;
         core.Settings.AreDefaultContextMenusEnabled = false;
@@ -104,10 +115,35 @@ public sealed class ForeignLoginWindow : Form
         core.Settings.IsPasswordAutosaveEnabled = false;
         core.Settings.IsGeneralAutofillEnabled = false;
         core.Settings.IsStatusBarEnabled = false;
+        try
+        {
+            await core.AddScriptToExecuteOnDocumentCreatedAsync(PopupMessageBridge);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("网页登录：注入弹窗消息桥失败 " + ex.Message, "webview2");
+        }
         core.NavigationStarting += Core_NavigationStarting;
         core.NavigationCompleted += Core_NavigationCompleted;
         core.NewWindowRequested += Core_NewWindowRequested;
         core.LaunchingExternalUriScheme += Core_LaunchingExternalUriScheme;
+        if (closeTarget != null)
+        {
+            core.WindowCloseRequested += (s, e) =>
+            {
+                Log.Info("网页登录：弹窗请求关闭", "webview2");
+                // redirect 页先 postMessage 再 window.close()，延后一点关窗，
+                // 避免消息还没进入 SDK iframe 的事件队列就把渲染进程销毁。
+                var timer = new System.Windows.Forms.Timer { Interval = 300 };
+                timer.Tick += (s2, e2) =>
+                {
+                    timer.Stop();
+                    timer.Dispose();
+                    try { closeTarget.Close(); } catch { }
+                };
+                timer.Start();
+            };
+        }
         core.ProcessFailed += (s, e) =>
         {
             Log.Warn($"网页登录 WebView2 进程失败 kind={e.ProcessFailedKind} reason={e.Reason}", "webview2");
@@ -123,7 +159,8 @@ public sealed class ForeignLoginWindow : Form
             return;
         }
         if (Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri) &&
-            uri.Scheme != "http" && uri.Scheme != "https" && uri.Scheme != "about")
+            uri.Scheme != "http" && uri.Scheme != "https" && uri.Scheme != "about" &&
+            uri.Scheme != "data" && uri.Scheme != "blob")
         {
             e.Cancel = true;
         }
@@ -177,10 +214,10 @@ public sealed class ForeignLoginWindow : Form
                 try { popup.Dispose(); } catch { }
             };
             await child.EnsureCoreWebView2Async(_environment);
-            ConfigureCore(child.CoreWebView2);
-            popup.Show(this);
+            await ConfigureCoreAsync(child.CoreWebView2, popup);
             e.NewWindow = child.CoreWebView2;
             e.Handled = true;
+            popup.Show(this);
         }
         catch (Exception ex)
         {
@@ -220,6 +257,23 @@ public sealed class ForeignLoginWindow : Form
         _completed = true;
         Close();
         return true;
+    }
+
+    static void CleanupStaleProfiles()
+    {
+        try
+        {
+            foreach (string dir in Directory.EnumerateDirectories(Paths.CacheDir, "webview-login*"))
+            {
+                try
+                {
+                    if (Directory.GetLastWriteTimeUtc(dir) < DateTime.UtcNow.AddDays(-1))
+                        Directory.Delete(dir, true);
+                }
+                catch { }
+            }
+        }
+        catch { }
     }
 
     void ShowErrorPage(string message)
@@ -264,6 +318,7 @@ public sealed class ForeignLoginWindow : Form
         try { _web?.Dispose(); } catch { }
         _web = null;
         _environment = null;
+        try { Directory.Delete(_profileDir, true); } catch { }
         base.OnFormClosed(e);
     }
 }

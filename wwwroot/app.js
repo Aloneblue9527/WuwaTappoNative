@@ -1851,9 +1851,9 @@
           <strong>国际服提示：</strong>国际服不支持游戏内 UID 邮件验证码。请先在电脑上登录官方 WuwaTappo 国际服客户端，再点击下方按钮继承登录状态。
         </div>
 
-        <button class="btn" id="loginWeb" style="margin-bottom:10px;width:100%">使用官方网页登录（支持 Google）</button>
+        <button class="btn" id="loginWeb" style="margin-bottom:10px;width:100%">使用官方网页登录（支持 Google / X 等）</button>
         <div class="hint" style="color:var(--text-sub,#888);font-size:12px;line-height:1.6;margin-bottom:14px">
-          网页登录会在本程序内打开官方登录页；Google 登录需要能访问 accounts.google.com。登录回调只在本进程内处理，不会注册或抢占官方客户端的 wuwa-buddy 协议。
+          网页登录会在本程序内打开官方登录页，支持 Google / X / Apple / Facebook / LINE 等官方登录方式。登录回调只在本进程内处理，不会注册或抢占官方客户端的 wuwa-buddy 协议。
         </div>
         <button class="btn ghost" id="loginInherit" style="margin-bottom:14px;width:100%">继承官方程序登录状态</button>
 
