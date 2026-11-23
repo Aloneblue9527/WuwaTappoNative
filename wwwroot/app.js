@@ -5884,6 +5884,10 @@
         <div class="section" data-section-id="keyboard">
           <div class="section-title">${tr('settings.section.keyboard', '桌面键盘')}</div>
           <div class="setting-item">
+            <div><div class="setting-title">${tr('settings.keyboard.controllerProtocol.title', '手柄协议扩展')}</div><div class="setting-sub">${tr('settings.keyboard.controllerProtocol.sub', '仅在未检测到 XInput 手柄时启用；兼容 PS / Switch 等 DirectInput 手柄，通过 WinMM 读取按键、十字键和扳机')}</div></div>
+            <div class="switch ${s.controllerProtocolExtension ? 'on' : ''}" data-switch="controllerProtocolExtension"></div>
+          </div>
+          <div class="setting-item">
             <div><div class="setting-title">${tr('settings.keyboard.rhythm.title', '音游模式')}</div><div class="setting-sub">${tr('settings.keyboard.rhythm.sub', '把鸣潮专属指示器替换音游指示器；开启后立即切换')}</div></div>
             <div class="switch ${s.rhythmMode ? 'on' : ''}" data-switch="rhythmMode"></div>
           </div>

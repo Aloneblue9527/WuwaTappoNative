@@ -56,6 +56,8 @@ public sealed class KeyboardWindow : Form
     short _lx, _ly, _rx, _ry;
     bool _padConnected, _padUnavailable;
     bool _padKeystrokesReady, _padKeystrokeUnavailable;
+    bool _controllerProtocolExtension;
+    readonly ControllerBridgeClient _controllerBridge = new();
     uint _padPacket;
     int _padUserIndex = -1;
     System.Windows.Forms.Timer _padReleaseTimer;
@@ -218,6 +220,23 @@ public sealed class KeyboardWindow : Form
         _pulseUntil.Clear();
         BuildLayout(_mode);
         Render();
+    }
+
+    /// <summary>切换手柄协议扩展；开启后额外读取 WinMM 手柄，立即重置旧状态避免误触发。</summary>
+    public void SetControllerProtocolExtension(bool enabled)
+    {
+        if (_controllerProtocolExtension == enabled) return;
+        _controllerProtocolExtension = enabled;
+        if (enabled) _controllerBridge.Start();
+        else _controllerBridge.Stop();
+        _padUserIndex = -1;
+        _padKeystrokesReady = false;
+        _padConnected = false;
+        _padButtons = 0;
+        _lt = _rt = 0;
+        _lx = _ly = _rx = _ry = 0;
+        ResetPadInputState();
+        if (_mode == Mode.Controller) Render();
     }
 
     /// <summary>
@@ -401,6 +420,18 @@ public sealed class KeyboardWindow : Form
                     break;
                 }
             }
+
+            // 协议扩展只在没有 XInput 手柄时接管；使用 Xbox/原生 XInput 时
+            // 绝不合并 WinMM，避免同一物理手柄被 WinMM 和 XInput 各识别一次。
+            if (!connected && _controllerProtocolExtension && _controllerBridge.TryRead(out var winmm))
+            {
+                state = new XINPUT_STATE();
+                state.Gamepad.wButtons = winmm.Buttons;
+                state.Gamepad.bLeftTrigger = winmm.LeftTrigger;
+                state.Gamepad.bRightTrigger = winmm.RightTrigger;
+                connected = true;
+            }
+
             if (!connected)
             {
                 if (_padConnected)
@@ -1058,6 +1089,7 @@ public sealed class KeyboardWindow : Form
 
     protected override void OnClosed(EventArgs e)
     {
+        _controllerBridge.Dispose();
         _poll?.Dispose();
         _pulseTimer?.Dispose();
         _padReleaseTimer?.Dispose();

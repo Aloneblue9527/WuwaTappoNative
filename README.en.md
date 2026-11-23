@@ -36,6 +36,7 @@ Wuwatappo Native is the Windows-native implementation of WuwaTappo 1.0.2, writte
 - ✅ Supports automatic treasure chest claiming
 - ✅ Supports auto emote, auto click, and game mode rules
 - ✅ Supports hotkeys and settings search
+- ✅ Supports a controller protocol extension for PS / Switch and other DirectInput controllers, active only when no XInput controller is detected
 - ✅ Supports displaying the current keyboard/gamepad key bindings, following the theme colors
 - ✅ Rhythm game mode supports 4K / 5K / 6K, with key bindings saved separately for each mode; Space and punctuation keys such as ; ' , . / can be configured
 - ✅ Supports one-click inheritance of the official login state
@@ -169,7 +170,7 @@ Hotkeys can be recorded, cleared, or reset to defaults in `Settings → Desktop 
 |---|---|
 | `Settings → Account` | Server region, login, inherit official login, import token, log out, refresh account info, cumulative click top-up |
 | `Settings → Pet & window` | Pet size, remote pet size/follow main pet, pet opacity, remote pet opacity/follow main pet, remote player name size, animation frame rate, always on top, mouse pass-through, hover hide, overlap handling, OBS capture window size/background color/transparent background/compatibility mode/stop rendering the desktop pet |
-| `Settings → Desktop keyboard` | 26-key, Wuthering Waves, Rhythm mode, Controller, key mapping, and hotkeys |
+| `Settings → Desktop keyboard` | 26-key, Wuthering Waves, Rhythm mode, Controller, controller protocol extension, key mapping, and hotkeys |
 | `Settings → Multiplayer & chests` | Remote pet layout, hide other members, automatic rank-up synthesis, manually open treasure chests, treasure chest display, automatic treasure chest claiming |
 | `Multiplayer` page | Create/join/switch rooms, room history, member display, quick emotes |
 | `Settings → Automation` | Auto emote, auto click, auto click rate, and virtual tap animation |

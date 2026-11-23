@@ -5,6 +5,7 @@ using System.Text;
 using System.Windows.Forms;
 using WuwatappoNative.Core;
 using WuwatappoNative.Net;
+using WuwatappoNative.Pet;
 
 namespace WuwatappoNative;
 
@@ -13,6 +14,13 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        // WinMM 在少数驱动热插拔时会直接触发访问冲突；手柄扩展把 WinMM 轮询放到
+        // 同一个 exe 的子进程，主程序只读命名管道，子进程崩溃不会带走 UI/账号。
+        if (args.Length >= 2 && string.Equals(args[0], "--controller-bridge", StringComparison.Ordinal))
+        {
+            ControllerBridgeHost.Run(args[1]);
+            return;
+        }
         Paths.EnsureDirs();
         Log.Init(args);
         OfficialTokenReader.CleanupStaleDumps();

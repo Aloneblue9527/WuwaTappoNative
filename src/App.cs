@@ -1061,6 +1061,7 @@ public sealed class App : ApplicationContext
 
     public void ApplyKeyboardMode()
     {
+        Keyboard.SetControllerProtocolExtension(Cfg.ControllerProtocolExtension);
         Keyboard.SetRhythm(Cfg.RhythmMode, Cfg.RhythmKeys);
         var mode = Cfg.KeyboardMode switch
         {

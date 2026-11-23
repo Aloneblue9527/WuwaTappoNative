@@ -681,6 +681,7 @@ public sealed class PanelWindow : Form
             hoverFade = _app.Cfg.HoverFade,
             hoverFadeOpacity = _app.Cfg.HoverFadeOpacity,
             keyboardMode = _app.Cfg.KeyboardMode,
+            controllerProtocolExtension = _app.Cfg.ControllerProtocolExtension,
             showMappingControls = _app.Cfg.ShowMappingControls,
             hideOtherPets = _app.Cfg.HideOtherPets,
             hideMainBar = _app.Cfg.HideMainBar,
@@ -1516,6 +1517,7 @@ public sealed class PanelWindow : Form
                             break;
                         }
                         case "showMappingControls": cfg.ShowMappingControls = ApiClient.ReadBool(kv.Value); break;
+                        case "controllerProtocolExtension": cfg.ControllerProtocolExtension = ApiClient.ReadBool(kv.Value); break;
                         case "rhythmMode":
                         {
                             bool on = ApiClient.ReadBool(kv.Value);

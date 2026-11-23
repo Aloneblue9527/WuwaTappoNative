@@ -26,6 +26,7 @@ internal static class Program
             CheckQuickTap();
             CheckMultiButton();
             CheckRapidPresses();
+            CheckWinMmPadBridge();
             Console.WriteLine($"PASS: {_checks} assertions.");
             return 0;
         }
@@ -240,6 +241,41 @@ internal static class Program
         }
         Assert(h.Downs == 10, "Ten rapid taps must produce ten downs (no 25ms throttle).");
         Assert(h.Bubbles.Count == 10, "Ten rapid taps must produce ten bubbles.");
+    }
+
+    static void CheckWinMmPadBridge()
+    {
+        var joy = new WinMmPadBridge.JoyInfoEx
+        {
+            dwFlags = 0xFF,
+            dwPOV = WinMmPadBridge.PovCentered,
+        };
+
+        joy.dwButtons = (1u << 0) | (1u << 1) | (1u << 2) | (1u << 3) |
+                        (1u << 4) | (1u << 5) | (1u << 8) | (1u << 9) |
+                        (1u << 10) | (1u << 11);
+        var state = WinMmPadBridge.Convert(joy);
+        Assert(state.Buttons == 0xF3F0 && state.LeftTrigger == 0 && state.RightTrigger == 0,
+            "DirectInput face/shoulder/start/thumb buttons must map to XInput bits.");
+
+        joy.dwButtons = (1u << 6) | (1u << 7);
+        state = WinMmPadBridge.Convert(joy);
+        Assert(state.Buttons == 0 && state.LeftTrigger == 255 && state.RightTrigger == 255,
+            "DirectInput buttons 6/7 must map to XInput LT/RT triggers.");
+
+        joy.dwButtons = 0;
+        joy.dwPOV = 0;
+        Assert(WinMmPadBridge.Convert(joy).Buttons == 0x0001, "POV 0 must map to D-pad up.");
+        joy.dwPOV = 9000;
+        Assert(WinMmPadBridge.Convert(joy).Buttons == 0x0008, "POV 9000 must map to D-pad right.");
+        joy.dwPOV = 18000;
+        Assert(WinMmPadBridge.Convert(joy).Buttons == 0x0002, "POV 18000 must map to D-pad down.");
+        joy.dwPOV = 27000;
+        Assert(WinMmPadBridge.Convert(joy).Buttons == 0x0004, "POV 27000 must map to D-pad left.");
+        joy.dwPOV = 4500;
+        Assert(WinMmPadBridge.Convert(joy).Buttons == 0x0009, "POV 4500 must map to D-pad up+right.");
+        joy.dwPOV = WinMmPadBridge.PovCentered;
+        Assert(WinMmPadBridge.Convert(joy).Buttons == 0, "Centered POV must not press a D-pad direction.");
     }
 
     sealed class Harness

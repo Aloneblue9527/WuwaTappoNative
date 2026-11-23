@@ -44,6 +44,7 @@ internal static class Program
             CheckCompatibilityGate();
             CheckUpdateVersionOrdering();
             CheckReleaseNotesLocalization();
+            CheckControllerProtocolExtensionWiring();
             CheckAuthStateBasics();
             CheckBusinessErrorMessages();
             CheckAnnouncementBoard();
@@ -1721,6 +1722,42 @@ internal static class Program
         Assert(ReleaseNotesLocalizer.Select("<!-- lang:zh -->\n中文兜底\n<!-- /lang:zh -->", "en") == "",
             "A missing language section must stay empty instead of showing another language.");
         Console.WriteLine("PASS: multilingual release notes select only the configured language.");
+    }
+
+    static void CheckControllerProtocolExtensionWiring()
+    {
+        string config = ReadRepoSource("src", "Core", "Config.cs");
+        string app = ReadRepoSource("src", "App.cs");
+        string program = ReadRepoSource("src", "Program.cs");
+        string panel = ReadRepoSource("src", "Ui", "PanelWindow.cs");
+        string keyboard = ReadRepoSource("src", "Pet", "KeyboardWindow.cs");
+        string bridge = ReadRepoSource("src", "Pet", "WinMmPadBridge.cs");
+        string web = ReadRepoSource("wwwroot", "app.js");
+        string i18n = ReadRepoSource("wwwroot", "i18n.js");
+
+        Assert(config.Contains("ControllerProtocolExtension", StringComparison.Ordinal),
+            "Settings must persist ControllerProtocolExtension.");
+        Assert(panel.Contains("controllerProtocolExtension", StringComparison.Ordinal) &&
+               panel.Contains("ControllerProtocolExtension", StringComparison.Ordinal),
+            "Panel boot and settings.set must carry the controller protocol extension.");
+        Assert(app.Contains("SetControllerProtocolExtension", StringComparison.Ordinal),
+            "App must apply the controller protocol extension to the keyboard window.");
+        Assert(program.Contains("--controller-bridge", StringComparison.Ordinal) &&
+               program.Contains("ControllerBridgeHost.Run", StringComparison.Ordinal),
+            "The app must expose an isolated controller-bridge child-process mode.");
+        Assert(keyboard.Contains("_controllerBridge.TryRead", StringComparison.Ordinal) &&
+               keyboard.Contains("_controllerProtocolExtension", StringComparison.Ordinal) &&
+               keyboard.Contains("!connected && _controllerProtocolExtension", StringComparison.Ordinal),
+            "Keyboard polling must consume the isolated WinMM bridge only when no XInput controller is connected.");
+        Assert(bridge.Contains("joyGetPosEx", StringComparison.Ordinal) &&
+               bridge.Contains("PovCentered", StringComparison.Ordinal),
+            "WinMM bridge must poll joyGetPosEx and translate D-pad POV.");
+        Assert(web.Contains("controllerProtocolExtension", StringComparison.Ordinal) &&
+               web.Contains("手柄协议扩展", StringComparison.Ordinal),
+            "Settings UI must expose the controller protocol extension switch.");
+        Assert(i18n.Contains("settings.keyboard.controllerProtocol.title", StringComparison.Ordinal),
+            "English/Japanese dictionaries must translate the controller protocol extension.");
+        Console.WriteLine("PASS: controller protocol extension is wired through settings, WinMM polling and UI.");
     }
 
     /// <summary>

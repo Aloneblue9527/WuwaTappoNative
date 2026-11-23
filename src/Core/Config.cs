@@ -66,6 +66,8 @@ public sealed class Settings
     /// <summary>悬停隐藏时的不透明度倍数（0.1-1.0，默认 0.4）。</summary>
     public double HoverFadeOpacity { get; set; } = 0.4;
     public string KeyboardMode { get; set; } = "hidden"; // hidden | letters | wuwa | rhythm | controller
+    /// <summary>手柄协议扩展：额外轮询 WinMM，兼容 PS / Switch 等 DirectInput 手柄。</summary>
+    public bool ControllerProtocolExtension { get; set; }
     public bool ShowMappingControls { get; set; } = true;
     public bool HideOtherPets { get; set; }
     /// <summary>隐藏主角底栏（计数条/工具栏/手部压条），角色本体仍完整显示。</summary>

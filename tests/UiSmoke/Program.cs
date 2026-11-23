@@ -128,6 +128,25 @@ internal static class Program
                     await core.ExecuteScriptAsync("document.getElementById('mCloseAbout')?.click()");
                     await Task.Delay(200);
 
+                    // 输入与控制：手柄协议扩展必须位于桌面键盘区域的第一排，并带有开关。
+                    string controllerProtocolUi = await core.ExecuteScriptAsync(@"
+                      (() => {
+                        const section = document.querySelector('[data-section-id=""keyboard""]');
+                        const first = section?.querySelector(':scope > .setting-item');
+                        const sw = section?.querySelector('[data-switch=""controllerProtocolExtension""]');
+                        return JSON.stringify({
+                          text: first?.textContent || '',
+                          isFirst: !!first && !!sw && first.contains(sw),
+                          switches: !!sw
+                        });
+                      })()");
+                    var controllerProtocolState = JsonNode.Parse(JsonSerializer.Deserialize<string>(controllerProtocolUi)!)!.AsObject();
+                    if (!controllerProtocolState["switches"]!.GetValue<bool>()
+                        || !controllerProtocolState["isFirst"]!.GetValue<bool>()
+                        || !controllerProtocolState["text"]!.GetValue<string>().Contains("手柄协议扩展", StringComparison.Ordinal))
+                        throw new InvalidOperationException("Controller protocol extension must be the first keyboard setting row.");
+                    Console.WriteLine("PASS: controller protocol extension is the first input/keyboard setting row.");
+
                     // 公告历史：按钮必须位于刷新版本状态与关于之间；后端历史未接入时回退到当前公告。
                     string historyFallbackUi = await core.ExecuteScriptAsync(@"
                       (() => {
