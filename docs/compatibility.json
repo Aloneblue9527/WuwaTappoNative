@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "messageLocked": true,
-  "updatedAt": "2026-11-20T08:50:00Z",
+  "updatedAt": "2026-11-23T14:30:30Z",
   "status": "safe",
-  "message": "官方客户端 1.0.5 为强制更新；Wuwatappo Native 0.3.5 已适配 1.0.5 联机协议，请使用 0.3.5 或更高版本，旧版本可能无法正常联机。",
+  "message": "官方客户端 1.0.5 为强制更新；Wuwatappo Native 0.3.5 及以上已适配 1.0.5 联机协议，建议使用 0.3.6。",
   "native": {
-    "latest": "0.3.5",
+    "latest": "0.3.6",
     "minSafe": "0.3.5"
   },
   "official": {
