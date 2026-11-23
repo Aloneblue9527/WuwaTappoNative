@@ -812,6 +812,53 @@ internal static class Program
                     Console.WriteLine("PASS: WebView2 advanced-synth command warns on every activation.");
                     Console.WriteLine("PASS: About button sits in the settings footer and the data-statistics notice is present.");
                     Console.WriteLine("PASS: WebView2 auth conflict/invalid states render persistent notices, paused view and login view.");
+
+                    var i18nLoaded = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    core.NavigationCompleted += (_, ev) => i18nLoaded.TrySetResult(ev.IsSuccess);
+                    core.Navigate("https://wuwatappo.local/index.html?preview=settings&lang=en#page=settings");
+                    if (!await i18nLoaded.Task) throw new InvalidOperationException("i18n English preview navigation failed.");
+                    await Task.Delay(900);
+                    string enUiJson = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        lang: document.documentElement.lang,
+                        tabs: [...document.querySelectorAll('.tab span')].map(x => x.textContent.trim()),
+                        title: document.getElementById('pageTitle')?.textContent || '',
+                        locale: document.getElementById('setLocale')?.value || '',
+                        groups: [...document.querySelectorAll('.settings-group-title')].map(x => x.textContent.trim())
+                      }))()");
+                    var enUi = JsonNode.Parse(JsonSerializer.Deserialize<string>(enUiJson)!)!.AsObject();
+                    var enTabs = enUi["tabs"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+                    var enGroups = enUi["groups"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+                    if (enUi["lang"]!.GetValue<string>() != "en"
+                        || !enTabs.Contains("Bag") || !enTabs.Contains("Settings")
+                        || enUi["title"]!.GetValue<string>() != "Settings"
+                        || enUi["locale"]!.GetValue<string>() != "en"
+                        || !enGroups.Contains("Basic helpers") || !enGroups.Contains("Account & redemption"))
+                        throw new InvalidOperationException("English i18n preview did not translate chrome/settings groups: " + enUiJson);
+
+                    var jaLoaded = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    core.NavigationCompleted += (_, ev) => jaLoaded.TrySetResult(ev.IsSuccess);
+                    core.Navigate("https://wuwatappo.local/index.html?preview=settings&lang=ja#page=settings");
+                    if (!await jaLoaded.Task) throw new InvalidOperationException("i18n Japanese preview navigation failed.");
+                    await Task.Delay(900);
+                    string jaUiJson = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        lang: document.documentElement.lang,
+                        tabs: [...document.querySelectorAll('.tab span')].map(x => x.textContent.trim()),
+                        title: document.getElementById('pageTitle')?.textContent || '',
+                        locale: document.getElementById('setLocale')?.value || '',
+                        groups: [...document.querySelectorAll('.settings-group-title')].map(x => x.textContent.trim())
+                      }))()");
+                    var jaUi = JsonNode.Parse(JsonSerializer.Deserialize<string>(jaUiJson)!)!.AsObject();
+                    var jaTabs = jaUi["tabs"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+                    var jaGroups = jaUi["groups"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+                    if (jaUi["lang"]!.GetValue<string>() != "ja"
+                        || !jaTabs.Contains("バッグ") || !jaTabs.Contains("設定")
+                        || jaUi["title"]!.GetValue<string>() != "設定"
+                        || jaUi["locale"]!.GetValue<string>() != "ja"
+                        || !jaGroups.Contains("基本補助") || !jaGroups.Contains("アカウントと交換"))
+                        throw new InvalidOperationException("Japanese i18n preview did not translate chrome/settings groups: " + jaUiJson);
+                    Console.WriteLine("PASS: English/Japanese i18n preview translates navigation, page title and settings groups.");
                     Console.WriteLine("screenshot=" + output);
                     form.Close();
                 }

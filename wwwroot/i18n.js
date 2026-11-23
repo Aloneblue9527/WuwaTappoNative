@@ -1,0 +1,267 @@
+/* Wuwatappo Native 轻量 i18n。初版覆盖导航、登录、关于、免责声明和设置分组；
+   未翻译的 key 自动回退到调用处传入的中文 fallback，避免缺失翻译时出现空白。 */
+(() => {
+  const dict = {
+    en: {
+      'nav.bag': 'Bag',
+      'nav.atlas': 'Gallery',
+      'nav.synth': 'Synthesis',
+      'nav.preset': 'Presets',
+      'nav.room': 'Multiplayer',
+      'nav.settings': 'Settings',
+      'nav.synthAdvancedOn': 'Advanced synthesis is on',
+      'nav.synthItems': 'Synthesizable items available',
+      'common.notLoggedIn': 'Not signed in',
+      'common.defaultNickname': 'Rover',
+      'common.closePanel': 'Close panel',
+      'common.themeSettings': 'Theme settings',
+      'common.minimize': 'Minimize',
+      'common.maximize': 'Maximize',
+      'common.close': 'Close',
+      'common.languageChanged': 'Language changed',
+
+      'login.title': 'Sign in to Wuwa Tappo',
+      'login.region': 'Region:',
+      'login.regionCn': 'China (CN)',
+      'login.regionGlobal': 'Global',
+      'login.globalHintTitle': 'Global notice: ',
+      'login.globalHint': 'The Global client does not support in-game UID email codes. Sign in to the official WuwaTappo Global client on this PC first, then use the button below to inherit its login state.',
+      'login.web': 'Official web login (Google / X and more)',
+      'login.webHint': 'The official login page opens inside this app and supports Google / X / Apple / Facebook / LINE and other official methods. The callback is handled inside this process only; it never registers or hijacks the official wuwa-buddy protocol.',
+      'login.inherit': 'Inherit login from official client',
+      'login.orToken': 'Or sign in manually with a Token:',
+      'login.tokenPlaceholder': 'Enter kuro_infoToken / infoToken',
+      'login.tokenButton': 'Token sign-in',
+      'login.uidMode': 'UID code',
+      'login.phoneMode': 'Phone number',
+      'login.phoneHint': 'Sign in with a Kuro Games phone number. The code is sent by Kuro and may require a human verification.',
+      'login.phonePlaceholder': 'Phone number (11 digits)',
+      'login.phoneCodePlaceholder': 'SMS code',
+      'login.sendCode': 'Send code',
+      'login.phoneLogin': 'Sign in with phone',
+      'login.phoneSuccessHint': 'After signing in, the Wuthering Waves character bound to this account will be synced.',
+      'login.uidHint': 'Sign in with your game UID. If code sign-in is unavailable, use the official login state instead.',
+      'login.uidPlaceholder': 'Game UID (9-10 digits)',
+      'login.codePlaceholder': '6-digit code',
+      'login.loginButton': 'Sign in',
+      'login.inheritHint': 'If code sign-in is unavailable, sign in on the official client first, then click the button below to inherit its login state.',
+      'login.manualTokenPlaceholder': 'Enter Token manually',
+      'login.toastUidRequired': 'Enter your game UID',
+      'login.toastUidInvalid': 'Enter a 9-10 digit game UID',
+      'login.toastCodeInvalid': 'Enter the 6-digit code',
+      'login.toastCodeSent': 'Code sent',
+      'login.toastSuccess': 'Signed in',
+      'login.toastPhoneRequired': 'Enter your phone number',
+      'login.toastPhoneInvalid': 'Enter an 11-digit phone number',
+      'login.toastSmsSent': 'SMS code sent',
+      'login.toastSmsInvalid': 'Enter the 4-6 digit SMS code',
+      'login.toastTokenRequired': 'Enter a Token',
+
+      'disclaimer.title': 'Disclaimer',
+      'disclaimer.text1': 'If you paid any amount for this program, you have been scammed. Please request a refund immediately and leave a negative review.',
+      'disclaimer.text2': 'All assets in this program belong to Kuro Games. This project is not affiliated with Kuro. If you believe anything infringes your rights, contact me immediately.',
+      'disclaimer.text3': 'This program is for learning and research of new technologies only. Anyone who downloads it should delete it within 24 hours. Thank you for your cooperation.',
+      'disclaimer.agree': 'I understand',
+
+      'about.version': 'Version {version}',
+      'about.author': 'Author',
+      'about.madeBy': 'Made by {link}, based on the official WuwaTappo.',
+      'about.thanks': 'Special thanks',
+      'about.kuro': 'Kuro Games',
+      'about.demo': 'Demo video',
+      'about.demoLink': 'Bilibili demo video',
+      'about.demoNote': 'If possible, please like, coin and favorite the video. It means a lot to me.',
+      'about.project': 'Project',
+      'about.star': 'Stars are welcome! ⭐',
+      'about.dataTitle': 'Data statistics',
+      'about.dataBody': 'The third-party server used for updates and announcements receives the request IP address only to aggregate user scale, online status and province-level region distribution for improving the experience. Raw IPs are not persisted, are not linked to any identity, and are not used for tracking or advertising. Region data is province-level only.',
+      'about.close': 'Close',
+
+      'settings.section.language': 'Interface language',
+      'settings.language.title': 'Interface language',
+      'settings.language.sub': 'Takes effect immediately. Some content is still in Chinese in this preview.',
+      'settings.language.zh': '中文',
+      'settings.language.en': 'English (Preview)',
+      'settings.language.ja': '日本語 (Preview)',
+      'settings.group.basic': 'Basic helpers',
+      'settings.group.basicSub': 'Clicks, auto-boost and auto-chest',
+      'settings.group.account': 'Account & redemption',
+      'settings.group.accountSub': 'Region, account, clicks and redeem codes',
+      'settings.group.input': 'Input & recording',
+      'settings.group.inputSub': 'Desktop keyboard and hotkeys',
+      'settings.group.window': 'Pet & window',
+      'settings.group.windowSub': 'Size, screen, opacity and accessory offsets',
+      'settings.group.obs': 'OBS capture',
+      'settings.group.obsSub': 'Capture window, background and compatibility mode',
+      'settings.group.theme': 'Theme & appearance',
+      'settings.group.themeSub': 'Theme colors, background image and presets',
+      'settings.group.interaction': 'Multiplayer & interaction',
+      'settings.group.interactionSub': 'Remote pets, chests, automation and notifications',
+      'settings.group.maintenance': 'App & updates',
+      'settings.group.maintenanceSub': 'Startup, permissions, rules, updates and logs',
+      'settings.section.account': 'Account',
+      'settings.section.window': 'Pet & window',
+      'settings.section.obs': 'OBS capture',
+      'settings.section.accessory': 'Accessory position',
+      'settings.section.theme': 'Theme & appearance',
+      'settings.section.keyboard': 'Desktop keyboard',
+      'settings.section.hotkeys': 'Hotkeys',
+      'settings.section.room': 'Multiplayer & chests',
+      'settings.section.auto': 'Automation',
+      'settings.section.notify': 'Notifications',
+      'settings.section.redeem': 'Redeem',
+      'settings.section.other': 'Other',
+      'settings.section.update': 'Updates',
+      'settings.searchPlaceholder': 'Search settings (name or description)',
+      'settings.searchEmpty': 'No matching settings',
+    },
+    ja: {
+      'nav.bag': 'バッグ',
+      'nav.atlas': '図鑑',
+      'nav.synth': '合成',
+      'nav.preset': 'プリセット',
+      'nav.room': 'マルチ',
+      'nav.settings': '設定',
+      'nav.synthAdvancedOn': '高度合成が有効です',
+      'nav.synthItems': '合成可能な素材があります',
+      'common.notLoggedIn': '未ログイン',
+      'common.defaultNickname': '漂泊者',
+      'common.closePanel': 'パネルを閉じる',
+      'common.themeSettings': 'テーマ設定',
+      'common.minimize': '最小化',
+      'common.maximize': '最大化',
+      'common.close': '閉じる',
+      'common.languageChanged': '言語を切り替えました',
+
+      'login.title': 'Wuwa Tappo にログイン',
+      'login.region': 'サーバー：',
+      'login.regionCn': '中国版（CN）',
+      'login.regionGlobal': 'グローバル版（Global）',
+      'login.globalHintTitle': 'グローバル版の注意：',
+      'login.globalHint': 'グローバル版はゲーム内 UID メール認証に対応していません。この PC で公式 WuwaTappo グローバルクライアントにログインしてから、下のボタンでログイン状態を引き継いでください。',
+      'login.web': '公式 Web ログイン（Google / X など）',
+      'login.webHint': '公式ログインページをこのアプリ内で開きます。Google / X / Apple / Facebook / LINE などの公式ログイン方法に対応しています。コールバックはこのプロセス内だけで処理され、公式クライアントの wuwa-buddy プロトコルを登録・横取りすることはありません。',
+      'login.inherit': '公式クライアントのログイン状態を引き継ぐ',
+      'login.orToken': 'または Token で手動ログイン：',
+      'login.tokenPlaceholder': 'kuro_infoToken / infoToken を入力',
+      'login.tokenButton': 'Token でログイン',
+      'login.uidMode': 'UID 認証コード',
+      'login.phoneMode': '電話番号ログイン',
+      'login.phoneHint': 'Kuro Games アカウントの電話番号でログインします。認証コードは Kuro から送信され、人機確認が必要な場合があります。',
+      'login.phonePlaceholder': '電話番号（11 桁）',
+      'login.phoneCodePlaceholder': 'SMS 認証コード',
+      'login.sendCode': '認証コードを送信',
+      'login.phoneLogin': '電話番号でログイン',
+      'login.phoneSuccessHint': 'ログイン後、このアカウントに紐づく鳴潮キャラクターが同期されます。',
+      'login.uidHint': 'ゲーム UID でログインします。認証コードログインができない場合は、公式ログイン状態を使用してください。',
+      'login.uidPlaceholder': 'ゲーム UID（9〜10 桁）',
+      'login.codePlaceholder': '6 桁の認証コード',
+      'login.loginButton': 'ログイン',
+      'login.inheritHint': '認証コードログインができない場合は、先に公式クライアントでログインし、下のボタンで公式ログイン状態を引き継いでください。',
+      'login.manualTokenPlaceholder': 'Token を手動入力',
+      'login.toastUidRequired': 'ゲーム UID を入力してください',
+      'login.toastUidInvalid': '9〜10 桁のゲーム UID を入力してください',
+      'login.toastCodeInvalid': '6 桁の認証コードを入力してください',
+      'login.toastCodeSent': '認証コードを送信しました',
+      'login.toastSuccess': 'ログインしました',
+      'login.toastPhoneRequired': '電話番号を入力してください',
+      'login.toastPhoneInvalid': '11 桁の電話番号を入力してください',
+      'login.toastSmsSent': 'SMS 認証コードを送信しました',
+      'login.toastSmsInvalid': '4〜6 桁の SMS 認証コードを入力してください',
+      'login.toastTokenRequired': 'Token を入力してください',
+
+      'disclaimer.title': '免責事項',
+      'disclaimer.text1': 'このプログラムに少しでも料金を支払った場合、それは詐欺です。すぐに返金を申請し、低評価を付けてください。',
+      'disclaimer.text2': '本プログラム内のすべての素材の著作権は Kuro Games に帰属します。本プロジェクトは Kuro と一切関係ありません。権利侵害がある場合はすぐにご連絡ください。',
+      'disclaimer.text3': '本プログラムは新しい技術の学習・研究のみを目的としています。ダウンロードした方は 24 時間以内に削除してください。ご協力ありがとうございます。',
+      'disclaimer.agree': '理解しました',
+
+      'about.version': 'バージョン {version}',
+      'about.author': '作者',
+      'about.madeBy': '本プログラムは {link} が公式 WuwaTappo を参考に制作しました。',
+      'about.thanks': '特別感謝',
+      'about.kuro': 'Kuro Games',
+      'about.demo': 'デモ動画',
+      'about.demoLink': 'Bilibili デモ動画',
+      'about.demoNote': 'よろしければ高評価・投げ銭・お気に入り登録をお願いします。とても励みになります。',
+      'about.project': 'プロジェクト',
+      'about.star': 'Star をお待ちしています！⭐',
+      'about.dataTitle': 'データ統計について',
+      'about.dataBody': '更新とお知らせの取得に使用する第三者サーバーは、利用者規模・オンライン状況・省レベルの地域分布を集計し、体験改善に役立てるためだけに、リクエスト元 IP を受信します。生の IP は保存されず、いかなる身元とも紐づけられず、追跡や広告には使用されません。地域情報は省レベルまでです。',
+      'about.close': '閉じる',
+
+      'settings.section.language': '表示言語',
+      'settings.language.title': '表示言語',
+      'settings.language.sub': 'すぐに反映されます。このプレビューでは一部の内容が中国語のままです。',
+      'settings.language.zh': '中文',
+      'settings.language.en': 'English (Preview)',
+      'settings.language.ja': '日本語 (Preview)',
+      'settings.group.basic': '基本補助',
+      'settings.group.basicSub': 'クリック、自動ブースト、自動開箱',
+      'settings.group.account': 'アカウントと交換',
+      'settings.group.accountSub': 'サーバー、アカウント、クリック、交換コード',
+      'settings.group.input': '入力と録画',
+      'settings.group.inputSub': 'デスクトップキーボードとホットキー',
+      'settings.group.window': 'ペットとウィンドウ',
+      'settings.group.windowSub': 'サイズ、画面、不透明度、アクセサリー位置',
+      'settings.group.obs': 'OBS キャプチャ',
+      'settings.group.obsSub': 'キャプチャウィンドウ、背景、互換モード',
+      'settings.group.theme': 'テーマと外観',
+      'settings.group.themeSub': 'テーマカラー、背景画像、プリセット',
+      'settings.group.interaction': 'マルチと交流',
+      'settings.group.interactionSub': 'リモートペット、宝箱、自動化、通知',
+      'settings.group.maintenance': 'アプリと更新',
+      'settings.group.maintenanceSub': '起動、権限、ルール、更新、ログ',
+      'settings.section.account': 'アカウント',
+      'settings.section.window': 'ペットとウィンドウ',
+      'settings.section.obs': 'OBS キャプチャ',
+      'settings.section.accessory': 'アクセサリー位置',
+      'settings.section.theme': 'テーマと外観',
+      'settings.section.keyboard': 'デスクトップキーボード',
+      'settings.section.hotkeys': 'ホットキー',
+      'settings.section.room': 'マルチと宝箱',
+      'settings.section.auto': '自動化',
+      'settings.section.notify': '通知',
+      'settings.section.redeem': '交換',
+      'settings.section.other': 'その他',
+      'settings.section.update': '更新',
+      'settings.searchPlaceholder': '設定を検索（名前または説明）',
+      'settings.searchEmpty': '一致する設定がありません',
+    }
+  };
+
+  let locale = 'zh';
+  const normalize = value => {
+    const v = String(value || '').trim().toLowerCase();
+    return v === 'en' || v === 'ja' ? v : 'zh';
+  };
+  const t = (key, fallback, vars) => {
+    let text = dict[locale]?.[key];
+    if (text == null) text = fallback != null ? fallback : key;
+    if (vars && typeof text === 'string') {
+      for (const [name, value] of Object.entries(vars)) {
+        text = text.split('{' + name + '}').join(String(value));
+      }
+    }
+    return text;
+  };
+  const setLocale = value => {
+    locale = normalize(value);
+    document.documentElement.lang = locale === 'zh' ? 'zh-CN' : locale;
+  };
+  const applyStatic = root => {
+    const scope = root || document;
+    scope.querySelectorAll('[data-i18n]').forEach(el => {
+      el.textContent = t(el.dataset.i18n, el.textContent);
+    });
+    scope.querySelectorAll('[data-i18n-title]').forEach(el => {
+      el.title = t(el.dataset.i18nTitle, el.title);
+    });
+    scope.querySelectorAll('[data-i18n-aria]').forEach(el => {
+      el.setAttribute('aria-label', t(el.dataset.i18nAria, el.getAttribute('aria-label') || ''));
+    });
+  };
+  const params = new URLSearchParams(location.search);
+  setLocale(params.get('lang') || 'zh');
+  window.I18N = { t, setLocale, applyStatic, get locale() { return locale; } };
+})();

@@ -66,6 +66,7 @@ internal static class Program
             CheckPerfOptimizations();
             CheckHiddenMemberVisibility();
             CheckForeignSessionCallback();
+            CheckI18n();
             if (args.Length > 0 && File.Exists(args[0])) CheckExternalPresetFile(args[0]);
 
             Console.WriteLine($"PASS: {_checks} assertions.");
@@ -2631,6 +2632,34 @@ internal static class Program
                 && web.Contains("login.foreign.start", StringComparison.Ordinal),
             "Global login UI must expose the official web login button.");
         Console.WriteLine("PASS: foreign login callback parsing, state checks and panel wiring.");
+    }
+
+    static void CheckI18n()
+    {
+        string i18n = ReadRepoSource("wwwroot", "i18n.js");
+        Assert(i18n.Contains("'nav.bag'", StringComparison.Ordinal)
+                && i18n.Contains("'login.title'", StringComparison.Ordinal)
+                && i18n.Contains("'settings.section.language'", StringComparison.Ordinal)
+                && i18n.Contains("fallback", StringComparison.Ordinal),
+            "i18n dictionary must cover navigation, login and the language setting with a Chinese fallback.");
+        string app = ReadRepoSource("wwwroot", "app.js");
+        Assert(app.Contains("applyLocale(", StringComparison.Ordinal)
+                && app.Contains("pageTitleOf(", StringComparison.Ordinal)
+                && app.Contains("id=\"setLocale\"", StringComparison.Ordinal)
+                && app.Contains("data-section-id", StringComparison.Ordinal),
+            "Panel must apply locale, localize page titles, expose the locale selector and use stable settings section ids.");
+        string panel = ReadRepoSource("src", "Ui", "PanelWindow.cs");
+        Assert(panel.Contains("locale = _app.Cfg.Locale", StringComparison.Ordinal)
+                && panel.Contains("case \"locale\":", StringComparison.Ordinal),
+            "Boot payload and settings.set must pass the locale through.");
+        string config = ReadRepoSource("src", "Core", "Config.cs");
+        Assert(config.Contains("public string Locale", StringComparison.Ordinal),
+            "Config must persist the selected locale.");
+        string index = ReadRepoSource("wwwroot", "index.html");
+        Assert(index.Contains("i18n.js", StringComparison.Ordinal)
+                && index.Contains("data-i18n=\"common.notLoggedIn\"", StringComparison.Ordinal),
+            "index.html must load i18n.js and mark static shell text.");
+        Console.WriteLine("PASS: i18n locale plumbing, dictionary coverage and stable settings section ids.");
     }
 
     static void CheckRoomProtocol105()

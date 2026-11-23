@@ -721,6 +721,7 @@ public sealed class PanelWindow : Form
             isElevated = Elevation.IsElevated,
             roomNo = _app.Cfg.RoomNo,
             lastRoom = _app.Cfg.LastRoom,
+            locale = _app.Cfg.Locale == "en" || _app.Cfg.Locale == "ja" ? _app.Cfg.Locale : "zh",
             serverRegion = _app.Cfg.ServerRegion,
             forcedOnlineAcceptedVersion = _app.Cfg.ForcedOnlineAcceptedVersion,
             updateChannel = EffectiveUpdateChannel(),
@@ -1689,6 +1690,13 @@ public sealed class PanelWindow : Form
                         case "updateHttpProxy":
                             cfg.UpdateHttpProxy = ApiClient.ReadString(kv.Value).Trim();
                             break;
+                        case "locale":
+                        {
+                            string locale = ApiClient.ReadString(kv.Value).Trim().ToLowerInvariant();
+                            if (locale != "zh" && locale != "en" && locale != "ja") locale = "zh";
+                            cfg.Locale = locale;
+                            break;
+                        }
                         case "serverRegion":
                         {
                             string reg = ApiClient.ReadString(kv.Value).Trim().ToLowerInvariant();

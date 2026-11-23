@@ -11,13 +11,28 @@
   };
 
   const PAGES = [
-    { key: 'bag', title: '我的背包', icon: 'bag' },
-    { key: 'atlas', title: '图鉴', icon: 'atlas' },
-    { key: 'synth', title: '合成', icon: 'synth' },
-    { key: 'preset', title: '我的预设', icon: 'preset' },
-    { key: 'room', title: '联机', icon: 'room' },
-    { key: 'settings', title: '设置', icon: 'settings' }
+    { key: 'bag', title: '我的背包', titleKey: 'nav.bag', icon: 'bag' },
+    { key: 'atlas', title: '图鉴', titleKey: 'nav.atlas', icon: 'atlas' },
+    { key: 'synth', title: '合成', titleKey: 'nav.synth', icon: 'synth' },
+    { key: 'preset', title: '我的预设', titleKey: 'nav.preset', icon: 'preset' },
+    { key: 'room', title: '联机', titleKey: 'nav.room', icon: 'room' },
+    { key: 'settings', title: '设置', titleKey: 'nav.settings', icon: 'settings' }
   ];
+
+  const tr = (key, fallback, vars) => {
+    try { return window.I18N ? window.I18N.t(key, fallback, vars) : (fallback ?? key); }
+    catch { return fallback ?? key; }
+  };
+  function applyLocale(locale) {
+    if (!locale) return;
+    try {
+      window.I18N?.setLocale?.(locale);
+      window.I18N?.applyStatic?.(document);
+    } catch { }
+  }
+  function pageTitleOf(page) {
+    return page ? tr(page.titleKey, page.title) : '';
+  }
 
   const RARITY_TEXT = { epic: '史诗', rare: '稀有', uncommon: '优良', common: '普通' };
   const RARITY_ORDER = { epic: 4, rare: 3, uncommon: 2, common: 1 };
@@ -1109,7 +1124,7 @@
     if (initialPage && PAGES.some(p => p.key === initialPage)) state.page = initialPage;
     const warningIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.8 20h18.4L12 3Z"/><path d="M12 9v4.5"/><path d="M12 17h.01"/></svg>';
     document.getElementById('tabs').innerHTML = PAGES.map(p =>
-      `<button class="tab" data-page="${p.key}">${ICONS[p.icon]}<span>${p.title}</span>${p.key === 'synth' && state.synthEnabled ? `<span class="tab-warning" title="高级合成已开启">${warningIcon}</span>` : ''}${p.key === 'synth' ? '<span class="tab-dot" data-tab-badge="synth" title="有可合成物资"></span>' : ''}</button>`).join('');
+      `<button class="tab" data-page="${p.key}">${ICONS[p.icon]}<span>${esc(pageTitleOf(p))}</span>${p.key === 'synth' && state.synthEnabled ? `<span class="tab-warning" title="${esc(tr('nav.synthAdvancedOn', '高级合成已开启'))}">${warningIcon}</span>` : ''}${p.key === 'synth' ? `<span class="tab-dot" data-tab-badge="synth" title="${esc(tr('nav.synthItems', '有可合成物资'))}"></span>` : ''}</button>`).join('');
     document.querySelectorAll('.tab').forEach(btn => btn.onclick = () => navigate(btn.dataset.page));
     document.getElementById('closeBtn').onclick = () => call('win.close');
     document.getElementById('winCloseBtn').onclick = () => call('win.close');
@@ -1185,6 +1200,7 @@
       const prevRegion = state.boot?.settings?.serverRegion || 'cn';
       adoptBootThemeBackground(b);
       state.boot = b;
+      applyLocale(b.settings?.locale);
       migrateLegacyAssetStorage();
       applySynthSettings(b);
       applyTheme(b.settings);
@@ -1208,11 +1224,13 @@
     } catch (e) { toast('初始化失败：' + e.message, 'err'); }
   }
 
-  const DISCLAIMER_TEXT = [
-    '如果你花费了任何金额购买了此程序，那你绝对是被骗了，请你立刻退款并差评。',
-    '本程序所有素材版权属于库洛游戏所有，本项目与库洛无任何关联，如有侵权，请立刻联系我。',
-    '本程序只用于对新技术的学习与研究，任何下载了此项目的用户请在24h内删除本程序，谢谢配合。'
-  ];
+  function disclaimerText() {
+    return [
+      tr('disclaimer.text1', '如果你花费了任何金额购买了此程序，那你绝对是被骗了，请你立刻退款并差评。'),
+      tr('disclaimer.text2', '本程序所有素材版权属于库洛游戏所有，本项目与库洛无任何关联，如有侵权，请立刻联系我。'),
+      tr('disclaimer.text3', '本程序只用于对新技术的学习与研究，任何下载了此项目的用户请在24h内删除本程序，谢谢配合。')
+    ];
+  }
 
   function maybeShowDisclaimer() {
     if (!state.boot || state.boot.disclaimerShown) return;
@@ -1220,11 +1238,11 @@
     state.disclaimerOpen = true;
     modal(`
       <div class="about">
-        <div class="about-title">免责声明</div>
+        <div class="about-title">${tr('disclaimer.title', '免责声明')}</div>
         <div class="about-note about-note--warn">
-          ${DISCLAIMER_TEXT.map(t => `<p>${esc(t)}</p>`).join('')}
+          ${disclaimerText().map(t => `<p>${esc(t)}</p>`).join('')}
         </div>
-        <button class="btn" id="mAgree" style="align-self:center;min-width:160px">我已知晓</button>
+        <button class="btn" id="mAgree" style="align-self:center;min-width:160px">${tr('disclaimer.agree', '我已知晓')}</button>
       </div>`, host => {
       // 首次启动的声明必须点按钮确认，点遮罩不关闭。
       host.onclick = null;
@@ -1304,36 +1322,36 @@
           <div class="about-badge">W</div>
           <div>
             <div class="about-name">Wuwatappo Native</div>
-            <div class="about-ver">版本 ${esc(version)}</div>
+            <div class="about-ver">${esc(tr('about.version', '版本 {version}', { version }))}</div>
           </div>
         </div>
         <div class="about-note">
-          ${DISCLAIMER_TEXT.map(t => `<p>${esc(t)}</p>`).join('')}
+          ${disclaimerText().map(t => `<p>${esc(t)}</p>`).join('')}
         </div>
         <div class="about-sec">
-          <div class="about-sec-title">作者</div>
-          <p>本程序由 ${link('http://danieluu.top', 'Daniel_兔兔')} 参考官方 WuwaTappo 制作。</p>
+          <div class="about-sec-title">${tr('about.author', '作者')}</div>
+          <p>${tr('about.madeBy', '本程序由 {link} 参考官方 WuwaTappo 制作。').replace('{link}', link('http://danieluu.top', 'Daniel_兔兔'))}</p>
         </div>
         <div class="about-sec">
-          <div class="about-sec-title">特别鸣谢</div>
-          <p>${link(state.boot?.settings?.serverRegion === 'global' ? 'https://download-wutheringwaves-wuwatappo.kurogames-global.com/download/en/' : 'https://download-mc-wuwatappo.kurogames-global.com/download/', '库洛游戏')}</p>
+          <div class="about-sec-title">${tr('about.thanks', '特别鸣谢')}</div>
+          <p>${link(state.boot?.settings?.serverRegion === 'global' ? 'https://download-wutheringwaves-wuwatappo.kurogames-global.com/download/en/' : 'https://download-mc-wuwatappo.kurogames-global.com/download/', tr('about.kuro', '库洛游戏'))}</p>
           <p>${link('https://github.com/Fantasicrap/', '@Fantasicrap')}</p>
         </div>
         <div class="about-sec">
-          <div class="about-sec-title">演示视频</div>
-          <p>${link('https://www.bilibili.com/video/BV1nRxk6dERS/', 'Bilibili 演示视频')}</p>
-          <p>如果可以请给我一键三连，这对我非常重要。</p>
+          <div class="about-sec-title">${tr('about.demo', '演示视频')}</div>
+          <p>${link('https://www.bilibili.com/video/BV1nRxk6dERS/', tr('about.demoLink', 'Bilibili 演示视频'))}</p>
+          <p>${tr('about.demoNote', '如果可以请给我一键三连，这对我非常重要。')}</p>
         </div>
         <div class="about-sec">
-          <div class="about-sec-title">项目地址</div>
+          <div class="about-sec-title">${tr('about.project', '项目地址')}</div>
           <p>GitHub：${link('https://github.com/DanielToyama/WuwaTappoNative', 'DanielToyama/WuwaTappoNative')}</p>
-          <p>希望收到你的 Star！⭐</p>
+          <p>${tr('about.star', '希望收到你的 Star！⭐')}</p>
         </div>
         <div class="about-sec">
-          <div class="about-sec-title">数据统计说明</div>
-          <p>本工具第三方服务器（用于更新和读取公告）会接收请求来源的 IP 地址，仅用于聚合统计用户规模、在线情况及省级地区分布，用于改善与分析用户体验。原始 IP 不持久化存储，不与任何身份关联，不用于追踪或广告。地区信息仅精确到省级。</p>
+          <div class="about-sec-title">${tr('about.dataTitle', '数据统计说明')}</div>
+          <p>${tr('about.dataBody', '本工具第三方服务器（用于更新和读取公告）会接收请求来源的 IP 地址，仅用于聚合统计用户规模、在线情况及省级地区分布，用于改善与分析用户体验。原始 IP 不持久化存储，不与任何身份关联，不用于追踪或广告。地区信息仅精确到省级。')}</p>
         </div>
-        <button class="btn ghost" id="mCloseAbout" style="align-self:center;min-width:120px">关闭</button>
+        <button class="btn ghost" id="mCloseAbout" style="align-self:center;min-width:120px">${tr('about.close', '关闭')}</button>
       </div>`, host => {
       host.querySelector('#mCloseAbout').onclick = closeModal;
     });
@@ -1477,6 +1495,7 @@
       const prevRoomSig = roomSignature(prev?.room);
       adoptBootThemeBackground(data);
       state.boot = data;
+      applyLocale(data.settings?.locale);
       migrateLegacyAssetStorage();
       state.update = data.update || state.update;
       state.compatibility = data.compatibility || state.compatibility;
@@ -1687,11 +1706,16 @@
     // 左下角只显示昵称，不再暴露 UID；冲突/失效时统一显示未登录。
     const showLoggedOut = !auth?.loggedIn || auth?.state === 'conflict' || auth?.state === 'invalid';
     document.getElementById('userChip').textContent = showLoggedOut
-      ? '未登录'
-      : (auth.nickname || '漂泊者');
+      ? tr('common.notLoggedIn', '未登录')
+      : (auth.nickname || tr('common.defaultNickname', '漂泊者'));
     document.querySelectorAll('.tab').forEach(btn => btn.classList.toggle('active', btn.dataset.page === state.page));
+    document.querySelectorAll('.tab').forEach(btn => {
+      const pageInfo = PAGES.find(p => p.key === btn.dataset.page);
+      const label = btn.querySelector('span');
+      if (pageInfo && label) label.textContent = pageTitleOf(pageInfo);
+    });
     const page = PAGES.find(p => p.key === state.page);
-    document.getElementById('pageTitle').textContent = page ? page.title : '';
+    document.getElementById('pageTitle').textContent = pageTitleOf(page);
     updateSynthBadge();
     renderNotices();
   }
@@ -1837,61 +1861,61 @@
     const isGlobal = reg === 'global';
     const mode = !isGlobal && state.loginMode === 'phone' ? 'phone' : 'uid';
     return `<div class="login-wrap"><div class="login-card">
-      <h2>登录 Wuwa Tappo</h2>
+      <h2>${tr('login.title', '登录 Wuwa Tappo')}</h2>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-        <span style="font-size:13px;color:var(--text-sub,#888);white-space:nowrap">区服：</span>
+        <span style="font-size:13px;color:var(--text-sub,#888);white-space:nowrap">${tr('login.region', '区服：')}</span>
         <select class="select" id="loginRegion" style="flex:1">
-          <option value="cn" ${!isGlobal ? 'selected' : ''}>国服（CN）</option>
-          <option value="global" ${isGlobal ? 'selected' : ''}>国际服（Global）</option>
+          <option value="cn" ${!isGlobal ? 'selected' : ''}>${tr('login.regionCn', '国服（CN）')}</option>
+          <option value="global" ${isGlobal ? 'selected' : ''}>${tr('login.regionGlobal', '国际服（Global）')}</option>
         </select>
       </div>
 
       ${isGlobal ? `
         <div class="hint" style="color:var(--text-sub,#888);line-height:1.6;margin-bottom:14px;background:rgba(0,0,0,0.03);padding:10px 12px;border-radius:6px;border:1px solid var(--border,#e0d4c3)">
-          <strong>国际服提示：</strong>国际服不支持游戏内 UID 邮件验证码。请先在电脑上登录官方 WuwaTappo 国际服客户端，再点击下方按钮继承登录状态。
+          <strong>${tr('login.globalHintTitle', '国际服提示：')}</strong>${tr('login.globalHint', '国际服不支持游戏内 UID 邮件验证码。请先在电脑上登录官方 WuwaTappo 国际服客户端，再点击下方按钮继承登录状态。')}
         </div>
 
-        <button class="btn" id="loginWeb" style="margin-bottom:10px;width:100%">使用官方网页登录（支持 Google / X 等）</button>
+        <button class="btn" id="loginWeb" style="margin-bottom:10px;width:100%">${tr('login.web', '使用官方网页登录（支持 Google / X 等）')}</button>
         <div class="hint" style="color:var(--text-sub,#888);font-size:12px;line-height:1.6;margin-bottom:14px">
-          网页登录会在本程序内打开官方登录页，支持 Google / X / Apple / Facebook / LINE 等官方登录方式。登录回调只在本进程内处理，不会注册或抢占官方客户端的 wuwa-buddy 协议。
+          ${tr('login.webHint', '网页登录会在本程序内打开官方登录页，支持 Google / X / Apple / Facebook / LINE 等官方登录方式。登录回调只在本进程内处理，不会注册或抢占官方客户端的 wuwa-buddy 协议。')}
         </div>
-        <button class="btn ghost" id="loginInherit" style="margin-bottom:14px;width:100%">继承官方程序登录状态</button>
+        <button class="btn ghost" id="loginInherit" style="margin-bottom:14px;width:100%">${tr('login.inherit', '继承官方程序登录状态')}</button>
 
-        <div style="font-size:12px;color:var(--text-sub,#888);margin-bottom:6px">或手动输入 Token 登录：</div>
+        <div style="font-size:12px;color:var(--text-sub,#888);margin-bottom:6px">${tr('login.orToken', '或手动输入 Token 登录：')}</div>
         <div style="display:flex;gap:10px">
-          <input class="input" id="loginTokenInput" placeholder="输入 kuro_infoToken / infoToken" style="flex:1" />
-          <button class="btn ghost" id="loginTokenBtn">Token 登录</button>
+          <input class="input" id="loginTokenInput" placeholder="${tr('login.tokenPlaceholder', '输入 kuro_infoToken / infoToken')}" style="flex:1" />
+          <button class="btn ghost" id="loginTokenBtn">${tr('login.tokenButton', 'Token 登录')}</button>
         </div>
       ` : `
         <div class="pill-row" style="margin-bottom:12px">
-          <button type="button" class="pill ${mode === 'uid' ? 'active' : ''}" data-login-mode="uid">UID 验证码</button>
-          <button type="button" class="pill ${mode === 'phone' ? 'active' : ''}" data-login-mode="phone">手机号登录</button>
+          <button type="button" class="pill ${mode === 'uid' ? 'active' : ''}" data-login-mode="uid">${tr('login.uidMode', 'UID 验证码')}</button>
+          <button type="button" class="pill ${mode === 'phone' ? 'active' : ''}" data-login-mode="phone">${tr('login.phoneMode', '手机号登录')}</button>
         </div>
         ${mode === 'phone' ? `
-          <div class="hint">使用库洛通行证手机号登录；验证码由库洛发送，可能需要人机验证。</div>
-          <input class="input" id="loginPhone" placeholder="手机号（11 位）" inputmode="numeric" maxlength="11" autocomplete="tel" />
+          <div class="hint">${tr('login.phoneHint', '使用库洛通行证手机号登录；验证码由库洛发送，可能需要人机验证。')}</div>
+          <input class="input" id="loginPhone" placeholder="${tr('login.phonePlaceholder', '手机号（11 位）')}" inputmode="numeric" maxlength="11" autocomplete="tel" />
           <div style="display:flex;gap:10px">
-            <input class="input" id="loginPhoneCode" placeholder="短信验证码" style="flex:1" inputmode="numeric" maxlength="6" autocomplete="one-time-code" />
-            <button class="btn ghost" id="phoneSendBtn">发送验证码</button>
+            <input class="input" id="loginPhoneCode" placeholder="${tr('login.phoneCodePlaceholder', '短信验证码')}" style="flex:1" inputmode="numeric" maxlength="6" autocomplete="one-time-code" />
+            <button class="btn ghost" id="phoneSendBtn">${tr('login.sendCode', '发送验证码')}</button>
           </div>
-          <button class="btn" id="phoneLoginBtn">手机号登录</button>
-          <div class="hint">登录成功后会同步该通行证绑定的鸣潮角色。</div>
+          <button class="btn" id="phoneLoginBtn">${tr('login.phoneLogin', '手机号登录')}</button>
+          <div class="hint">${tr('login.phoneSuccessHint', '登录成功后会同步该通行证绑定的鸣潮角色。')}</div>
         ` : `
-          <div class="hint">使用游戏 UID 登录；如果无法完成验证码登录，请使用官方登录状态。</div>
-          <input class="input" id="loginUid" placeholder="游戏 UID（9-10 位）" inputmode="numeric" maxlength="10" />
+          <div class="hint">${tr('login.uidHint', '使用游戏 UID 登录；如果无法完成验证码登录，请使用官方登录状态。')}</div>
+          <input class="input" id="loginUid" placeholder="${tr('login.uidPlaceholder', '游戏 UID（9-10 位）')}" inputmode="numeric" maxlength="10" />
           <div style="display:flex;gap:10px">
-            <input class="input" id="loginCode" placeholder="6 位验证码" style="flex:1" inputmode="numeric" maxlength="6" autocomplete="one-time-code" />
-            <button class="btn ghost" id="sendCodeBtn">发送验证码</button>
+            <input class="input" id="loginCode" placeholder="${tr('login.codePlaceholder', '6 位验证码')}" style="flex:1" inputmode="numeric" maxlength="6" autocomplete="one-time-code" />
+            <button class="btn ghost" id="sendCodeBtn">${tr('login.sendCode', '发送验证码')}</button>
           </div>
-          <button class="btn" id="loginBtn">登录</button>
+          <button class="btn" id="loginBtn">${tr('login.loginButton', '登录')}</button>
         `}
-        <div class="hint">如果无法完成验证码登录，请先在官方客户端登录，再点击下方按钮继承官方登录状态。</div>
-        <button class="btn ghost" id="loginInherit">继承官方程序登录状态</button>
+        <div class="hint">${tr('login.inheritHint', '如果无法完成验证码登录，请先在官方客户端登录，再点击下方按钮继承官方登录状态。')}</div>
+        <button class="btn ghost" id="loginInherit">${tr('login.inherit', '继承官方程序登录状态')}</button>
 
         <div style="margin-top:12px;border-top:1px dashed var(--border,#e0d4c3);padding-top:10px">
           <div style="display:flex;gap:10px">
-            <input class="input" id="loginTokenInput" placeholder="手动输入 Token 登录" style="flex:1" />
-            <button class="btn ghost" id="loginTokenBtn">Token 登录</button>
+            <input class="input" id="loginTokenInput" placeholder="${tr('login.manualTokenPlaceholder', '手动输入 Token 登录')}" style="flex:1" />
+            <button class="btn ghost" id="loginTokenBtn">${tr('login.tokenButton', 'Token 登录')}</button>
           </div>
         </div>
       `}
@@ -1957,21 +1981,21 @@
     if (send) {
       send.onclick = async () => {
         const uid = uidEl?.value.trim();
-        if (!uid) return toast('请输入游戏 UID', 'err');
-        if (!uidValid(uid)) return toast('请输入 9-10 位游戏 UID', 'err');
-        try { await tryCall('login.sendCode', { uid }); toast('验证码已发送'); } catch { }
+        if (!uid) return toast(tr('login.toastUidRequired', '请输入游戏 UID'), 'err');
+        if (!uidValid(uid)) return toast(tr('login.toastUidInvalid', '请输入 9-10 位游戏 UID'), 'err');
+        try { await tryCall('login.sendCode', { uid }); toast(tr('login.toastCodeSent', '验证码已发送')); } catch { }
       };
     }
     if (go) {
       go.onclick = async () => {
         const uid = uidEl?.value.trim();
         const code = codeEl?.value.trim();
-        if (!uid) return toast('请输入游戏 UID', 'err');
-        if (!uidValid(uid)) return toast('请输入 9-10 位游戏 UID', 'err');
-        if (!/^[0-9]{6}$/.test(code)) return toast('请输入 6 位数字验证码', 'err');
+        if (!uid) return toast(tr('login.toastUidRequired', '请输入游戏 UID'), 'err');
+        if (!uidValid(uid)) return toast(tr('login.toastUidInvalid', '请输入 9-10 位游戏 UID'), 'err');
+        if (!/^[0-9]{6}$/.test(code)) return toast(tr('login.toastCodeInvalid', '请输入 6 位数字验证码'), 'err');
         try {
           await tryCall('login.submit', { uid, code });
-          toast('登录成功');
+          toast(tr('login.toastSuccess', '登录成功'));
           state.boot = await call('boot');
           renderChrome();
           navigate('bag');
@@ -1981,11 +2005,11 @@
     if (phoneSend) {
       phoneSend.onclick = async () => {
         const phone = phoneEl?.value.trim();
-        if (!phone) return toast('请输入手机号', 'err');
-        if (!/^1[3-9]\d{9}$/.test(phone)) return toast('请输入 11 位手机号', 'err');
+        if (!phone) return toast(tr('login.toastPhoneRequired', '请输入手机号'), 'err');
+        if (!/^1[3-9]\d{9}$/.test(phone)) return toast(tr('login.toastPhoneInvalid', '请输入 11 位手机号'), 'err');
         try {
           await tryCall('login.phone.sendCode', { phone });
-          toast('短信验证码已发送');
+          toast(tr('login.toastSmsSent', '短信验证码已发送'));
           startCooldown(phoneSend, 60, '发送验证码');
         } catch { }
       };
@@ -1994,12 +2018,12 @@
       phoneLogin.onclick = async () => {
         const phone = phoneEl?.value.trim();
         const code = phoneCodeEl?.value.trim();
-        if (!phone) return toast('请输入手机号', 'err');
-        if (!/^1[3-9]\d{9}$/.test(phone)) return toast('请输入 11 位手机号', 'err');
-        if (!/^[0-9]{4,6}$/.test(code)) return toast('请输入 4-6 位短信验证码', 'err');
+        if (!phone) return toast(tr('login.toastPhoneRequired', '请输入手机号'), 'err');
+        if (!/^1[3-9]\d{9}$/.test(phone)) return toast(tr('login.toastPhoneInvalid', '请输入 11 位手机号'), 'err');
+        if (!/^[0-9]{4,6}$/.test(code)) return toast(tr('login.toastSmsInvalid', '请输入 4-6 位短信验证码'), 'err');
         try {
           await tryCall('login.phone.submit', { phone, code });
-          toast('登录成功');
+          toast(tr('login.toastSuccess', '登录成功'));
           state.boot = await call('boot');
           renderChrome();
           navigate('bag');
@@ -2011,10 +2035,10 @@
     if (tokenBtn && tokenInput) {
       tokenBtn.onclick = async () => {
         const tok = tokenInput.value.trim();
-        if (!tok) return toast('请输入 Token', 'err');
+        if (!tok) return toast(tr('login.toastTokenRequired', '请输入 Token'), 'err');
         try {
           await tryCall('login.token', { token: tok });
-          toast('登录成功');
+          toast(tr('login.toastSuccess', '登录成功'));
           state.boot = await call('boot');
           renderChrome();
           navigate('bag');
@@ -2024,7 +2048,7 @@
     document.getElementById('loginWeb')?.addEventListener('click', async () => {
       try {
         await tryCall('login.foreign.start');
-        toast('登录成功');
+        toast(tr('login.toastSuccess', '登录成功'));
         state.boot = await call('boot');
         renderChrome();
         navigate('bag');
@@ -5209,23 +5233,23 @@
     const scroller = document.querySelector('.settings-scroll');
     if (!scroller) return;
     const sections = [...scroller.querySelectorAll(':scope > .section')];
-    const byTitle = new Map();
+    const byId = new Map();
     for (const section of sections) {
-      const title = section.querySelector('.section-title')?.textContent.trim();
-      if (title) byTitle.set(title, section);
+      const id = section.dataset.sectionId;
+      if (id) byId.set(id, section);
     }
-    const makeGroup = (id, title, subtitle, sectionTitles) => {
+    const makeGroup = (id, title, subtitle, sectionIds) => {
       const group = createSettingsGroup(id, title, subtitle);
       const body = group.querySelector('.settings-group-body');
-      for (const name of sectionTitles) {
-        const section = byTitle.get(name);
+      for (const sectionId of sectionIds) {
+        const section = byId.get(sectionId);
         if (section) body.appendChild(section);
       }
       return body.children.length ? group : null;
     };
 
     const groups = [];
-    const basic = createSettingsGroup('basic', '基础辅助', '点击、自动补贴与自动开箱', true);
+    const basic = createSettingsGroup('basic', tr('settings.group.basic', '基础辅助'), tr('settings.group.basicSub', '点击、自动补贴与自动开箱'), true);
     const basicBody = basic.querySelector('.settings-group-body');
     const clickRows = [...scroller.querySelectorAll('.detail-row')]
       .filter(row => /可用点击|累计点击|已消耗/.test(row.textContent || ''));
@@ -5252,13 +5276,13 @@
     if (gameModeItem && gameRuleItem) gameModeItem.insertAdjacentElement('afterend', gameRuleItem);
 
     groups.push(
-      makeGroup('account', '账号与兑换', '区服、账号、点击与兑换码', ['账号', '兑换']),
-      makeGroup('input', '输入与录制', '桌面键盘与快捷键', ['桌面键盘', '快捷键']),
-      makeGroup('window', '桌宠与窗口', '大小、屏幕、不透明度与头饰微调', ['窗口与桌宠', '头饰位置微调']),
-      makeGroup('obs', 'OBS 采集', '采集窗口、背景与兼容模式', ['OBS 采集']),
-      makeGroup('theme', '主题与外观', '主题色、背景图与主题预设', ['主题与外观']),
-      makeGroup('interaction', '联机与互动', '联机桌宠、宝箱、自动化与通知', ['联机与宝箱', '自动化', '通知']),
-      makeGroup('maintenance', '程序与更新', '启动、权限、规则、更新与日志', ['其他', '更新'])
+      makeGroup('account', tr('settings.group.account', '账号与兑换'), tr('settings.group.accountSub', '区服、账号、点击与兑换码'), ['account', 'redeem']),
+      makeGroup('input', tr('settings.group.input', '输入与录制'), tr('settings.group.inputSub', '桌面键盘与快捷键'), ['keyboard', 'hotkeys']),
+      makeGroup('window', tr('settings.group.window', '桌宠与窗口'), tr('settings.group.windowSub', '大小、屏幕、不透明度与头饰微调'), ['window', 'accessory']),
+      makeGroup('obs', tr('settings.group.obs', 'OBS 采集'), tr('settings.group.obsSub', '采集窗口、背景与兼容模式'), ['obs']),
+      makeGroup('theme', tr('settings.group.theme', '主题与外观'), tr('settings.group.themeSub', '主题色、背景图与主题预设'), ['theme']),
+      makeGroup('interaction', tr('settings.group.interaction', '联机与互动'), tr('settings.group.interactionSub', '联机桌宠、宝箱、自动化与通知'), ['room', 'auto', 'notify']),
+      makeGroup('maintenance', tr('settings.group.maintenance', '程序与更新'), tr('settings.group.maintenanceSub', '启动、权限、规则、更新与日志'), ['other', 'update'])
     );
 
     const anchor = scroller.querySelector('.compat-banner') || scroller.querySelector('.settings-footer');
@@ -5296,6 +5320,7 @@
   function renderSettings() {
     const viewState = captureSettingsViewState();
     const s = state.boot?.settings || {};
+    const currentLocale = (window.I18N?.locale) || s.locale || 'zh';
     applyTheme(s);
     const auth = state.boot?.auth || {};
     const currentAuthState = auth.state || (auth.loggedIn ? 'valid' : 'loggedOut');
@@ -5387,13 +5412,28 @@
     setPage(`
       <div class="settings-scroll">
         <div class="settings-search-bar">
-          <input class="input" id="settingsSearch" placeholder="搜索设置项（名称或说明）" value="${esc(state.settingsSearch)}" autocomplete="off" />
+          <input class="input" id="settingsSearch" placeholder="${tr('settings.searchPlaceholder', '搜索设置项（名称或说明）')}" value="${esc(state.settingsSearch)}" autocomplete="off" />
           <span class="muted" id="settingsSearchCount"></span>
         </div>
-        <div class="empty-state hidden" id="settingsSearchEmpty">没有匹配的设置项</div>
+        <div class="empty-state hidden" id="settingsSearchEmpty">${tr('settings.searchEmpty', '没有匹配的设置项')}</div>
         ${updateBannerHtml()}
-        <div class="section">
-          <div class="section-title">账号</div>
+        <div class="section" data-section-id="language">
+          <div class="section-title">${tr('settings.section.language', '界面语言')}</div>
+          <div class="panel-box">
+            <div class="setting-item">
+              <div><div class="setting-title">${tr('settings.language.title', '界面语言')}</div><div class="setting-sub">${tr('settings.language.sub', '切换后立即生效；部分内容仍为中文。')}</div></div>
+              <div class="setting-content">
+                <select class="select" id="setLocale">
+                  <option value="zh" ${currentLocale === 'zh' ? 'selected' : ''}>${tr('settings.language.zh', '中文')}</option>
+                  <option value="en" ${currentLocale === 'en' ? 'selected' : ''}>${tr('settings.language.en', 'English (Preview)')}</option>
+                  <option value="ja" ${currentLocale === 'ja' ? 'selected' : ''}>${tr('settings.language.ja', '日本語 (Preview)')}</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="section" data-section-id="account">
+          <div class="section-title">${tr('settings.section.account', '账号')}</div>
           <div class="panel-box" style="display:flex;flex-direction:column;gap:12px">
             <div class="setting-item" style="padding:0 0 10px 0;border-bottom:1px solid var(--border,#eee)">
               <div><div class="setting-title">服务器区服</div><div class="setting-sub">选择官方桌宠所在的区服（切换后需重新登录）</div></div>
@@ -5455,8 +5495,8 @@
           </div>
         </div>
 
-        <div class="section">
-          <div class="section-title">窗口与桌宠</div>
+        <div class="section" data-section-id="window">
+          <div class="section-title">${tr('settings.section.window', '窗口与桌宠')}</div>
           <div class="setting-item">
             <div><div class="setting-title">桌宠大小</div><div class="setting-sub">拖动滑条以 1% 细调，或选择常用档位；缩放以猫底部中心为锚点</div></div>
             <div class="setting-content">
@@ -5575,8 +5615,8 @@
           </div>
         </div>
 
-        <div class="section">
-          <div class="section-title">OBS 采集</div>
+        <div class="section" data-section-id="obs">
+          <div class="section-title">${tr('settings.section.obs', 'OBS 采集')}</div>
           <div class="setting-item">
             <div><div class="setting-title">OBS 采集窗口</div><div class="setting-sub">主角完整 GUI（数字/计数条/宝箱/昵称）和键盘/手柄面板一起显示；可自定义背景色或设为透明</div></div>
             <div class="switch ${s.captureMode ? 'on' : ''}" data-switch="captureMode"></div>
@@ -5613,8 +5653,8 @@
           </div>
         </div>
 
-        <div class="section">
-          <div class="section-title">头饰位置微调</div>
+        <div class="section" data-section-id="accessory">
+          <div class="section-title">${tr('settings.section.accessory', '头饰位置微调')}</div>
           <div class="setting-item accessory-tuning">
             <div class="accessory-tuning-head">
               <div>
@@ -5668,8 +5708,8 @@
           </div>
         </div>
 
-        <div class="section" id="themeSection">
-          <div class="section-title">主题与外观</div>
+        <div class="section" id="themeSection" data-section-id="theme">
+          <div class="section-title">${tr('settings.section.theme', '主题与外观')}</div>
           <div class="setting-item">
             <div><div class="setting-title">主题色</div><div class="setting-sub">作为主色自动生成整套面板配色，也用于桌宠底部信息条</div></div>
             <div class="setting-content">
@@ -5782,8 +5822,8 @@
           </div>
         </div>
 
-        <div class="section">
-          <div class="section-title">桌面键盘</div>
+        <div class="section" data-section-id="keyboard">
+          <div class="section-title">${tr('settings.section.keyboard', '桌面键盘')}</div>
           <div class="setting-item">
             <div><div class="setting-title">音游模式</div><div class="setting-sub">把鸣潮专属指示器替换音游指示器；开启后立即切换</div></div>
             <div class="switch ${s.rhythmMode ? 'on' : ''}" data-switch="rhythmMode"></div>
@@ -5815,8 +5855,8 @@
           </div>
         </div>
 
-        <div class="section">
-          <div class="section-title">快捷键</div>
+        <div class="section" data-section-id="hotkeys">
+          <div class="section-title">${tr('settings.section.hotkeys', '快捷键')}</div>
           <div class="hint muted" style="font-size:12px;margin:-4px 0 10px">点击输入框后按下新组合键；Esc 取消，退格清除（禁用该快捷键）。支持 Ctrl / Alt / Shift + 普通按键。快捷键为被动监听，不会拦截其他程序的按键，也不影响按键延迟。</div>
           <div class="setting-item">
             <div><div class="setting-title">分开设置底栏快捷键</div><div class="setting-sub">关闭时用一个快捷键同时切换主角和远程角色底栏；开启后分别用两个快捷键控制。切换只影响当前显示和注册的行，另一模式已录制的绑定会保留。</div></div>
@@ -5836,8 +5876,8 @@
           </div>
         </div>
 
-        <div class="section">
-          <div class="section-title">联机与宝箱</div>
+        <div class="section" data-section-id="room">
+          <div class="section-title">${tr('settings.section.room', '联机与宝箱')}</div>
           <div class="setting-item">
             <div><div class="setting-title">联机桌宠排列</div><div class="setting-sub">横向贴底部排成一排；纵向贴屏幕右侧，排满后向左换列</div></div>
             <div class="setting-content">
@@ -5876,8 +5916,8 @@
           ${forcedOnlineRow}
         </div>
 
-        <div class="section">
-          <div class="section-title">自动化</div>
+        <div class="section" data-section-id="auto">
+          <div class="section-title">${tr('settings.section.auto', '自动化')}</div>
           <div class="setting-item">
             <div><div class="setting-title">自动表情</div><div class="setting-sub">每次产生敲击时自动发送一个表情；受下方每秒上限限制</div></div>
             <div class="switch ${s.autoEmoteEnabled ? 'on' : ''}" data-switch="autoEmoteEnabled"></div>
@@ -5918,8 +5958,8 @@
           </div>
         </div>
 
-        <div class="section">
-          <div class="section-title">通知</div>
+        <div class="section" data-section-id="notify">
+          <div class="section-title">${tr('settings.section.notify', '通知')}</div>
           <div class="setting-item">
             <div><div class="setting-title">宝箱领取通知</div><div class="setting-sub">自动领取成功后发送 Windows 通知</div></div>
             <div class="switch ${s.notifyChestClaimed !== false ? 'on' : ''}" data-switch="notifyChestClaimed"></div>
@@ -5930,16 +5970,16 @@
           </div>
         </div>
 
-        <div class="section">
-          <div class="section-title">兑换</div>
+        <div class="section" data-section-id="redeem">
+          <div class="section-title">${tr('settings.section.redeem', '兑换')}</div>
           <div class="panel-box" style="display:flex;gap:10px">
             <input class="input" id="redeemCode" placeholder="输入兑换码" style="flex:1" />
             <button class="btn" id="redeemBtn">兑换</button>
           </div>
         </div>
 
-        <div class="section">
-          <div class="section-title">其他</div>
+        <div class="section" data-section-id="other">
+          <div class="section-title">${tr('settings.section.other', '其他')}</div>
           <div class="setting-item">
             <div><div class="setting-title">开机自动启动</div><div class="setting-sub">登录 Windows 后自动运行桌宠（仅当前用户；管理员模式使用最高权限计划任务）</div></div>
             <div class="switch ${s.launchAtLogin ? 'on' : ''}" data-switch="launchAtLogin"></div>
@@ -5969,8 +6009,8 @@
           </div>
         </div>
 
-        <div class="section">
-          <div class="section-title">更新</div>
+        <div class="section" data-section-id="update">
+          <div class="section-title">${tr('settings.section.update', '更新')}</div>
           <div class="setting-item">
             <div><div class="setting-title">更新通道</div><div class="setting-sub">正式版只接收正式版；测试版同时接收正式版和后续测试版</div></div>
             <div class="setting-content">
@@ -7277,6 +7317,15 @@
         }, wait);
       };
     }
+    document.getElementById('setLocale')?.addEventListener('change', async e => {
+      const val = ['zh', 'en', 'ja'].includes(e.target.value) ? e.target.value : 'zh';
+      const boot = await tryCall('settings.set', { locale: val });
+      if (boot?.settings) state.boot = boot;
+      applyLocale(val);
+      renderChrome();
+      renderSettings();
+      toast(tr('common.languageChanged', '界面语言已切换'));
+    });
     document.getElementById('setServerRegion')?.addEventListener('change', async e => {
       const val = e.target.value;
       if (val !== (state.boot?.settings?.serverRegion || 'cn')) {
@@ -7310,16 +7359,16 @@
     });
     document.getElementById('setSend')?.addEventListener('click', async () => {
       const uid = val('setUid');
-      if (!uid) return toast('请输入游戏 UID', 'err');
-      if (!/^[0-9]{9,10}$/.test(uid)) return toast('请输入 9-10 位游戏 UID', 'err');
-      try { await tryCall('login.sendCode', { uid }); toast('验证码已发送'); } catch { }
+      if (!uid) return toast(tr('login.toastUidRequired', '请输入游戏 UID'), 'err');
+      if (!/^[0-9]{9,10}$/.test(uid)) return toast(tr('login.toastUidInvalid', '请输入 9-10 位游戏 UID'), 'err');
+      try { await tryCall('login.sendCode', { uid }); toast(tr('login.toastCodeSent', '验证码已发送')); } catch { }
     });
     document.getElementById('setLogin')?.addEventListener('click', async () => {
       const uid = val('setUid'), code = val('setCode');
       if (!uid || !code) return toast('请输入游戏 UID 与验证码', 'err');
-      if (!/^[0-9]{9,10}$/.test(uid)) return toast('请输入 9-10 位游戏 UID', 'err');
-      if (!/^[0-9]{6}$/.test(code)) return toast('请输入 6 位数字验证码', 'err');
-      try { await tryCall('login.submit', { uid, code }); state.boot = await call('boot'); renderChrome(); navigate('bag'); toast('登录成功'); } catch { }
+      if (!/^[0-9]{9,10}$/.test(uid)) return toast(tr('login.toastUidInvalid', '请输入 9-10 位游戏 UID'), 'err');
+      if (!/^[0-9]{6}$/.test(code)) return toast(tr('login.toastCodeInvalid', '请输入 6 位数字验证码'), 'err');
+      try { await tryCall('login.submit', { uid, code }); state.boot = await call('boot'); renderChrome(); navigate('bag'); toast(tr('login.toastSuccess', '登录成功')); } catch { }
     });
     document.getElementById('setPhoneLoginOpen')?.addEventListener('click', () => {
       state.loginMode = 'phone';
