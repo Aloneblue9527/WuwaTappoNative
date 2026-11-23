@@ -972,6 +972,27 @@ public sealed class PanelWindow : Form
                 _app.CheckAutoChestNow();
                 return new { loggedIn = true, nickname = auth.Nickname };
 
+            case "login.foreign.start":
+            {
+                if (!string.Equals(_app.Cfg.ServerRegion, "global", StringComparison.OrdinalIgnoreCase))
+                    throw new ApiException(-1, "网页登录仅支持国际服");
+                // 这个命令来自 WebView2 的 WebMessageReceived 回调。若在回调栈里直接
+                // ShowDialog，会阻塞同一 UI 线程上 WebView2 的消息泵，第二个 WebView2
+                // 环境往往初始化超时（只有窗口底色）。先让出一轮消息循环再开窗。
+                await Task.Yield();
+                using var login = new ForeignLoginWindow();
+                var session = login.ShowLogin(this);
+                if (session == null)
+                    throw new ApiException(-1, string.IsNullOrWhiteSpace(login.ErrorMessage) ? "已取消网页登录" : login.ErrorMessage);
+                await auth.LoginWithForeignSessionAsync(
+                    session.Cuid, session.Puid, session.UserId, session.UserName, session.AccessToken);
+                _app.Pet.BeginInvoke(new Action(() => _app.Pet.ApplySettings()));
+                await _app.Room.EnsureLobbyAsync();
+                await _app.ResumeLastRoomAsync();
+                _app.CheckAutoChestNow();
+                return new { loggedIn = true, nickname = auth.Nickname };
+            }
+
             case "login.token":
                 auth.SetTokenManually(ApiClient.ReadString(data["token"]));
                 if (await auth.TryRestoreAsync())

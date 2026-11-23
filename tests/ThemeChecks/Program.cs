@@ -65,6 +65,7 @@ internal static class Program
             CheckMirrorMode();
             CheckPerfOptimizations();
             CheckHiddenMemberVisibility();
+            CheckForeignSessionCallback();
             if (args.Length > 0 && File.Exists(args[0])) CheckExternalPresetFile(args[0]);
 
             Console.WriteLine($"PASS: {_checks} assertions.");
@@ -2588,6 +2589,44 @@ internal static class Program
                 && pet.Contains("cat.Show();", StringComparison.Ordinal),
             "New remote members must only be shown when F9 hidden mode is off.");
         Console.WriteLine("PASS: F9-hidden mode blocks new and recreated remote windows from showing.");
+    }
+
+    static void CheckForeignSessionCallback()
+    {
+        const string state = "state-123";
+        const string uri = "wuwa-buddy://auth/callback?state=state-123&access_token=token-abc&cuid=123456789&puid=987654321&userId=111111&userName=tester";
+        Assert(ForeignSessionCallback.TryParse(uri, state, out var session, out string error),
+            "Valid foreign login callback must parse: " + error);
+        Assert(session.AccessToken == "token-abc" && session.Cuid == "123456789" &&
+               session.Puid == "987654321" && session.UserId == "111111" && session.UserName == "tester",
+            "Foreign login callback fields must map to ForeignSessionInfo.");
+        Assert(!ForeignSessionCallback.TryParse(uri, "wrong-state", out _, out _),
+            "Mismatched OAuth state must be rejected.");
+        Assert(!ForeignSessionCallback.TryParse(
+                "wuwa-buddy://auth/callback?state=state-123&state=state-123&access_token=token-abc&cuid=1", state, out _, out _),
+            "Duplicate callback parameters must be rejected.");
+        Assert(!ForeignSessionCallback.TryParse(
+                "wuwa-buddy://auth/callback?state=state-123&access_token=token-abc&cuid=123456789&puid=1&userId=1&userName=t", "other", out _, out _),
+            "Wrong state must not be accepted.");
+        Assert(!ForeignSessionCallback.TryParse(
+                "wuwa-buddy://evil/callback?state=state-123&access_token=token-abc&cuid=1", state, out _, out _),
+            "Callback host/path must be strictly validated.");
+
+        string panel = ReadRepoSource("src", "Ui", "PanelWindow.cs");
+        Assert(panel.Contains("login.foreign.start", StringComparison.Ordinal)
+                && panel.Contains("LoginWithForeignSessionAsync", StringComparison.Ordinal),
+            "Panel must expose the foreign web login command.");
+        Assert(panel.Contains("await Task.Yield();", StringComparison.Ordinal),
+            "Foreign login must yield out of the WebView2 message callback before ShowDialog.");
+        string loginWindow = ReadRepoSource("src", "Ui", "ForeignLoginWindow.cs");
+        Assert(loginWindow.Contains("CoreWebView2Environment.CreateAsync", StringComparison.Ordinal)
+                && !loginWindow.Contains("CreationProperties", StringComparison.Ordinal),
+            "Foreign login must use an explicit WebView2 environment; CreationProperties leaves the window blank.");
+        string web = ReadRepoSource("wwwroot", "app.js");
+        Assert(web.Contains("loginWeb", StringComparison.Ordinal)
+                && web.Contains("login.foreign.start", StringComparison.Ordinal),
+            "Global login UI must expose the official web login button.");
+        Console.WriteLine("PASS: foreign login callback parsing, state checks and panel wiring.");
     }
 
     static void CheckRoomProtocol105()

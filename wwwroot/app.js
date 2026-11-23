@@ -1851,7 +1851,11 @@
           <strong>国际服提示：</strong>国际服不支持游戏内 UID 邮件验证码。请先在电脑上登录官方 WuwaTappo 国际服客户端，再点击下方按钮继承登录状态。
         </div>
 
-        <button class="btn" id="loginInherit" style="margin-bottom:14px;width:100%">继承官方程序登录状态</button>
+        <button class="btn" id="loginWeb" style="margin-bottom:10px;width:100%">使用官方网页登录（支持 Google）</button>
+        <div class="hint" style="color:var(--text-sub,#888);font-size:12px;line-height:1.6;margin-bottom:14px">
+          网页登录会在本程序内打开官方登录页；Google 登录需要能访问 accounts.google.com。登录回调只在本进程内处理，不会注册或抢占官方客户端的 wuwa-buddy 协议。
+        </div>
+        <button class="btn ghost" id="loginInherit" style="margin-bottom:14px;width:100%">继承官方程序登录状态</button>
 
         <div style="font-size:12px;color:var(--text-sub,#888);margin-bottom:6px">或手动输入 Token 登录：</div>
         <div style="display:flex;gap:10px">
@@ -2017,6 +2021,15 @@
         } catch { }
       };
     }
+    document.getElementById('loginWeb')?.addEventListener('click', async () => {
+      try {
+        await tryCall('login.foreign.start');
+        toast('登录成功');
+        state.boot = await call('boot');
+        renderChrome();
+        navigate('bag');
+      } catch { }
+    });
     document.getElementById('loginInherit')?.addEventListener('click', showInheritLogin);
   }
 
