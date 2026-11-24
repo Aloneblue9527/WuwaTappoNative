@@ -113,8 +113,7 @@ static class Program
                     .Append(" scale=").Append(cfg.Scale)
                     .Append(" serverRegion=").Append(cfg.ServerRegion)
                     .Append(" updateChannel=").Append(cfg.UpdateChannel)
-                    .Append(" autoSynthUp=").Append(cfg.AutoSynthUp)
-                    .Append(" anyItemSynthesisEnabled=").Append(cfg.AnyItemSynthesisEnabled);
+                    .Append(" autoSynthUp=").Append(cfg.AutoSynthUp);
             }
             Log.Info(sb.ToString(), "startup");
         }

@@ -69,6 +69,11 @@ internal static class Program
             CheckHiddenMemberVisibility();
             CheckForeignSessionCallback();
             CheckI18n();
+            CheckCompanionPets();
+            CheckAppearanceRotation();
+            CheckTrayHideOtherPets();
+            CheckChestNotificationFilters();
+            CheckAdvancedSynthRemoved();
             if (args.Length > 0 && File.Exists(args[0])) CheckExternalPresetFile(args[0]);
 
             Console.WriteLine($"PASS: {_checks} assertions.");
@@ -1184,6 +1189,17 @@ internal static class Program
             "50% scaled accessory must not hit its old outer edge.");
         Assert(PetComposer.HitTestCat(frames, 1, 1, 60, 100, 0, 0, 50, 0),
             "50% scaled accessory must hit inside the scaled rect.");
+
+        string pet = ReadRepoSource("src", "Pet", "PetWindow.cs");
+        string config = ReadRepoSource("src", "Core", "Config.cs");
+        string web = ReadRepoSource("wwwroot", "app.js");
+        Assert(pet.Contains("AccessoryKey(characterId, accessoryId)", StringComparison.Ordinal)
+                && pet.Contains("characterId + \":\" + accessoryId", StringComparison.Ordinal),
+            "Accessory transforms must be keyed by character + accessory.");
+        Assert(config.Contains("cfg.CharacterAssetId + \":\" + key", StringComparison.Ordinal),
+            "Legacy accessory offsets must migrate to the current character key.");
+        Assert(web.Contains("`${char}:${id}`", StringComparison.Ordinal),
+            "Preset previews must read character-scoped accessory offsets.");
         Console.WriteLine("PASS: accessory transform legacy compatibility, clamping, rendering, cache key and hit testing.");
     }
 
@@ -2190,7 +2206,7 @@ internal static class Program
     /// </summary>
     static void CheckSynthesisSnapshotSerialization()
     {
-        var cfg = new Settings { AutoSynthUp = true, AnyItemSynthesisEnabled = false };
+        var cfg = new Settings { AutoSynthUp = true };
         var snapshot = SynthesisLog.StartAuto(manual: false, cfg);
         snapshot.Bag.Total = 1;
         snapshot.Bag.Items.Add(new AutoSynthesisItemSnapshot
@@ -2743,8 +2759,31 @@ internal static class Program
                 && panel.Contains("case \"locale\":", StringComparison.Ordinal),
             "Boot payload and settings.set must pass the locale through.");
         string config = ReadRepoSource("src", "Core", "Config.cs");
-        Assert(config.Contains("public string Locale", StringComparison.Ordinal),
-            "Config must persist the selected locale.");
+        string localization = ReadRepoSource("src", "Core", "Localization.cs");
+        Assert(config.Contains("public string Locale", StringComparison.Ordinal)
+                && config.Contains("Locale { get; set; } = \"\"", StringComparison.Ordinal)
+                && config.Contains("Localization.SystemDefault()", StringComparison.Ordinal),
+            "Config must persist an explicit locale and use the system UI language when it is unset.");
+        Assert(localization.Contains("SystemDefault", StringComparison.Ordinal)
+                && localization.Contains("CurrentUICulture", StringComparison.Ordinal),
+            "Localization must derive the default from the system UI language.");
+
+        string previousRoot = Paths.Root;
+        string localeTestRoot = Path.Combine(Path.GetTempPath(), "wuwa-locale-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(localeTestRoot);
+            Paths.Root = localeTestRoot;
+            File.WriteAllText(Paths.ConfigFile, "{\"ServerRegion\":\"cn\"}", Encoding.UTF8);
+            var legacyLocale = ConfigStore.Load();
+            Assert(legacyLocale.Locale is "zh" or "en" or "ja",
+                "A legacy config without Locale must detect a supported system language instead of defaulting to Chinese.");
+        }
+        finally
+        {
+            Paths.Root = previousRoot;
+            try { Directory.Delete(localeTestRoot, true); } catch { }
+        }
         string catalog = ReadRepoSource("src", "Assets", "Catalog.cs");
         Assert(catalog.Contains("GlobalAssetsHost", StringComparison.Ordinal)
                 && catalog.Contains("AcceptLanguageFor", StringComparison.Ordinal)
@@ -2813,6 +2852,456 @@ internal static class Program
             Assert(web.Contains(token, StringComparison.Ordinal), $"Web room UI token {token} is missing.");
 
         Console.WriteLine("PASS: 1.0.5 random-join/rooms-public/rk/rt/rm.p protocol and UI wiring.");
+    }
+
+    static void CheckCompanionPets()
+    {
+        Assert(CompanionPets.DisplayName("菲比·Miratsu") == "菲比",
+            "Companion display name must keep only the part before the middle dot.");
+        Assert(CompanionPets.DisplayName("菲比・Miratsu") == "菲比",
+            "Companion display name must also handle the Japanese middle dot.");
+        Assert(CompanionPets.DisplayName("菲比") == "菲比" && CompanionPets.DisplayName("  ") == "",
+            "Names without a middle dot must stay unchanged and empty input must stay empty.");
+
+        var cfg = new Settings();
+        cfg.Companions.Add(new CompanionPet { Id = "a", Name = "菲比·Miratsu", CharacterAssetId = 3060, AccessoryAssetId = 1604, ClickIntervalSeconds = 12, RandomClick = true, ShowBar = true });
+        cfg.Companions.Add(new CompanionPet { Id = "b", Name = "第二伙伴", CharacterAssetId = 3061, AccessoryAssetId = 0, ClickIntervalSeconds = 0, ShowBar = false, Hidden = true });
+        CompanionPets.Normalize(cfg);
+        Assert(cfg.Companions.Count == 2, "Companion config normalization must keep valid entries.");
+        Assert(cfg.Companions.All(c => c.SyntheticId < 0), "Companion synthetic ids must stay outside the positive room-member id space.");
+        Assert(cfg.Companions.Select(c => c.SyntheticId).Distinct().Count() == 2,
+            "Companion synthetic ids must be unique.");
+        Assert(CompanionPets.NextSyntheticId(cfg) < cfg.Companions.Min(c => c.SyntheticId),
+            "Next synthetic id must not collide with existing companions.");
+
+        string json = JsonSerializer.Serialize(cfg);
+        var roundTrip = JsonSerializer.Deserialize<Settings>(json);
+        Assert(roundTrip?.Companions.Count == 2
+                && roundTrip.Companions[0].Name == "菲比·Miratsu"
+                && roundTrip.Companions[0].ClickIntervalSeconds == 12
+                && roundTrip.Companions[0].RandomClick
+                && roundTrip.Companions[0].ShowBar
+                && roundTrip.Companions[1].Hidden,
+            "Companion fields, including temporary visibility, must survive Settings JSON persistence.");
+
+        string config = ReadRepoSource("src", "Core", "Config.cs");
+        string state = ReadRepoSource("src", "Core", "StateStore.cs");
+        string pet = ReadRepoSource("src", "Pet", "PetWindow.cs");
+        string remote = ReadRepoSource("src", "Pet", "RemoteCatWindow.cs");
+        string panel = ReadRepoSource("src", "Ui", "PanelWindow.cs");
+        string web = ReadRepoSource("wwwroot", "app.js");
+        string i18n = ReadRepoSource("wwwroot", "i18n.js");
+        Assert(config.Contains("Companions", StringComparison.Ordinal)
+                && config.Contains("CompanionPositions", StringComparison.Ordinal)
+                && state.Contains("companionPositions", StringComparison.Ordinal),
+            "Companion settings and independent position storage must be persisted.");
+        Assert(pet.Contains("_companionCats", StringComparison.Ordinal)
+                && pet.Contains("RefreshCompanions", StringComparison.Ordinal)
+                && pet.Contains("TickCompanionClicks", StringComparison.Ordinal)
+                && pet.Contains("localCompanion: true", StringComparison.Ordinal)
+                && pet.Contains("CompanionBarVisible", StringComparison.Ordinal)
+                && pet.Contains("CompanionKey", StringComparison.Ordinal),
+            "PetWindow must render custom companions with independent timers, bars and positions.");
+        Assert(pet.Contains("CompanionPets.DisplayName", StringComparison.Ordinal) || remote.Contains("CompanionPets.DisplayName", StringComparison.Ordinal),
+            "Desktop pet bottom bars must use the shared middle-dot display-name rule.");
+        Assert(pet.Contains("companion.ShowBar && !_cfg.HideRemoteBars", StringComparison.Ordinal),
+            "Per-companion bar visibility must respect the global hide-remote-bars setting.");
+        Assert(panel.Contains("companions.list", StringComparison.Ordinal)
+                && panel.Contains("companions.save", StringComparison.Ordinal)
+                && panel.Contains("companions.delete", StringComparison.Ordinal)
+                && panel.Contains("companions.visibility", StringComparison.Ordinal),
+            "Panel bridge must expose companion list/save/delete/visibility commands.");
+        Assert(pet.Contains("!companion.Hidden", StringComparison.Ordinal)
+                && pet.Contains("LocalHideRequested", StringComparison.Ordinal)
+                && remote.Contains("LocalHideRequested", StringComparison.Ordinal),
+            "Custom companions must support temporary per-companion hiding.");
+        Assert(web.Contains("data-companion-visibility", StringComparison.Ordinal)
+                && web.Contains("companions.visibility", StringComparison.Ordinal),
+            "Companion management UI must expose the temporary visibility toggle.");
+        Assert(web.Contains("nav.companion", StringComparison.Ordinal)
+                && web.Contains("companionDisplayName", StringComparison.Ordinal)
+                && web.Contains("companions.save", StringComparison.Ordinal)
+                && web.Contains("自定义伙伴", StringComparison.Ordinal)
+                && web.Contains("openCompanionEditor", StringComparison.Ordinal),
+            "Web UI must contain the custom companion page, editor and client-side name rule.");
+        Assert(i18n.Contains("'nav.companion'", StringComparison.Ordinal)
+                && i18n.Contains("'companion.intro'", StringComparison.Ordinal),
+            "English/Japanese dictionaries must translate the custom companion page.");
+
+        int refreshStart = pet.IndexOf("public void RefreshCompanions()", StringComparison.Ordinal);
+        int refreshEnd = pet.IndexOf("void UpdateCompanionCat", refreshStart, StringComparison.Ordinal);
+        Assert(refreshStart >= 0 && refreshEnd > refreshStart, "RefreshCompanions body must be locatable.");
+        string refreshBody = pet.Substring(refreshStart, refreshEnd - refreshStart);
+        Assert(!refreshBody.Contains("Members", StringComparison.Ordinal)
+                && !refreshBody.Contains("AddClicks", StringComparison.Ordinal)
+                && !refreshBody.Contains("EmitAsync", StringComparison.Ordinal),
+            "Custom companions must never mutate RoomManager members or upload clicks.");
+        int clickStart = pet.IndexOf("void TickCompanionClicks()", StringComparison.Ordinal);
+        int clickEnd = pet.IndexOf("void OnCompanionDragStarted", clickStart, StringComparison.Ordinal);
+        Assert(clickStart >= 0 && clickEnd > clickStart, "TickCompanionClicks body must be locatable.");
+        string clickBody = pet.Substring(clickStart, clickEnd - clickStart);
+        Assert(!clickBody.Contains("AddClicks", StringComparison.Ordinal)
+                && !clickBody.Contains("NotifyLocalAction", StringComparison.Ordinal)
+                && !clickBody.Contains("EmitAsync", StringComparison.Ordinal),
+            "Companion auto-click animation must stay local and never touch the click ledger/server.");
+        Console.WriteLine("PASS: custom companion name rule, persistence, independent positions and UI wiring.");
+    }
+
+    static void CheckAppearanceRotation()
+    {
+        // 纯函数：去重、间隔夹取、当前项不在列表时从第一项开始。
+        var normalized = AppearanceRotation.NormalizeIds(new long[] { 0, -1, 5, 5, 7, 0 });
+        Assert(normalized.Length == 2 && normalized[0] == 5 && normalized[1] == 7,
+            "Rotation id normalization must drop invalid/duplicate ids and keep order.");
+        Assert(AppearanceRotation.NormalizeInterval(0) == 30
+                && AppearanceRotation.NormalizeInterval(-5) == 30
+                && AppearanceRotation.NormalizeInterval(45) == 45
+                && AppearanceRotation.NormalizeInterval(1) == 1
+                && AppearanceRotation.NormalizeInterval(2000) == 1440,
+            "Rotation interval must default to 30 and clamp to 1–1440 minutes.");
+        var ids = new long[] { 10, 20, 30 };
+        Assert(AppearanceRotation.NextId(Array.Empty<long>(), 10) == 0,
+            "Empty rotation list must not select an item.");
+        Assert(AppearanceRotation.NextId(ids, 20) == 30
+                && AppearanceRotation.NextId(ids, 30) == 10
+                && AppearanceRotation.NextId(ids, 99) == 10
+                && AppearanceRotation.NextId(new long[] { 7 }, 7) == 7,
+            "Rotation must advance in list order, wrap, and start at the first item when current is absent.");
+
+        // Settings/ConfigStore 持久化：列表去重、间隔和开关都写进 config.json。
+        var cfg = new Settings
+        {
+            RotationEnabled = true,
+            RotationIntervalMinutes = 17,
+            RotationCharacterIds = new long[] { 5, 0, 5, 7 },
+            RotationAccessoryIds = new long[] { 9, 9, 0 },
+        };
+        ConfigStore.Save(cfg);
+        var loaded = ConfigStore.Load();
+        Assert(loaded.RotationEnabled && loaded.RotationIntervalMinutes == 17,
+            "Rotation enabled/interval must persist through config.json.");
+        Assert(loaded.RotationCharacterIds.SequenceEqual(new long[] { 5, 7 })
+                && loaded.RotationAccessoryIds.SequenceEqual(new long[] { 9 }),
+            "Rotation lists must be normalized and deduplicated when persisted.");
+
+        var now = DateTime.UtcNow;
+        long nowMs = new DateTimeOffset(DateTime.SpecifyKind(now, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+        var rotateCfg = new Settings
+        {
+            RotationEnabled = true,
+            RotationIntervalMinutes = 30,
+            RotationCharacterIds = new long[] { 10, 20, 30 },
+            RotationAccessoryIds = new long[] { 100, 200 },
+            CharacterAssetId = 20,
+            AccessoryAssetId = 999,
+            RotationLastAppliedUtcMs = nowMs - 31 * 60_000L,
+        };
+        using (var service = new AppearanceRotationService(rotateCfg))
+        {
+            long seenCharacter = 0, seenAccessory = 0;
+            int events = 0;
+            service.Applied += (characterId, accessoryId) =>
+            {
+                seenCharacter = characterId;
+                seenAccessory = accessoryId;
+                events++;
+            };
+            Assert(service.CheckRotation(now),
+                "Rotation must fire when the interval has elapsed.");
+            Assert(rotateCfg.CharacterAssetId == 30 && rotateCfg.AccessoryAssetId == 100,
+                "Rotation must advance character and independently start accessory at the first item.");
+            Assert(rotateCfg.LocalAppearance,
+                "Rotation must mark appearance as local so user/me cannot overwrite it.");
+            Assert(events == 1 && seenCharacter == 30 && seenAccessory == 100,
+                "Rotation must notify the UI with the new character/accessory ids.");
+            Assert(rotateCfg.RotationLastAppliedUtcMs == nowMs,
+                "Rotation must persist its last-applied timestamp for restart/panel-reopen continuity.");
+        }
+
+        var charOnlyCfg = new Settings
+        {
+            RotationEnabled = true,
+            RotationIntervalMinutes = 30,
+            RotationCharacterIds = new long[] { 10, 20 },
+            RotationAccessoryIds = Array.Empty<long>(),
+            CharacterAssetId = 20,
+            AccessoryAssetId = 555,
+            RotationLastAppliedUtcMs = nowMs - 31 * 60_000L,
+        };
+        using (var service = new AppearanceRotationService(charOnlyCfg))
+        {
+            Assert(service.CheckRotation(now), "Character-only rotation must still run.");
+            Assert(charOnlyCfg.CharacterAssetId == 10 && charOnlyCfg.AccessoryAssetId == 555,
+                "An empty accessory list must leave the current accessory untouched.");
+        }
+
+        var waitCfg = new Settings
+        {
+            RotationEnabled = true,
+            RotationIntervalMinutes = 30,
+            RotationCharacterIds = new long[] { 10, 20 },
+            CharacterAssetId = 20,
+            RotationLastAppliedUtcMs = nowMs - 5 * 60_000L,
+        };
+        using (var service = new AppearanceRotationService(waitCfg))
+            Assert(!service.CheckRotation(now) && waitCfg.CharacterAssetId == 20,
+                "Rotation must not advance before the interval elapses.");
+
+        var disabledCfg = new Settings
+        {
+            RotationEnabled = false,
+            RotationIntervalMinutes = 30,
+            RotationCharacterIds = new long[] { 10, 20 },
+            CharacterAssetId = 20,
+            RotationLastAppliedUtcMs = nowMs - 31 * 60_000L,
+        };
+        using (var service = new AppearanceRotationService(disabledCfg))
+            Assert(!service.CheckRotation(now) && disabledCfg.CharacterAssetId == 20,
+                "Disabled rotation must never change appearance.");
+
+        var toggleCfg = new Settings();
+        using (var service = new AppearanceRotationService(toggleCfg))
+        {
+            Assert(service.Toggle("character_skin", 11) && service.Toggle("accessory", 44),
+                "Toggle must add valid character/accessory ids.");
+            Assert(toggleCfg.RotationCharacterIds.SequenceEqual(new long[] { 11 })
+                    && toggleCfg.RotationAccessoryIds.SequenceEqual(new long[] { 44 }),
+                "Toggle must update the correct list.");
+            Assert(!service.Toggle("character_skin", 11) && toggleCfg.RotationCharacterIds.Length == 0,
+                "Toggling an existing id must remove it.");
+            Assert(service.Toggle("character_skin", 11) && service.Remove("character_skin", 11)
+                    && toggleCfg.RotationCharacterIds.Length == 0
+                    && !service.Remove("character_skin", 11),
+                "Remove must only delete existing ids.");
+            Assert(!service.Toggle("emote", 99) && !service.Toggle("unknown", 1),
+                "Emotes/unknown types must never enter either rotation list.");
+        }
+
+        var setCfg = new Settings();
+        using (var service = new AppearanceRotationService(setCfg))
+        {
+            service.SetRotation(true, 0);
+            Assert(setCfg.RotationEnabled && setCfg.RotationIntervalMinutes == 30
+                    && setCfg.RotationLastAppliedUtcMs > 0,
+                "Enabling rotation must default the interval to 30 and start the timer window.");
+            service.SetRotation(true, 9999);
+            Assert(setCfg.RotationIntervalMinutes == 1440,
+                "Rotation interval must clamp to 1440 minutes on save.");
+            service.SetRotation(false, 45);
+            Assert(!setCfg.RotationEnabled && setCfg.RotationIntervalMinutes == 45,
+                "Disabling rotation must persist and keep the chosen interval.");
+        }
+
+        string rotationSource = ReadRepoSource("src", "Core", "AppearanceRotation.cs");
+        Assert(rotationSource.Contains("public static class AppearanceRotation", StringComparison.Ordinal)
+                && rotationSource.Contains("public sealed class AppearanceRotationService", StringComparison.Ordinal)
+                && rotationSource.Contains("NextId", StringComparison.Ordinal),
+            "Rotation pure helper/service must exist.");
+        Assert(!rotationSource.Contains("AnnounceAppearanceAsync", StringComparison.Ordinal)
+                && !rotationSource.Contains("EmitAsync", StringComparison.Ordinal)
+                && !rotationSource.Contains("RoomManager", StringComparison.Ordinal)
+                && !rotationSource.Contains("ApiClient", StringComparison.Ordinal),
+            "Rotation must stay local and never announce/upload/touch room state.");
+
+        string app = ReadRepoSource("src", "App.cs");
+        Assert(app.Contains("public AppearanceRotationService Rotation", StringComparison.Ordinal)
+                && app.Contains("Rotation.Start();", StringComparison.Ordinal)
+                && app.Contains("Rotation.Dispose();", StringComparison.Ordinal)
+                && app.Contains("Pet.ReloadAppearance", StringComparison.Ordinal)
+                && app.Contains("Panel?.PushBoot", StringComparison.Ordinal),
+            "App must own the rotation timer, refresh the pet preview and push boot to the panel.");
+
+        string panel = ReadRepoSource("src", "Ui", "PanelWindow.cs");
+        Assert(panel.Contains("rotation = RotationPayload()", StringComparison.Ordinal)
+                && panel.Contains("case \"rotation.set\"", StringComparison.Ordinal)
+                && panel.Contains("case \"rotation.toggle\"", StringComparison.Ordinal)
+                && panel.Contains("case \"rotation.remove\"", StringComparison.Ordinal)
+                && panel.Contains("AppearanceRotationService.IsValidType", StringComparison.Ordinal)
+                && !panel.Contains("if (!_app.Rotation.Toggle", StringComparison.Ordinal),
+            "Panel boot/commands must expose rotation state and treat removal as success.");
+
+        string web = ReadRepoSource("wwwroot", "app.js");
+        string css = ReadRepoSource("wwwroot", "style.css");
+        string i18n = ReadRepoSource("wwwroot", "i18n.js");
+        Assert(web.Contains("bag.tab.rotation", StringComparison.Ordinal)
+                && web.Contains("renderRotationHost", StringComparison.Ordinal)
+                && web.Contains("openRotationPicker", StringComparison.Ordinal)
+                && web.Contains("rotation.toggle", StringComparison.Ordinal)
+                && web.Contains("rotation.remove", StringComparison.Ordinal),
+            "Bag rotation subpage, picker and bridge commands must be wired in app.js.");
+        Assert(web.Contains("rotationButtonHtml(item.type, item.id)", StringComparison.Ordinal)
+                && web.Contains("rotationButtonHtml(x.type, x.mainId)", StringComparison.Ordinal)
+                && web.Contains("if (type !== 'character_skin' && type !== 'accessory') return '';", StringComparison.Ordinal)
+                && web.Contains("bindRotationButtons(host)", StringComparison.Ordinal),
+            "Bag/atlas cards must include rotation buttons for character/accessory only and bind them.");
+        Assert(web.Contains("e.stopPropagation();", StringComparison.Ordinal)
+                && web.Contains("data-rotation-toggle", StringComparison.Ordinal)
+                && web.Contains("aria-pressed", StringComparison.Ordinal),
+            "Rotation buttons must stop propagation and expose active/pressed state.");
+        int tabStart = web.IndexOf("const BAG_TABS = [", StringComparison.Ordinal);
+        int tabEnd = web.IndexOf("];", tabStart, StringComparison.Ordinal);
+        Assert(tabStart >= 0 && tabEnd > tabStart
+                && web.Substring(tabStart, tabEnd - tabStart).IndexOf("['rotation'", StringComparison.Ordinal)
+                    > web.Substring(tabStart, tabEnd - tabStart).IndexOf("['emote'", StringComparison.Ordinal),
+            "The rotation bag tab must be the last tab in the row.");
+        int cardStart = web.IndexOf("function cardHtml(", StringComparison.Ordinal);
+        int cardEnd = web.IndexOf("function isAccessoryEquipped", cardStart, StringComparison.Ordinal);
+        Assert(cardStart >= 0 && cardEnd > cardStart, "cardHtml body must be locatable.");
+        string cardBlock = web.Substring(cardStart, cardEnd - cardStart);
+        int cardFav = cardBlock.IndexOf("class=\"fav\"", StringComparison.Ordinal);
+        int cardRotation = cardBlock.IndexOf("${rotation}", StringComparison.Ordinal);
+        int atlasStart = web.IndexOf("function atlasCard(", StringComparison.Ordinal);
+        int atlasEnd = web.IndexOf("function renderAtlasList", atlasStart, StringComparison.Ordinal);
+        Assert(atlasStart >= 0 && atlasEnd > atlasStart, "atlasCard body must be locatable.");
+        string atlasBlock = web.Substring(atlasStart, atlasEnd - atlasStart);
+        int atlasBadge = atlasBlock.IndexOf("atlas-badge", StringComparison.Ordinal);
+        int atlasRotation = atlasBlock.IndexOf("${rotation}", StringComparison.Ordinal);
+        Assert(cardFav >= 0 && cardRotation > cardFav,
+            "Bag rotation button must be the last action button in the card.");
+        Assert(atlasBadge >= 0 && atlasRotation > atlasBadge,
+            "Atlas rotation button must be the last action button in the card.");
+        Assert(css.Contains(".card .rotation-toggle", StringComparison.Ordinal)
+                && css.Contains(".card .rotation-toggle.active", StringComparison.Ordinal)
+                && css.Contains(".rotation-section", StringComparison.Ordinal),
+            "Rotation card button and stacked section styles must exist.");
+        Assert(i18n.Contains("'bag.tab.rotation'", StringComparison.Ordinal)
+                && i18n.Contains("'rotation.enable'", StringComparison.Ordinal)
+                && i18n.Contains("'rotation.hint'", StringComparison.Ordinal)
+                && i18n.Contains("'rotation.pickerTitleCharacter'", StringComparison.Ordinal),
+            "Rotation UI must be translated in English/Japanese dictionaries.");
+        Assert(!web.Contains("data-lock", StringComparison.Ordinal)
+                && !web.Contains("isAssetLocked", StringComparison.Ordinal)
+                && !web.Contains("lockButtonHtml", StringComparison.Ordinal),
+            "Old advanced-synthesis lock markup/handlers must stay removed; rotation must not reuse them.");
+        Console.WriteLine("PASS: appearance rotation persistence, next-item logic, local timer behavior and bag/atlas UI wiring.");
+    }
+
+    static void CheckTrayHideOtherPets()
+    {
+        string pet = ReadRepoSource("src", "Pet", "PetWindow.cs");
+        string panel = ReadRepoSource("src", "Ui", "PanelWindow.cs");
+        string en = ReadRepoSource("wwwroot", "locales", "native-en.json");
+        string ja = ReadRepoSource("wwwroot", "locales", "native-ja.json");
+        Assert(pet.Contains("tray.hideOtherPets", StringComparison.Ordinal)
+                && pet.Contains("_hideOtherPetsItem", StringComparison.Ordinal),
+            "Tray/context menu must expose the hide-other-pets toggle.");
+        Assert(pet.Contains("RefreshCompanions();", StringComparison.Ordinal)
+                && panel.Contains("_app.Pet.RefreshCompanions();", StringComparison.Ordinal),
+            "Hide-other-pets changes must refresh real remote pets and custom companions.");
+        Assert(en.Contains("\"tray.hideOtherPets\"", StringComparison.Ordinal)
+                && ja.Contains("\"tray.hideOtherPets\"", StringComparison.Ordinal),
+            "Tray hide-other-pets toggle must be localized in English/Japanese.");
+        Console.WriteLine("PASS: tray hide-other-pets toggle is localized and refreshes both real and custom pets.");
+    }
+
+    static void CheckChestNotificationFilters()
+    {
+        var cfg = new Settings();
+        Assert(!ChestNotificationRules.ShouldNotify(cfg, "common", "character_skin"),
+            "Common chest rewards must be excluded by default.");
+        Assert(!ChestNotificationRules.ShouldNotify(cfg, "uncommon", "accessory"),
+            "Uncommon chest rewards must be excluded by default.");
+        Assert(ChestNotificationRules.ShouldNotify(cfg, "rare", "character_skin")
+                && ChestNotificationRules.ShouldNotify(cfg, "epic", "emote"),
+            "Rare/Epic rewards must notify for all three categories by default.");
+
+        cfg.ChestNotifyRules["common"] = new ChestNotifyRule { Enabled = true, Character = false, Accessory = true, Emote = true };
+        Assert(!ChestNotificationRules.ShouldNotify(cfg, "common", "character_skin"),
+            "A disabled category checkbox must suppress that rarity/category combination.");
+        Assert(ChestNotificationRules.ShouldNotify(cfg, "common", "accessory"),
+            "Enabled category checkboxes must allow notifications after the rarity is enabled.");
+
+        cfg.NotifyChestClaimed = false;
+        Assert(!ChestNotificationRules.ShouldNotify(cfg, "epic", "emote"),
+            "The master chest notification toggle must suppress all notifications.");
+        cfg.NotifyChestClaimed = true;
+        Assert(!ChestNotificationRules.ShouldNotify(cfg, "unknown", "emote")
+                && !ChestNotificationRules.ShouldNotify(cfg, "rare", "unknown"),
+            "Unknown rarities/categories must never notify.");
+        string dtoJson = JsonSerializer.Serialize(ChestNotificationRules.ToDto(cfg.ChestNotifyRules));
+        Assert(dtoJson.Contains("\"rare\":{\"enabled\":true", StringComparison.Ordinal)
+                && dtoJson.Contains("\"common\":{\"enabled\":", StringComparison.Ordinal),
+            "Chest notification matrix DTO must keep the four rarity objects with camelCase fields.");
+
+        Assert(ChestNotificationRules.EmojiFor("common") == "🟢"
+                && ChestNotificationRules.EmojiFor("uncommon") == "🔵"
+                && ChestNotificationRules.EmojiFor("rare") == "🟣"
+                && ChestNotificationRules.EmojiFor("epic") == "🟡",
+            "Chest notification rarity emoji mapping is wrong.");
+        Localization.SetLocale("zh");
+        string text = ChestNotificationRules.BuildClaimMessage("rare", "嘉贝莉娜・团团团团转", "左侧");
+        Assert(text == "获得了🟣稀有物资：嘉贝莉娜・团团团团转（左侧宝箱）",
+            "Chinese chest notification format must exactly match the required text: " + text);
+
+        string app = ReadRepoSource("src", "App.cs");
+        string panel = ReadRepoSource("src", "Ui", "PanelWindow.cs");
+        string web = ReadRepoSource("wwwroot", "app.js");
+        string i18n = ReadRepoSource("wwwroot", "i18n.js");
+        string nativeEn = ReadRepoSource("wwwroot", "locales", "native-en.json");
+        string nativeJa = ReadRepoSource("wwwroot", "locales", "native-ja.json");
+        Assert(app.Contains("ChestNotificationRules.ShouldNotify", StringComparison.Ordinal)
+                && app.Contains("ChestNotificationRules.BuildClaimMessage", StringComparison.Ordinal),
+            "Chest claim path must use the notification filter and localized message helper.");
+        Assert(panel.Contains("chestNotifyRules", StringComparison.Ordinal)
+                && panel.Contains("ChestNotificationRules.Normalize", StringComparison.Ordinal),
+            "Panel boot/settings must carry and normalize the chest notification matrix.");
+        Assert(web.Contains("chestNotifyMatrixHtml", StringComparison.Ordinal)
+                && web.Contains("data-chest-notify", StringComparison.Ordinal)
+                && web.Contains("CHEST_NOTIFY_RARITY_EMOJI", StringComparison.Ordinal),
+            "Notification settings UI must render the 4×3 chest filter matrix.");
+        Assert(i18n.Contains("'settings.notify.chestMatrix.title'", StringComparison.Ordinal),
+            "Chest filter UI keys must be translated in English/Japanese dictionaries.");
+        Assert(nativeEn.Contains("app.chest.itemClaim", StringComparison.Ordinal)
+                && nativeEn.Contains("app.rarity.epic", StringComparison.Ordinal)
+                && nativeJa.Contains("app.chest.itemClaim", StringComparison.Ordinal)
+                && nativeJa.Contains("app.rarity.epic", StringComparison.Ordinal),
+            "Chest notification message and rarity labels must be localized for English/Japanese.");
+        Console.WriteLine("PASS: chest notification rarity/category filters and exact Chinese message format.");
+    }
+
+    static void CheckAdvancedSynthRemoved()
+    {
+        foreach (var (path, label) in new[]
+                 {
+                     (ReadRepoSource("src", "Core", "Config.cs"), "Config"),
+                     (ReadRepoSource("src", "App.cs"), "App"),
+                     (ReadRepoSource("src", "Ui", "PanelWindow.cs"), "PanelWindow"),
+                     (ReadRepoSource("src", "Program.cs"), "Program"),
+                     (ReadRepoSource("src", "Core", "SynthesisLog.cs"), "SynthesisLog"),
+                 })
+        {
+            Assert(!path.Contains("AnyItemSynthesis", StringComparison.Ordinal)
+                    && !path.Contains("anyItemSynthesis", StringComparison.Ordinal),
+                $"Advanced synthesis settings must be removed from {label}.");
+        }
+        string web = ReadRepoSource("wwwroot", "app.js");
+        string css = ReadRepoSource("wwwroot", "style.css");
+        string index = ReadRepoSource("wwwroot", "index.html");
+        string i18n = ReadRepoSource("wwwroot", "i18n.js");
+        Assert(!web.Contains("anyItemSynthesis", StringComparison.Ordinal)
+                && !web.Contains("locks.toggle", StringComparison.Ordinal)
+                && !web.Contains("synth-advanced-panel", StringComparison.Ordinal)
+                && !web.Contains("lockButtonHtml", StringComparison.Ordinal),
+            "Advanced synthesis UI/locks must be removed from app.js.");
+        Assert(!css.Contains("card-lock", StringComparison.Ordinal)
+                && !css.Contains("synth-advanced", StringComparison.Ordinal),
+            "Advanced synthesis/lock CSS must be removed.");
+        Assert(!index.Contains("locks.toggle", StringComparison.Ordinal),
+            "Preview bridge must no longer expose locks.toggle.");
+        Assert(!i18n.Contains("synth.advancedTitle", StringComparison.Ordinal)
+                && !i18n.Contains("nav.synthAdvancedOn", StringComparison.Ordinal)
+                && !i18n.Contains("locks.json", StringComparison.Ordinal),
+            "Advanced synthesis i18n strings must be removed.");
+        Assert(web.Contains("KONAMI_CODE", StringComparison.Ordinal)
+                && web.Contains("showSynthMemorial", StringComparison.Ordinal)
+                && web.Contains("人生自古谁无死？不幸的，高级合成已经被牢库暗杀，无法再为您服务，让我们一起缅怀它", StringComparison.Ordinal)
+                && !web.Contains("showAdvancedSynthWarning", StringComparison.Ordinal),
+            "Konami sequence must remain as a side-effect-free memorial modal.");
+        Assert(web.Contains("renderSynth", StringComparison.Ordinal)
+                && web.Contains("synth.auto", StringComparison.Ordinal)
+                && web.Contains("synthCheckMode", StringComparison.Ordinal),
+            "Normal synthesis UI and auto-synth must remain functional.");
+        Console.WriteLine("PASS: advanced synthesis and locks removed; normal synthesis and Konami memorial remain.");
     }
 
     static string ReadRepoSource(params string[] relativeParts)

@@ -636,7 +636,7 @@ public sealed class PetWindow : Form
         var p = Cursor.Position;
         bool visible = Visible && !_hiddenByHotkey;
         SetHovering(visible && ContainsPetPoint(p), visible && ContainsCatPoint(p));
-        foreach (var cat in _cats.Values)
+        foreach (var cat in AllPetWindows())
             cat.SetHovered(cat.Visible && !_hiddenByHotkey && cat.ContainsCatScreenPoint(p));
     }
 
@@ -2532,7 +2532,7 @@ public sealed class PetWindow : Form
         }
 
         Track(LocalVisibleRect());
-        foreach (var cat in _cats.Values)
+        foreach (var cat in AllPetWindows())
             if (cat.Visible && !_hiddenByHotkey) Track(CatVisibleRect(cat));
         return multiple;
     }
@@ -2571,7 +2571,7 @@ public sealed class PetWindow : Form
             if (!_hiddenByHotkey) LogZOrderSnapshot("f9-hide");
             _hiddenByHotkey = !_hiddenByHotkey;
             Visible = !_hiddenByHotkey && !(_cfg.CaptureMode && _cfg.CaptureStopRenderingMain);
-            foreach (var c in _cats.Values) c.Visible = !_hiddenByHotkey;
+            foreach (var c in AllPetWindows()) c.Visible = !_hiddenByHotkey;
             if (!_hiddenByHotkey)
             {
                 Compose();
@@ -2917,7 +2917,7 @@ public sealed class PetWindow : Form
         RefreshMenu();
         try { KeyboardUI?.RefreshLocale(); } catch { }
         try { _capture?.ApplyLocale(); } catch { }
-        foreach (var cat in _cats.Values)
+        foreach (var cat in AllPetWindows())
         {
             try { cat.ApplyLocale(); } catch { }
         }
@@ -3379,7 +3379,7 @@ public sealed class PetWindow : Form
     List<Rectangle> VisibleCatRects()
     {
         var list = new List<Rectangle>();
-        foreach (var cat in _cats.Values)
+        foreach (var cat in AllPetWindows())
         {
             if (cat.Visible) list.Add(CatVisibleRect(cat));
         }

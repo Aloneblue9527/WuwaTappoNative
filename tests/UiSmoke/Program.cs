@@ -70,6 +70,8 @@ internal static class Program
                                   JsonSerializer.Serialize(rotationJson) +
                                   "); } catch (e) { window.__uiSmokeSeedError = String(e); } })();";
                     await core.AddScriptToExecuteOnDocumentCreatedAsync(seed);
+                    await core.AddScriptToExecuteOnDocumentCreatedAsync(
+                        "window.__uiSmokeErrors=[];window.addEventListener('error',e=>window.__uiSmokeErrors.push(String(e.message||e.error||e)));window.addEventListener('unhandledrejection',e=>window.__uiSmokeErrors.push('rejection:'+String(e.reason?.message||e.reason||e)));");
 
                     var loaded = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                     core.NavigationCompleted += (_, ev) => loaded.TrySetResult(ev.IsSuccess);
@@ -124,9 +126,25 @@ internal static class Program
                     var aboutState = JsonNode.Parse(JsonSerializer.Deserialize<string>(aboutUi)!)!.AsObject();
                     if (!aboutState["inFooter"]!.GetValue<bool>() || aboutState["inSetting"]!.GetValue<bool>()
                         || !aboutState["hasStats"]!.GetValue<bool>() || !aboutState["hasIp"]!.GetValue<bool>())
-                        throw new InvalidOperationException("About button must sit beside update controls and include the data-statistics notice.");
+                        throw new InvalidOperationException("About button must sit beside update controls and include the data-statistics notice. errors="
+                            + JsonSerializer.Deserialize<string>(await core.ExecuteScriptAsync("JSON.stringify(window.__uiSmokeErrors||[])")));
                     await core.ExecuteScriptAsync("document.getElementById('mCloseAbout')?.click()");
                     await Task.Delay(200);
+
+                    string chestMatrixUi = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        rows: document.querySelectorAll('#chestNotifyMatrix [data-chest-rarity]').length,
+                        categories: document.querySelectorAll('#chestNotifyMatrix [data-chest-notify=""character""], #chestNotifyMatrix [data-chest-notify=""accessory""], #chestNotifyMatrix [data-chest-notify=""emote""]').length,
+                        rareOn: !!document.querySelector('#chestNotifyMatrix [data-chest-rarity=""rare""] [data-chest-notify=""enabled""]')?.checked,
+                        commonOn: !!document.querySelector('#chestNotifyMatrix [data-chest-rarity=""common""] [data-chest-notify=""enabled""]')?.checked
+                      }))()");
+                    var chestMatrixState = JsonNode.Parse(JsonSerializer.Deserialize<string>(chestMatrixUi)!)!.AsObject();
+                    if (chestMatrixState["rows"]!.GetValue<int>() != 4
+                        || chestMatrixState["categories"]!.GetValue<int>() != 12
+                        || !chestMatrixState["rareOn"]!.GetValue<bool>()
+                        || chestMatrixState["commonOn"]!.GetValue<bool>())
+                        throw new InvalidOperationException("Chest notification matrix did not render the expected 4×3 defaults: " + chestMatrixUi);
+                    Console.WriteLine("PASS: chest notification settings render the 4×3 rarity/category matrix with Rare/Epic defaults.");
 
                     // 输入与控制：手柄协议扩展必须位于桌面键盘区域的第一排，并带有开关。
                     string controllerProtocolUi = await core.ExecuteScriptAsync(@"
@@ -529,7 +547,7 @@ internal static class Program
                     if (acceptedState["blocked"]!.GetValue<bool>())
                         throw new InvalidOperationException("Accepted forced-update state still shows the network-blocked banner.");
 
-                    // 高级合成：每次输入隐藏指令都应重新显示首次警告；确认后可打开高级面板。
+                    // 高级合成已移除：隐藏指令只显示纪念弹窗，不出现任何解锁/面板/二次确认。
                     var synthLoaded = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                     core.NavigationCompleted += (_, ev) => synthLoaded.TrySetResult(ev.IsSuccess);
                     core.Navigate("https://wuwatappo.local/index.html?preview=synth#page=synth");
@@ -539,8 +557,6 @@ internal static class Program
                         await core.ExecuteScriptAsync("JSON.stringify(window.__previewBoot(window.__previewMode))"));
                     var synthBoot = JsonNode.Parse(synthBootJson) as JsonObject
                         ?? throw new InvalidOperationException("synth preview boot missing");
-                    synthBoot["settings"]!["anyItemSynthesisUnlocked"] = false;
-                    synthBoot["settings"]!["anyItemSynthesisEnabled"] = false;
                     boot = synthBoot;
                     core.PostWebMessageAsJson(JsonSerializer.Serialize(new { evt = "boot", data = synthBoot }));
                     await Task.Delay(700);
@@ -553,24 +569,29 @@ internal static class Program
                       })()";
                     await core.ExecuteScriptAsync(konamiScript);
                     await Task.Delay(500);
-                    string firstWarning = JsonSerializer.Deserialize<string>(
+                    string firstMemorial = JsonSerializer.Deserialize<string>(
                         await core.ExecuteScriptAsync("document.getElementById('modalHost')?.textContent || ''")) ?? "";
-                    if (!firstWarning.Contains("高级合成警告", StringComparison.Ordinal)
-                        || !firstWarning.Contains("我已知晓并解锁", StringComparison.Ordinal))
-                        throw new InvalidOperationException("Advanced synth command did not show the first warning.");
-                    await core.ExecuteScriptAsync("document.getElementById('synthUnlockOk')?.click()");
-                    await Task.Delay(800);
-                    string advancedPanel = await core.ExecuteScriptAsync("String(!!document.querySelector('.synth-advanced-panel'))");
-                    if (JsonSerializer.Deserialize<string>(advancedPanel) != "true")
-                        throw new InvalidOperationException("Advanced synth panel did not open after confirmation.");
+                    if (!firstMemorial.Contains("人生自古谁无死？不幸的，高级合成已经被牢库暗杀，无法再为您服务，让我们一起缅怀它", StringComparison.Ordinal)
+                        || !firstMemorial.Contains("确定", StringComparison.Ordinal))
+                        throw new InvalidOperationException("Advanced synth memorial modal did not show the exact Chinese text.");
+                    string advancedPanelExists = JsonSerializer.Deserialize<string>(
+                        await core.ExecuteScriptAsync("String(!!document.querySelector('.synth-advanced-panel'))")) ?? "";
+                    if (advancedPanelExists == "true")
+                        throw new InvalidOperationException("Advanced synth panel must not exist after removal.");
+                    await core.ExecuteScriptAsync("document.getElementById('synthMemorialOk')?.click()");
+                    await Task.Delay(300);
+                    string memorialHidden = JsonSerializer.Deserialize<string>(
+                        await core.ExecuteScriptAsync("String(document.getElementById('modalHost')?.classList.contains('hidden'))")) ?? "";
+                    if (memorialHidden != "true")
+                        throw new InvalidOperationException("Memorial modal did not close after clicking 确定.");
 
                     await core.ExecuteScriptAsync(konamiScript);
                     await Task.Delay(500);
-                    string secondWarning = JsonSerializer.Deserialize<string>(
+                    string secondMemorial = JsonSerializer.Deserialize<string>(
                         await core.ExecuteScriptAsync("document.getElementById('modalHost')?.textContent || ''")) ?? "";
-                    if (!secondWarning.Contains("高级合成警告", StringComparison.Ordinal))
-                        throw new InvalidOperationException("Advanced synth command did not warn again on the second activation.");
-                    await core.ExecuteScriptAsync("document.getElementById('synthUnlockCancel')?.click()");
+                    if (!secondMemorial.Contains("人生自古谁无死", StringComparison.Ordinal))
+                        throw new InvalidOperationException("Advanced synth memorial did not reappear on a repeated sequence.");
+                    await core.ExecuteScriptAsync("document.getElementById('synthMemorialOk')?.click()");
                     await Task.Delay(200);
 
                     // 登录态异常：顶部常驻条、桌宠统一“未登录”、暂停页和重新连接入口。
@@ -828,9 +849,221 @@ internal static class Program
                     Console.WriteLine("PASS: WebView2 theme preset list/apply/rename/delete uses real C# data and persists deletes.");
                     Console.WriteLine("PASS: WebView2 accessory scale/rotation, nudge and reset keep native boot and sliders in sync.");
                     Console.WriteLine("PASS: WebView2 forced-update risk opt-in notice, modal and accepted state render correctly.");
-                    Console.WriteLine("PASS: WebView2 advanced-synth command warns on every activation.");
+                    Console.WriteLine("PASS: WebView2 advanced-synth removal shows only a repeated memorial modal.");
                     Console.WriteLine("PASS: About button sits in the settings footer and the data-statistics notice is present.");
                     Console.WriteLine("PASS: WebView2 auth conflict/invalid states render persistent notices, paused view and login view.");
+
+                    // 自定义伙伴：联机与设置之间的独立页面、名称截断、添加/编辑/删除。
+                    var companionLoaded = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    core.NavigationCompleted += (_, ev) => companionLoaded.TrySetResult(ev.IsSuccess);
+                    core.Navigate("https://wuwatappo.local/index.html?preview=companion#page=companion");
+                    if (!await companionLoaded.Task) throw new InvalidOperationException("companion preview navigation failed.");
+                    await Task.Delay(900);
+                    string companionBootJson = JsonSerializer.Deserialize<string>(
+                        await core.ExecuteScriptAsync("JSON.stringify(window.__previewBoot(window.__previewMode))"));
+                    var companionBoot = JsonNode.Parse(companionBootJson) as JsonObject
+                        ?? throw new InvalidOperationException("companion preview boot missing");
+                    boot = companionBoot;
+                    core.PostWebMessageAsJson(JsonSerializer.Serialize(new { evt = "boot", data = companionBoot }));
+                    await Task.Delay(500);
+                    await core.ExecuteScriptAsync("document.querySelector('.tab[data-page=\"companion\"]')?.click()");
+                    await Task.Delay(500);
+                    string companionUi = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        tabs: [...document.querySelectorAll('.tab')].map(x => x.dataset.page),
+                        tabText: [...document.querySelectorAll('.tab span')].map(x => x.textContent.trim()),
+                        title: document.getElementById('pageTitle')?.textContent || '',
+                        cards: [...document.querySelectorAll('.companion-card')].map(x => ({
+                          name: x.querySelector('.companion-name')?.textContent || '',
+                          full: x.querySelector('.companion-fullname')?.textContent || ''
+                        }))
+                      }))()");
+                    var companionState = JsonNode.Parse(JsonSerializer.Deserialize<string>(companionUi)!)!.AsObject();
+                    var companionTabs = companionState["tabs"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+                    if (Array.IndexOf(companionTabs, "companion") < 0
+                        || Array.IndexOf(companionTabs, "room") > Array.IndexOf(companionTabs, "companion")
+                        || Array.IndexOf(companionTabs, "companion") > Array.IndexOf(companionTabs, "settings")
+                        || companionState["title"]!.GetValue<string>() != "自定义伙伴"
+                        || !companionState["tabText"]!.AsArray().Any(x => x!.GetValue<string>() == "自定义伙伴"))
+                        throw new InvalidOperationException("Custom companion page must sit between multiplayer and settings: " + companionUi);
+                    var companionCard = companionState["cards"]!.AsArray().FirstOrDefault();
+                    if (companionCard == null)
+                    {
+                        string debug = JsonSerializer.Deserialize<string>(await core.ExecuteScriptAsync(
+                            "JSON.stringify({host:document.getElementById('pageHost')?.innerHTML?.slice(0,500),errors:window.__uiSmokeErrors||[]})")) ?? "";
+                        throw new InvalidOperationException("Companion preview demo card missing: " + debug);
+                    }
+                    if (companionCard["name"]!.GetValue<string>() != "菲比"
+                        || companionCard["full"]!.GetValue<string>() != "")
+                        throw new InvalidOperationException("Companion list must show only the part before the middle dot: " + companionUi);
+
+                    await core.ExecuteScriptAsync("document.getElementById('companionAdd')?.click()");
+                    await Task.Delay(700);
+                    string editorUi = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        title: document.querySelector('.preset-edit .preset-title')?.textContent || '',
+                        hasName: !!document.getElementById('peName'),
+                        hasClick: !!document.getElementById('peClickSeconds'),
+                        hasRandom: !!document.getElementById('peRandomClick'),
+                        hasBar: !!document.getElementById('peShowBar'),
+                        hasEmoteTab: !!document.querySelector('[data-pe-tab=""emote""]')
+                      }))()");
+                    var editorState = JsonNode.Parse(JsonSerializer.Deserialize<string>(editorUi)!)!.AsObject();
+                    if (!editorState["title"]!.GetValue<string>().Contains("添加自定义伙伴", StringComparison.Ordinal)
+                        || !editorState["hasName"]!.GetValue<bool>() || !editorState["hasClick"]!.GetValue<bool>()
+                        || !editorState["hasRandom"]!.GetValue<bool>() || !editorState["hasBar"]!.GetValue<bool>()
+                        || editorState["hasEmoteTab"]!.GetValue<bool>())
+                        throw new InvalidOperationException("Companion editor did not reuse the preset picker/options: " + editorUi);
+                    await core.ExecuteScriptAsync(@"
+                      (() => {
+                        document.getElementById('peName').value = '嘉贝莉娜·团团团团转';
+                        document.getElementById('peClickSeconds').value = '7';
+                        document.getElementById('peRandomClick').checked = true;
+                        document.getElementById('peShowBar').checked = true;
+                        document.getElementById('peSave').click();
+                      })()");
+                    await Task.Delay(900);
+                    string addedUi = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        count: document.querySelectorAll('.companion-card').length,
+                        names: [...document.querySelectorAll('.companion-name')].map(x => x.textContent.trim())
+                      }))()");
+                    var addedState = JsonNode.Parse(JsonSerializer.Deserialize<string>(addedUi)!)!.AsObject();
+                    if (addedState["count"]!.GetValue<int>() != 2
+                        || !addedState["names"]!.AsArray().Any(x => x!.GetValue<string>() == "嘉贝莉娜"))
+                        throw new InvalidOperationException("Adding a companion did not persist/display the truncated name: " + addedUi);
+
+                    await core.ExecuteScriptAsync("document.querySelectorAll('[data-companion-delete]')[1]?.click()");
+                    await Task.Delay(300);
+                    await core.ExecuteScriptAsync("document.getElementById('roomActionContinue')?.click()");
+                    await Task.Delay(700);
+                    string deletedUi = await core.ExecuteScriptAsync("String(document.querySelectorAll('.companion-card').length)");
+                    if (JsonSerializer.Deserialize<string>(deletedUi) != "1")
+                        throw new InvalidOperationException("Deleting a companion did not remove the card.");
+                    Console.WriteLine("PASS: WebView2 custom companion page is ordered between multiplayer/settings and supports add/delete with name truncation.");
+
+                    // 外观轮换：背包顶部子页、角色/配件分区、开关/间隔、卡片按钮和未拥有图鉴条目。
+                    var rotationLoaded = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    core.NavigationCompleted += (_, ev) => rotationLoaded.TrySetResult(ev.IsSuccess);
+                    core.Navigate("https://wuwatappo.local/index.html?preview=bag-rotation#page=bag");
+                    if (!await rotationLoaded.Task) throw new InvalidOperationException("bag rotation preview navigation failed.");
+                    await Task.Delay(1000);
+                    string rotationBootJson = JsonSerializer.Deserialize<string>(
+                        await core.ExecuteScriptAsync("JSON.stringify(window.__previewBoot(window.__previewMode))"));
+                    var rotationBoot = JsonNode.Parse(rotationBootJson) as JsonObject
+                        ?? throw new InvalidOperationException("bag rotation preview boot missing");
+                    boot = rotationBoot;
+                    core.PostWebMessageAsJson(JsonSerializer.Serialize(new { evt = "boot", data = rotationBoot }));
+                    await Task.Delay(800);
+                    string rotationUi = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        lastTab: [...document.querySelectorAll('[data-btab]')].pop()?.dataset.btab || '',
+                        tabText: document.querySelector('[data-btab=""rotation""]')?.textContent.trim() || '',
+                        sections: document.querySelectorAll('.rotation-section').length,
+                        items: document.querySelectorAll('.rotation-item').length,
+                        enabled: !!document.getElementById('rotationEnabled')?.checked,
+                        interval: document.getElementById('rotationInterval')?.value || '',
+                        hint: document.querySelector('.rotation-hint')?.textContent || '',
+                        errors: window.__uiSmokeErrors || []
+                      }))()");
+                    var rotationState = JsonNode.Parse(JsonSerializer.Deserialize<string>(rotationUi)!)!.AsObject();
+                    if (rotationState["lastTab"]!.GetValue<string>() != "rotation"
+                        || !rotationState["tabText"]!.GetValue<string>().Contains("轮换", StringComparison.Ordinal)
+                        || rotationState["sections"]!.GetValue<int>() != 2
+                        || rotationState["items"]!.GetValue<int>() != 4
+                        || !rotationState["enabled"]!.GetValue<bool>()
+                        || rotationState["interval"]!.GetValue<string>() != "30"
+                        || !rotationState["hint"]!.GetValue<string>().Contains("图鉴", StringComparison.Ordinal)
+                        || !rotationState["hint"]!.GetValue<string>().Contains("未拥有", StringComparison.Ordinal)
+                        || rotationState["errors"]!.AsArray().Count > 0)
+                        throw new InvalidOperationException("Bag rotation page did not render the expected toolbar/sections/hint: " + rotationUi);
+                    Console.WriteLine("PASS: bag rotation tab renders two stacked sections, enable/interval toolbar and gallery hint.");
+
+                    await core.ExecuteScriptAsync(@"
+                      (() => {
+                        const el = document.getElementById('rotationInterval');
+                        el.value = '45';
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                      })()");
+                    await Task.Delay(700);
+                    if (boot["rotation"]?["intervalMinutes"]?.GetValue<int>() != 45)
+                        throw new InvalidOperationException("Rotation interval change did not reach the bridge.");
+                    string rotationIntervalUi = JsonSerializer.Deserialize<string>(
+                        await core.ExecuteScriptAsync("document.getElementById('rotationInterval')?.value || ''")) ?? "";
+                    if (rotationIntervalUi != "45")
+                        throw new InvalidOperationException("Rotation interval did not refresh after saving: " + rotationIntervalUi);
+
+                    await core.ExecuteScriptAsync("document.querySelector('[data-btab=\"character_skin\"]')?.click()");
+                    await Task.Delay(700);
+                    string bagRotationCards = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        has3060: !!document.querySelector('#bagGroups .card[data-id=""3060""] .rotation-toggle'),
+                        active3060: !!document.querySelector('#bagGroups .card[data-id=""3060""] .rotation-toggle.active'),
+                        has3062: !!document.querySelector('#bagGroups .card[data-id=""3062""] .rotation-toggle'),
+                        hasEmoteButton: !!document.querySelector('#bagGroups .card[data-id=""201""] .rotation-toggle'),
+                        lastActionRotation: (() => {
+                          const card = document.querySelector('#bagGroups .card[data-id=""3060""]');
+                          const actions = card ? [...card.querySelectorAll('.fav, .rotation-toggle')] : [];
+                          return actions.length > 0 && actions[actions.length - 1].classList.contains('rotation-toggle');
+                        })()
+                      }))()");
+                    var bagRotation = JsonNode.Parse(JsonSerializer.Deserialize<string>(bagRotationCards)!)!.AsObject();
+                    if (!bagRotation["has3060"]!.GetValue<bool>() || !bagRotation["active3060"]!.GetValue<bool>()
+                        || !bagRotation["has3062"]!.GetValue<bool>() || bagRotation["hasEmoteButton"]!.GetValue<bool>()
+                        || !bagRotation["lastActionRotation"]!.GetValue<bool>())
+                        throw new InvalidOperationException("Bag character cards must show active/inactive rotation buttons: " + bagRotationCards);
+
+                    await core.ExecuteScriptAsync("document.querySelector('#bagGroups .card[data-id=\"3062\"] .rotation-toggle')?.click()");
+                    await Task.Delay(700);
+                    string bagToggled = await core.ExecuteScriptAsync("String(!!document.querySelector('#bagGroups .card[data-id=\"3062\"] .rotation-toggle.active'))");
+                    if (JsonSerializer.Deserialize<string>(bagToggled) != "true")
+                        throw new InvalidOperationException("Bag rotation button did not toggle active state.");
+                    if (!((boot["rotation"]?["characterIds"] as JsonArray)?.Any(x => x!.GetValue<long>() == 3062) ?? false))
+                        throw new InvalidOperationException("Bag rotation toggle did not reach the bridge.");
+
+                    await core.ExecuteScriptAsync("document.querySelector('[data-btab=\"emote\"]')?.click()");
+                    await Task.Delay(500);
+                    string emoteRotation = await core.ExecuteScriptAsync("String(!!document.querySelector('#bagGroups .rotation-toggle'))");
+                    if (JsonSerializer.Deserialize<string>(emoteRotation) != "false")
+                        throw new InvalidOperationException("Emote bag cards must not show rotation buttons.");
+                    Console.WriteLine("PASS: bag cards expose rotation toggles for characters/accessories only, with active state.");
+
+                    await core.ExecuteScriptAsync("document.querySelector('.tab[data-page=\"atlas\"]')?.click()");
+                    await Task.Delay(1000);
+                    string atlasRotation = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        charActive: !!document.querySelector('#atlasGroups .card[data-key=""character_skin:3060""] .rotation-toggle.active'),
+                        unownedButton: !!document.querySelector('#atlasGroups .card[data-key=""character_skin:3063""] .rotation-toggle'),
+                        unownedActive: !!document.querySelector('#atlasGroups .card[data-key=""character_skin:3063""] .rotation-toggle.active'),
+                        accessoryActive: !!document.querySelector('#atlasGroups .card[data-key=""accessory:1604""] .rotation-toggle.active'),
+                        emoteButton: !!document.querySelector('#atlasGroups .card[data-key=""emote:201""] .rotation-toggle'),
+                        lastActionRotation: (() => {
+                          const card = document.querySelector('#atlasGroups .card[data-key=""character_skin:3060""]');
+                          const actions = card ? [...card.querySelectorAll('.rotation-toggle')] : [];
+                          return actions.length > 0 && actions[actions.length - 1].classList.contains('rotation-toggle');
+                        })(),
+                        modalHidden: !!document.getElementById('modalHost')?.classList.contains('hidden')
+                      }))()");
+                    var atlasRotationState = JsonNode.Parse(JsonSerializer.Deserialize<string>(atlasRotation)!)!.AsObject();
+                    if (!atlasRotationState["charActive"]!.GetValue<bool>()
+                        || !atlasRotationState["unownedButton"]!.GetValue<bool>()
+                        || atlasRotationState["unownedActive"]!.GetValue<bool>()
+                        || !atlasRotationState["accessoryActive"]!.GetValue<bool>()
+                        || atlasRotationState["emoteButton"]!.GetValue<bool>()
+                        || !atlasRotationState["lastActionRotation"]!.GetValue<bool>())
+                        throw new InvalidOperationException("Atlas rotation buttons did not render/active correctly: " + atlasRotation);
+
+                    await core.ExecuteScriptAsync("document.querySelector('#atlasGroups .card[data-key=\"character_skin:3063\"] .rotation-toggle')?.click()");
+                    await Task.Delay(700);
+                    string atlasToggled = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        active: !!document.querySelector('#atlasGroups .card[data-key=""character_skin:3063""] .rotation-toggle.active'),
+                        modalHidden: !!document.getElementById('modalHost')?.classList.contains('hidden')
+                      }))()");
+                    var atlasToggledState = JsonNode.Parse(JsonSerializer.Deserialize<string>(atlasToggled)!)!.AsObject();
+                    if (!atlasToggledState["active"]!.GetValue<bool>() || !atlasToggledState["modalHidden"]!.GetValue<bool>())
+                        throw new InvalidOperationException("Atlas rotation button must stop propagation and update state: " + atlasToggled);
+                    Console.WriteLine("PASS: atlas cards expose rotation toggles for owned/unowned character/accessory entries, not emotes.");
 
                     var i18nLoaded = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                     core.NavigationCompleted += (_, ev) => i18nLoaded.TrySetResult(ev.IsSuccess);
@@ -849,7 +1082,7 @@ internal static class Program
                     var enTabs = enUi["tabs"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
                     var enGroups = enUi["groups"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
                     if (enUi["lang"]!.GetValue<string>() != "en"
-                        || !enTabs.Contains("Bag") || !enTabs.Contains("Settings")
+                        || !enTabs.Contains("Bag") || !enTabs.Contains("Settings") || !enTabs.Contains("Custom companions")
                         || enUi["title"]!.GetValue<string>() != "Settings"
                         || enUi["locale"]!.GetValue<string>() != "en"
                         || !enGroups.Contains("Basic helpers") || !enGroups.Contains("Account & redemption"))
@@ -872,7 +1105,7 @@ internal static class Program
                     var jaTabs = jaUi["tabs"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
                     var jaGroups = jaUi["groups"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
                     if (jaUi["lang"]!.GetValue<string>() != "ja"
-                        || !jaTabs.Contains("バッグ") || !jaTabs.Contains("設定")
+                        || !jaTabs.Contains("バッグ") || !jaTabs.Contains("設定") || !jaTabs.Contains("カスタムコンパニオン")
                         || jaUi["title"]!.GetValue<string>() != "設定"
                         || jaUi["locale"]!.GetValue<string>() != "ja"
                         || !jaGroups.Contains("基本補助") || !jaGroups.Contains("アカウントと交換"))
@@ -934,16 +1167,119 @@ internal static class Program
         var settings = boot["settings"] as JsonObject ?? new JsonObject();
         switch (cmd)
         {
+            case "companions.list":
+                return (boot["companions"] as JsonArray)?.DeepClone() ?? new JsonArray();
+            case "companions.save":
+            {
+                var list = boot["companions"] as JsonArray;
+                if (list == null) { list = new JsonArray(); boot["companions"] = list; }
+                string id = data["id"]?.GetValue<string>() ?? "";
+                var item = list.OfType<JsonObject>().FirstOrDefault(x => (x["id"]?.GetValue<string>() ?? "") == id);
+                if (item == null)
+                {
+                    item = new JsonObject { ["id"] = "preview-companion-" + (list.Count + 1), ["syntheticId"] = -1000 - list.Count };
+                    list.Add(item);
+                }
+                string name = (data["name"]?.GetValue<string>() ?? "伙伴").Trim();
+                if (name.Length == 0) name = "伙伴";
+                int dot = name.IndexOfAny(new[] { '·', '・' });
+                item["name"] = name;
+                item["displayName"] = dot > 0 ? name[..dot].Trim() : name;
+                item["characterAssetId"] = data["characterAssetId"]?.GetValue<long>() ?? 0;
+                item["accessoryAssetId"] = data["accessoryAssetId"]?.GetValue<long>() ?? 0;
+                item["clickIntervalSeconds"] = Math.Clamp(data["clickIntervalSeconds"]?.GetValue<int>() ?? 0, 0, 3600);
+                item["randomClick"] = data["randomClick"]?.GetValue<bool>() ?? false;
+                item["showBar"] = data["showBar"]?.GetValue<bool>() ?? true;
+                return list.DeepClone();
+            }
+            case "companions.delete":
+            {
+                var list = boot["companions"] as JsonArray;
+                if (list != null)
+                {
+                    string id = data["id"]?.GetValue<string>() ?? "";
+                    var item = list.OfType<JsonObject>().FirstOrDefault(x => (x["id"]?.GetValue<string>() ?? "") == id);
+                    if (item != null) list.Remove(item);
+                }
+                return (list ?? new JsonArray()).DeepClone();
+            }
             case "bag.list":
                 return new JsonObject
                 {
                     ["items"] = new JsonArray
                     {
+                        new JsonObject { ["id"] = 3060, ["type"] = "character_skin", ["assetName"] = "role_1407", ["name"] = "测试角色A", ["rarity"] = "epic", ["quantity"] = 1, ["isCollect"] = false, ["thumb"] = "" },
+                        new JsonObject { ["id"] = 3062, ["type"] = "character_skin", ["assetName"] = "role_1409", ["name"] = "测试角色C", ["rarity"] = "rare", ["quantity"] = 1, ["isCollect"] = false, ["thumb"] = "" },
+                        new JsonObject { ["id"] = 1604, ["type"] = "accessory", ["assetName"] = "acc_1604", ["name"] = "测试配件A", ["rarity"] = "rare", ["quantity"] = 1, ["isCollect"] = false, ["thumb"] = "" },
                         new JsonObject { ["id"] = 201, ["type"] = "emote", ["name"] = "收藏测试·普通", ["rarity"] = "common", ["quantity"] = 1, ["isCollect"] = false, ["thumb"] = "" },
                         new JsonObject { ["id"] = 202, ["type"] = "emote", ["name"] = "收藏测试·史诗", ["rarity"] = "epic", ["quantity"] = 1, ["isCollect"] = false, ["thumb"] = "" },
                         new JsonObject { ["id"] = 203, ["type"] = "emote", ["name"] = "收藏测试·稀有", ["rarity"] = "rare", ["quantity"] = 1, ["isCollect"] = false, ["thumb"] = "" },
                     }
                 };
+            case "catalog.list":
+            {
+                string type = data["type"]?.GetValue<string>() ?? "character_skin";
+                return new JsonObject { ["items"] = CatalogItems(type), ["count"] = CatalogItems(type).Count };
+            }
+            case "atlas.list":
+            {
+                string type = data["type"]?.GetValue<string>() ?? "";
+                var list = new JsonArray();
+                if (type == "character_skin")
+                {
+                    list.Add(AtlasItem(3060, "role_1407", "character_skin", "测试角色A", "epic"));
+                    list.Add(AtlasItem(3061, "role_1408", "character_skin", "测试角色B", "rare"));
+                    list.Add(AtlasItem(3062, "role_1409", "character_skin", "测试角色C", "rare"));
+                    list.Add(AtlasItem(3063, "role_1410", "character_skin", "测试角色D", "uncommon"));
+                }
+                else if (type == "accessory")
+                {
+                    list.Add(AtlasItem(1604, "acc_1604", "accessory", "测试配件A", "rare"));
+                    list.Add(AtlasItem(1605, "acc_1605", "accessory", "测试配件B", "uncommon"));
+                    list.Add(AtlasItem(1606, "acc_1606", "accessory", "测试配件C", "common"));
+                }
+                else
+                {
+                    list.Add(AtlasItem(201, "emote_2000_happy", "emote", "收藏测试·普通", "common"));
+                }
+                return new JsonObject { ["items"] = list, ["count"] = list.Count };
+            }
+            case "rotation.set":
+            {
+                var rot = boot["rotation"] as JsonObject;
+                if (rot == null) { rot = new JsonObject(); boot["rotation"] = rot; }
+                if (data.ContainsKey("enabled")) rot["enabled"] = data["enabled"]?.GetValue<bool>() ?? false;
+                if (data.ContainsKey("intervalMinutes"))
+                    rot["intervalMinutes"] = Math.Clamp(data["intervalMinutes"]?.GetValue<int>() ?? 30, 1, 1440);
+                return boot;
+            }
+            case "rotation.toggle":
+            {
+                string type = data["type"]?.GetValue<string>() ?? "";
+                long id = data["id"]?.GetValue<long>() ?? 0;
+                var rot = boot["rotation"] as JsonObject;
+                if (rot == null) { rot = new JsonObject(); boot["rotation"] = rot; }
+                string key = type == "character_skin" ? "characterIds" : "accessoryIds";
+                var values = (rot[key] as JsonArray)?.Select(x => x!.GetValue<long>()).ToList() ?? new List<long>();
+                if (values.Contains(id)) values.Remove(id); else values.Add(id);
+                var next = new JsonArray();
+                foreach (long value in values) next.Add(value);
+                rot[key] = next;
+                return boot;
+            }
+            case "rotation.remove":
+            {
+                string type = data["type"]?.GetValue<string>() ?? "";
+                long id = data["id"]?.GetValue<long>() ?? 0;
+                var rot = boot["rotation"] as JsonObject;
+                if (rot == null) { rot = new JsonObject(); boot["rotation"] = rot; }
+                string key = type == "character_skin" ? "characterIds" : "accessoryIds";
+                var values = (rot[key] as JsonArray)?.Select(x => x!.GetValue<long>()).Where(x => x != id).ToList() ?? new List<long>();
+                var next = new JsonArray();
+                foreach (long value in values) next.Add(value);
+                rot[key] = next;
+                return boot;
+            }
             case "favorite":
                 return new JsonObject { ["favorite"] = data["on"]?.GetValue<bool>() ?? false };
             case "settings.set":
@@ -1053,6 +1389,52 @@ internal static class Program
                 return null;
         }
     }
+
+    static JsonArray CatalogItems(string type)
+    {
+        var list = new JsonArray();
+        if (type == "character_skin")
+        {
+            list.Add(CatalogItem(3060, "测试角色A", "角色系列"));
+            list.Add(CatalogItem(3061, "测试角色B", "角色系列"));
+            list.Add(CatalogItem(3062, "测试角色C", "角色系列"));
+            list.Add(CatalogItem(3063, "测试角色D", "角色系列"));
+        }
+        else if (type == "accessory")
+        {
+            list.Add(CatalogItem(1604, "测试配件A", "配件系列"));
+            list.Add(CatalogItem(1605, "测试配件B", "配件系列"));
+            list.Add(CatalogItem(1606, "测试配件C", "配件系列"));
+        }
+        else
+        {
+            list.Add(CatalogItem(201, "收藏测试·普通", ""));
+        }
+        return list;
+    }
+
+    static JsonObject CatalogItem(long id, string name, string series) => new()
+    {
+        ["id"] = id,
+        ["name"] = name,
+        ["series"] = series,
+        ["rarity"] = "rare",
+        ["thumb"] = "",
+        ["previewUrl"] = "",
+        ["gameRoleId"] = 0,
+    };
+
+    static JsonObject AtlasItem(long mainId, string assetName, string type, string name, string rarity) => new()
+    {
+        ["id"] = mainId + 50000,
+        ["mainId"] = mainId,
+        ["assetName"] = assetName,
+        ["type"] = type,
+        ["name"] = name,
+        ["rarity"] = rarity,
+        ["series"] = "图鉴系列",
+        ["thumb"] = "",
+    };
 
     static void RefreshThemePresetBoot(JsonObject boot, ThemePresetManager manager)
     {

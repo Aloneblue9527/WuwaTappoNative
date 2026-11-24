@@ -988,7 +988,7 @@ public sealed class App : ApplicationContext
         if (Catalog.Find("character_skin", id) != null) return "character_skin";
         if (Catalog.Find("accessory", id) != null) return "accessory";
         if (Catalog.Find("emote", id) != null) return "emote";
-        return "emote";
+        return "";
     }
 
     async Task BootAsync()
@@ -1382,7 +1382,7 @@ public sealed class App : ApplicationContext
     async Task AutoSynthTickAsync(ApiClient session = null)
     {
         if (Volatile.Read(ref _disposed) != 0) return;
-        if (!Cfg.AutoSynthUp || !Auth.CanUseOnline || Cfg.AnyItemSynthesisEnabled) return;
+        if (!Cfg.AutoSynthUp || !Auth.CanUseOnline) return;
         if (!string.IsNullOrEmpty(OnlineBlockedReason)) return;
         // 自动升阶网络失败后的冷却期内直接返回，不再消耗一次请求。
         if (_autoSynthBackoff.IsCoolingDown(Environment.TickCount64)) return;
@@ -1404,7 +1404,7 @@ public sealed class App : ApplicationContext
             catch (OperationCanceledException) { return; }
 
             if (Volatile.Read(ref _disposed) != 0) return;
-            if (!Cfg.AutoSynthUp || !Auth.CanUseOnline || Cfg.AnyItemSynthesisEnabled) return;
+            if (!Cfg.AutoSynthUp || !Auth.CanUseOnline) return;
             if (!string.IsNullOrEmpty(OnlineBlockedReason)) return;
             if (!Auth.IsLoggedIn || !ReferenceEquals(Auth.CaptureSession(), session)) return;
             // 等待期间可能已有另一次自动检查失败并写入冷却，这里再确认一次。
@@ -1552,8 +1552,7 @@ public sealed class App : ApplicationContext
 
     /// <summary>
     /// 自动升阶合成：拥有 10 件以上相同类型和稀有度的多余材料时自动进行升阶合成。
-    /// 每种收集物至少保留 1 份底物不消耗；上锁只影响高级合成时是否保留最后 1 件，
-    /// 不影响普通 10/5 件合成和本自动升阶（本功能始终使用普通升阶接口）。
+    /// 每种收集物至少保留 1 份底物不消耗，不影响普通 10/5 件合成。
     /// 供后台定时/登录态恢复自动触发，也可供前端“一键全部升阶”主动调用；开箱路径不再立即触发。
     /// </summary>
     public async Task<AutoSynthResult> RunAutoSynthAsync(ApiClient session = null, bool manual = false, CancellationToken cancellationToken = default)
@@ -1599,8 +1598,6 @@ public sealed class App : ApplicationContext
             return result;
         }
 
-        if (Cfg.AnyItemSynthesisEnabled)
-            return Early("高级合成开启时不会自动升阶，请先关闭高级合成。", gate: true);
         if (!manual && !Cfg.AutoSynthUp)
             return Early("自动升阶合成已关闭。", gate: true);
 
@@ -1669,8 +1666,7 @@ public sealed class App : ApplicationContext
 
                 ownedAssetIds.Add(id);
 
-                // 普通升阶/自动升阶一律保留每件底物 1 个；锁定只影响高级合成，
-                // 这里不能把锁定物资排除出池子（见 wwwroot/app.js 的 synthBaseUsable）。
+                // 普通升阶/自动升阶一律保留每件底物 1 个。
                 long qty = Math.Max(1, ApiClient.ReadLong(o["quantity"]));
                 int usable = (int)Math.Max(0, qty - 1);
 
@@ -1715,7 +1711,7 @@ public sealed class App : ApplicationContext
                 while (round < MaxRounds)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (!manual && (!Cfg.AutoSynthUp || Cfg.AnyItemSynthesisEnabled)) break;
+                    if (!manual && !Cfg.AutoSynthUp) break;
                     if (!string.IsNullOrEmpty(OnlineBlockedReason))
                     {
                         errorMessage = OnlineBlockedReason;

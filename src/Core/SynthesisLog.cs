@@ -40,7 +40,6 @@ public static class SynthesisLog
             Settings = new AutoSynthesisSettingsSnapshot
             {
                 AutoSynthUp = cfg?.AutoSynthUp ?? false,
-                AnyItemSynthesisEnabled = cfg?.AnyItemSynthesisEnabled ?? false,
             },
             Bag = new AutoSynthesisBagSnapshot(),
             Rounds = new List<AutoSynthesisRoundSnapshot>(),
@@ -109,7 +108,6 @@ public sealed class AutoSynthesisSnapshot
 public sealed class AutoSynthesisSettingsSnapshot
 {
     public bool AutoSynthUp { get; set; }
-    public bool AnyItemSynthesisEnabled { get; set; }
 }
 
 public sealed class AutoSynthesisBagSnapshot

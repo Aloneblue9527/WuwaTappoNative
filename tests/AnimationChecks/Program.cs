@@ -181,9 +181,12 @@ internal static partial class Program
                 SamePixels(expected, actual, $"remote {scale}: {label}", 2);
             }
             Verify("first frame");
-            var cached = Field(window, "_baseFrame").GetValue(window);
+            int bodyFrame = (int)Field(window, "_bodyFrame").GetValue(window)!;
+            int bodyIndex = bodyFrame is 2 or 3 ? bodyFrame : 1;
+            var cached = ((Bitmap[])Field(window, "_baseFrames").GetValue(window)!)[bodyIndex];
             Verify("cache hit");
-            Assert(ReferenceEquals(cached, Field(window, "_baseFrame").GetValue(window)), "Remote cache should reuse its bitmap.");
+            Assert(ReferenceEquals(cached, ((Bitmap[])Field(window, "_baseFrames").GetValue(window)!)[bodyIndex]),
+                "Remote cache should reuse its bitmap.");
             member.Nickname += "X"; Verify("nickname");
             Field(window, "_remoteNameScale").SetValue(window, 1.7); Verify("name size");
             Field(window, "_bodyFrame").SetValue(window, 2); Verify("hand frame");

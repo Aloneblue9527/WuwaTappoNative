@@ -288,93 +288,21 @@
     }
   }
 
-  /* ---------------- 隐藏高级合成入口 ---------------- */
+  /* ---------------- 高级合成纪念彩蛋 ----------------
+     上上下下左右左右 b a b a 仍然保留，但只显示纪念弹窗，不再解锁任何功能。 */
   const KONAMI_CODE = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a', 'b', 'a'];
   let konamiIndex = 0;
 
-  function lockKey(type, id) { return String(type || '').toLowerCase() + ':' + Number(id); }
-  function isAssetLocked(type, id) { return state.locks.has(lockKey(type, id)); }
-  function syncLocks(items) {
-    state.locks = new Set((items || []).map(x => lockKey(x.type, x.id)));
-  }
-  function applySynthSettings(boot) {
-    if (!boot) return;
-    state.synthUnlocked = !!boot.settings?.anyItemSynthesisUnlocked;
-    state.synthEnabled = !!boot.settings?.anyItemSynthesisEnabled;
-    syncLocks(boot.locks || []);
-  }
-  async function toggleAssetLock(type, id) {
-    try {
-      const r = await tryCall('locks.toggle', { type, id });
-      syncLocks(r?.items || []);
-      if (state.page === 'bag') {
-        const host = document.getElementById('bagGroups');
-        const scroll = host?.scrollTop || 0;
-        renderBagList();
-        if (host) host.scrollTop = scroll;
-      }
-      else if (state.page === 'atlas') renderAtlas(true);
-      else if (state.page === 'synth') renderSynth(true);
-    } catch { }
-  }
-  function lockButtonHtml(type, id, extra = '') {
-    if (!state.synthUnlocked) return '';
-    const locked = isAssetLocked(type, id);
-    const icon = locked
-      ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>'
-      : '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 7.2-2.2"/></svg>';
-    return `<button type="button" class="card-lock ${locked ? 'locked' : ''} ${extra}" data-lock-type="${esc(type)}" data-lock-id="${Number(id)}" title="${locked ? tr('bag.unlock', '解除锁定') : tr('bag.lock', '锁定，避免消耗最后一份')}">${icon}</button>`;
-  }
-  function showAdvancedSynthWarning() {
+  function showSynthMemorial() {
     modal(`<div class="about">
-      <div class="about-title">${tr('synth.advancedTitle', '高级合成警告')}</div>
-      <div class="about-note about-note--warn"><p>${tr('synth.advancedFirstBody', '此功能允许你使用所有库存物品进行合成，请务必看清后使用， 这将会损失你已解锁的图鉴！！！！每次重新打开操作面板后都会自动关闭，需要重新输入隐藏指令。')}</p></div>
-      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
-        <button class="btn ghost" id="synthUnlockCancel">${tr('common.cancel', '取消')}</button>
-        <button class="btn danger" id="synthUnlockOk">${tr('synth.unlock', '我已知晓并解锁')}</button>
-      </div>
+      <div class="about-note"><p>${tr('synth.memorialBody', '人生自古谁无死？不幸的，高级合成已经被牢库暗杀，无法再为您服务，让我们一起缅怀它')}</p></div>
+      <button class="btn" id="synthMemorialOk" style="align-self:center;min-width:120px">${tr('synth.memorialConfirm', '确定')}</button>
     </div>`, host => {
-      host.querySelector('#synthUnlockCancel').onclick = closeModal;
-      host.querySelector('#synthUnlockOk').onclick = async () => {
-        closeModal();
-        try {
-          const boot = await tryCall('settings.set', { anyItemSynthesisUnlocked: true, anyItemSynthesisEnabled: true });
-          state.boot = boot;
-          applySynthSettings(boot);
-          state.synthPanelVisible = true;
-          renderChrome();
-          if (state.page === 'synth') renderSynth();
-          toast(tr('synth.unlocked', '高级合成已解锁'));
-        } catch { }
-      };
+      host.querySelector('#synthMemorialOk').onclick = closeModal;
     });
-  }
-
-  /** 每次从关闭切到开启都重新警告；关闭本身不警告。 */
-  function confirmAdvancedSynthEnable(onConfirm) {
-    const cancel = () => { closeModal(); renderSynth(); };
-    modal(`<div class="about">
-      <div class="about-title">${tr('synth.advancedTitle', '高级合成警告')}</div>
-      <div class="about-note about-note--warn"><p>${tr('synth.advancedEnableBody', '开启后，任意物品合成会消耗你已解锁的图鉴，可能造成不可恢复的损失。每次实际合成前仍会再确认一次。')}</p></div>
-      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
-        <button class="btn ghost" id="synthEnableCancel">${tr('common.cancel', '取消')}</button>
-        <button class="btn danger" id="synthEnableOk">${tr('synth.stillEnable', '仍要开启')}</button>
-      </div>
-    </div>`, host => {
-      host.onclick = e => { if (e.target === host) cancel(); };
-      host.querySelector('#synthEnableCancel').onclick = cancel;
-      host.querySelector('#synthEnableOk').onclick = () => { closeModal(); onConfirm(); };
-    });
-  }
-
-  async function showSynthPanel() {
-    if (state.page !== 'synth') return;
-    // 保留旧的“意外设计”：每次输入隐藏指令都重新弹出首次警告，而不是直接打开面板。
-    showAdvancedSynthWarning();
   }
 
   document.addEventListener('keydown', e => {
-    if (state.page !== 'synth') { konamiIndex = 0; return; }
     if (e.repeat) return;
     const target = e.target;
     if (target && target instanceof Element && target.closest('input, textarea, select')) { konamiIndex = 0; return; }
@@ -383,7 +311,7 @@
       konamiIndex++;
       if (konamiIndex === KONAMI_CODE.length) {
         konamiIndex = 0;
-        showSynthPanel();
+        showSynthMemorial();
       }
     } else {
       konamiIndex = key === KONAMI_CODE[0] ? 1 : 0;
@@ -1177,9 +1105,8 @@
     loadSettingsOpenGroups();
     const initialPage = hashParams.get('page');
     if (initialPage && PAGES.some(p => p.key === initialPage)) state.page = initialPage;
-    const warningIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.8 20h18.4L12 3Z"/><path d="M12 9v4.5"/><path d="M12 17h.01"/></svg>';
     document.getElementById('tabs').innerHTML = PAGES.map(p =>
-      `<button class="tab" data-page="${p.key}">${ICONS[p.icon]}<span>${esc(pageTitleOf(p))}</span>${p.key === 'synth' && state.synthEnabled ? `<span class="tab-warning" title="${esc(tr('nav.synthAdvancedOn', '高级合成已开启'))}">${warningIcon}</span>` : ''}${p.key === 'synth' ? `<span class="tab-dot" data-tab-badge="synth" title="${esc(tr('nav.synthItems', '有可合成物资'))}"></span>` : ''}</button>`).join('');
+      `<button class="tab" data-page="${p.key}">${ICONS[p.icon]}<span>${esc(pageTitleOf(p))}</span>${p.key === 'synth' ? `<span class="tab-dot" data-tab-badge="synth" title="${esc(tr('nav.synthItems', '有可合成物资'))}"></span>` : ''}</button>`).join('');
     document.querySelectorAll('.tab').forEach(btn => btn.onclick = () => navigate(btn.dataset.page));
     document.getElementById('closeBtn').onclick = () => call('win.close');
     document.getElementById('winCloseBtn').onclick = () => call('win.close');
@@ -1562,7 +1489,6 @@
       mergePendingRecentChests(data.pendingRecentChestIds);
       applyPanelMaximized(data.panelMaximized);
       applyTheme(data.settings);
-      applySynthSettings(data);
       renderChrome();
       applyAuthFields(data.auth);
       const nextAuthKey = authIdentityKey(data);
@@ -3288,7 +3214,6 @@
 
   /* ---------------- 合成 ---------------- */
   function synthNeed() { return state.synthMode === 'same' ? 5 : 10; }
-  function synthAnyMode() { return !!(state.synthUnlocked && state.synthEnabled); }
   function synthResetSlots() { state.synthSlots = Array(synthNeed()).fill(null); }
   function synthSlotCount(id) { return state.synthSlots.filter(x => x === id).length; }
   function synthBagById(id) { return (state.bag || []).find(x => x.id === id) || null; }
@@ -3300,17 +3225,14 @@
     for (const it of list) if ((order[effRarity(it.rarity)] || 0) > (order[max] || 0)) max = effRarity(it.rarity);
     return max;
   }
-  /** 未扣除已放入槽位的可用数量；锁只保留 1 份，普通模式永远保留 1 份。 */
+  /** 未扣除已放入槽位的可用数量；普通模式永远保留 1 份。 */
   function synthBaseUsable(item) {
     const quantity = Math.max(0, Number(item.quantity) || 1);
-    const locked = isAssetLocked(item.type, item.id);
-    const reserved = (!synthAnyMode() || locked) ? 1 : 0;
-    return Math.max(0, quantity - reserved);
+    return Math.max(0, quantity - 1);
   }
   function synthUsable(item) { return Math.max(0, synthBaseUsable(item) - synthSlotCount(item.id)); }
   function synthEligible(type) {
     const list = (state.bag || []).filter(x => ['character_skin', 'accessory', 'emote'].includes(x.type));
-    if (synthAnyMode()) return type ? list.filter(x => x.type === type) : list;
     const maxR = synthMaxRarity(type);
     return list.filter(x => x.type === type)
       .filter(x => state.synthMode === 'same' || effRarity(x.rarity) !== maxR);
@@ -3336,7 +3258,7 @@
     const groups = new Map();
     for (const item of state.bag) {
       if (!['character_skin', 'accessory', 'emote'].includes(item.type)) continue;
-      // 合成提醒只统计正常规则下可合成的数量；高级合成额外允许的最后一份不参与计算。
+      // 合成提醒只统计正常规则下可合成的数量（保留每件物品 1 份）。
       const usable = Math.max(0, (Number(item.quantity) || 1) - 1);
       if (usable <= 0) continue;
       const rarity = effRarity(item.rarity);
@@ -3367,13 +3289,9 @@
     const need = synthNeed(), type = state.synthType;
     // 清理已不合法/超量的槽位
     const eligibleAll = synthEligible(type);
-    const anchorForCleanup = synthAnchor();
-    const cleanupAll = synthAnyMode()
-      ? synthEligible('').filter(x => !anchorForCleanup || (x.type === anchorForCleanup.type && effRarity(x.rarity) === effRarity(anchorForCleanup.rarity)))
-      : eligibleAll;
     const kept = state.synthSlots.map((id, i) => {
       if (id == null) return null;
-      const item = cleanupAll.find(x => x.id === id);
+      const item = eligibleAll.find(x => x.id === id);
       if (!item) return null;
       const before = state.synthSlots.slice(0, i).filter(x => x === id).length;
       return before < synthBaseUsable(item) ? id : null;
@@ -3396,18 +3314,6 @@
       return `<div class="synth-slot ${item ? 'filled' : ''}" data-slot="${i}" title="${item ? esc(item.name) : tr('synth.slotEmpty', '空槽位')}">
         ${item ? img(item.thumb) : ''}<span class="idx">${i + 1}</span></div>`;
     }).join('');
-    const advancedReminderHtml = synthAnyMode() ? `<div class="synth-danger-note">${tr('synth.advancedReminder', '高级合成已开启，使用完毕务必及时关闭。')}</div>` : '';
-    const advancedPanelHtml = state.synthPanelVisible ? `
-      <div class="synth-advanced-panel">
-        <div class="synth-advanced-head">
-          <span>${tr('synth.advanced', '高级合成')} <span class="synth-advanced-state ${state.synthEnabled ? 'on' : ''}">${state.synthEnabled ? tr('synth.enabled', '已启用') : tr('synth.disabled', '已关闭')}</span></span>
-          <label class="synth-advanced-toggle"><input type="checkbox" id="synthEnabled" ${state.synthEnabled ? 'checked' : ''}> ${tr('synth.anyItem', '任意物品')}</label>
-          <span class="synth-advanced-meta">${tr('synth.lockedCount', '锁定 {count} 件', { count: state.locks.size })}</span>
-          <button class="btn ghost" id="synthHide">${tr('synth.hide', '隐藏')}</button>
-        </div>
-        <div class="synth-advanced-note">${tr('synth.advancedNote', '锁定物资在高级合成中只保证保留最后 1 件，不会被消耗到 0。锁定记录单独保存在 locks.json；每次合成前会二次确认。重新打开操作面板后会自动关闭，需要重新输入隐藏指令。')}</div>
-        <div class="synth-advanced-actions"><button class="btn" id="synthSave">${tr('synth.saveSettings', '保存设置')}</button></div>
-      </div>` : '';
 
     setPage(`
       <div class="synth-top">
@@ -3451,12 +3357,10 @@
         <span class="synth-count">${tr('synth.selected', '已选 {filled} / {need}', { filled, need })}${anchor ? ' · ' + esc(anchor.name) : ''}</span>
         <span class="spacer"></span>
         <button class="btn ghost" id="synthClear">${tr('synth.clear', '清空')}</button>
-        <button class="btn ghost" id="synthOne" ${synthAnyMode() ? `disabled title="${tr('synth.advancedForbidden', '高级合成禁止一键放置')}"` : ''}>${tr('synth.autoSelect', '一键选择')}</button>
-        <button class="btn ghost" id="synthAutoAll" ${synthAnyMode() ? `disabled title="${tr('synth.advancedManual', '高级合成模式下请手动选择材料')}"` : ''}>${tr('synth.autoAll', '一键全部升阶')}</button>
+        <button class="btn ghost" id="synthOne">${tr('synth.autoSelect', '一键选择')}</button>
+        <button class="btn ghost" id="synthAutoAll">${tr('synth.autoAll', '一键全部升阶')}</button>
         <button class="btn" id="synthSubmit" ${filled === need ? '' : 'disabled'}>${tr('synth.submit', '合成')}</button>
-      </div>
-      ${advancedPanelHtml}
-      ${advancedReminderHtml}`);
+      </div>`);
 
     document.querySelectorAll('[data-sm]').forEach(b => b.onclick = () => {
       state.synthMode = b.dataset.sm; synthResetSlots(); renderSynth();
@@ -3507,7 +3411,6 @@
     const autoAllBtn = document.getElementById('synthAutoAll');
     if (autoAllBtn) {
       autoAllBtn.onclick = async () => {
-        if (synthAnyMode()) return toast(tr('synth.advancedManual', '高级合成模式下请手动选择材料'), 'err');
         if (state.synthBusy) return;
         try {
           state.synthBusy = true;
@@ -3538,30 +3441,6 @@
         }
       };
     }
-    if (state.synthPanelVisible) {
-      document.getElementById('synthHide').onclick = () => {
-        state.synthPanelVisible = false;
-        renderSynth();
-      };
-      document.getElementById('synthSave').onclick = () => {
-        const enabled = !!document.getElementById('synthEnabled')?.checked;
-        const save = async () => {
-          try {
-            const boot = await tryCall('settings.set', { anyItemSynthesisEnabled: enabled });
-            state.boot = boot;
-            applySynthSettings(boot);
-            state.synthEnabled = enabled;
-            if (!enabled) synthResetSlots();
-            renderChrome();
-            renderSynth();
-            toast(enabled ? tr('synth.advancedOn', '高级合成已开启') : tr('synth.advancedOff', '高级合成已关闭'));
-          } catch { renderSynth(); }
-        };
-        // 每次从关闭切到开启都重新警告；已开启时重复保存不重复打扰。
-        if (enabled && !state.synthEnabled) confirmAdvancedSynthEnable(save);
-        else save();
-      };
-    }
 
     const grid = document.getElementById('synthGrid');
     if (!items.length) {
@@ -3572,7 +3451,6 @@
       const usable = synthUsable(x);
       const sel = synthSlotCount(x.id);
       return `<div class="card ${sel ? 'selected' : ''}" data-id="${x.id}">
-        ${lockButtonHtml(x.type, x.id)}
         ${img(x.thumb, 'thumb', x.name)}
         <div class="rarity-bar ${rarityClass(x.rarity)}"></div>
         <div class="name" title="${esc(x.name)}">${esc(x.name)}</div>
@@ -3580,9 +3458,6 @@
         ${x.quantity > 1 ? `<div class="qty">×${x.quantity}</div>` : ''}
       </div>`;
     }).join('');
-    grid.querySelectorAll('[data-lock-type]').forEach(el => {
-      el.onclick = async e => { e.stopPropagation(); await toggleAssetLock(el.dataset.lockType, Number(el.dataset.lockId)); };
-    });
     grid.querySelectorAll('.card').forEach(el => {
       el.onclick = () => {
         const item = synthBagById(Number(el.dataset.id));
@@ -3604,7 +3479,6 @@
   }
 
   async function synthOneClick() {
-    if (synthAnyMode()) return toast(tr('synth.advancedForbidden', '高级合成禁止使用一键放置'), 'err');
     const need = synthNeed();
     const filled = state.synthSlots.filter(x => x !== null).length;
     if (filled >= need) return;
@@ -3612,27 +3486,8 @@
     // 一键选择搜索全部三类材料，不再受当前“类型”页签限制。
     await Promise.all(['character_skin', 'accessory', 'emote']
       .map(t => ensureAtlas(t).catch(() => [])));
-    const pool = (synthAnyMode() ? synthEligible('') : ['character_skin', 'accessory', 'emote'].flatMap(t => synthEligible(t)))
+    const pool = ['character_skin', 'accessory', 'emote'].flatMap(t => synthEligible(t))
       .filter(x => synthUsable(x) > 0);
-
-    if (synthAnyMode()) {
-      const remaining = need - filled;
-      if (pool.reduce((sum, x) => sum + synthUsable(x), 0) < remaining)
-        return toast(tr('synth.notEnough', '库存中的可用材料不足'), 'err');
-      const slots = [...state.synthSlots];
-      for (const item of pool.sort((a, b) => synthUsable(b) - synthUsable(a))) {
-        const take = Math.min(synthUsable(item), remaining - slots.filter(Boolean).length);
-        for (let i = 0; i < take; i++) {
-          const idx = slots.findIndex(v => v === null);
-          if (idx < 0) break;
-          slots[idx] = item.id;
-        }
-        if (slots.filter(Boolean).length >= need) break;
-      }
-      state.synthSlots = slots;
-      renderSynth();
-      return;
-    }
 
     let group;
     let chosenType;
@@ -3854,27 +3709,6 @@
     if (selectedItems.some(x => x.type !== first.type || effRarity(x.rarity) !== effRarity(first.rarity)))
       return toast(tr('synth.crossType', '不能跨材料合成，请选择相同类型和稀有度的收集物'), 'err');
     const sameLevel = state.synthMode === 'same';
-    if (synthAnyMode()) {
-      state.synthBusy = true;
-      modal(`<div class="about">
-        <div class="about-title">${tr('synth.confirmTitle', '合成确认')}</div>
-        <div class="about-note about-note--warn"><p>${tr('synth.confirmBody', '确认要开始此次合成吗？这将可能损失你已解锁的图鉴')}</p></div>
-        <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
-          <button class="btn ghost" id="synthCancel">${tr('common.cancel', '取消')}</button>
-          <button class="btn danger" id="synthConfirm">${tr('synth.confirm', '确认合成')}</button>
-        </div>
-      </div>`, host => {
-        const release = () => { state.synthBusy = false; };
-        host.onclick = e => { if (e.target === host) { closeModal(); release(); } };
-        host.querySelector('#synthCancel').onclick = () => { closeModal(); release(); };
-        host.querySelector('#synthConfirm').onclick = async () => {
-          closeModal();
-          try { await performSynth(ids, sameLevel); }
-          finally { release(); }
-        };
-      });
-      return;
-    }
     await performSynth(ids, sameLevel);
   }
 
@@ -8208,7 +8042,6 @@
     window.__previewBoot = previewBoot;
     window.__previewMode = PREVIEW;
     state.boot = previewBoot(PREVIEW);
-    applySynthSettings(state.boot);
     applyTheme(state.boot.settings);
     state.compatibility = previewCompatibility(PREVIEW);
     state.announcements = previewAnnouncements(PREVIEW);

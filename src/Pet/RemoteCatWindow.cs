@@ -38,8 +38,7 @@ public sealed class RemoteCatWindow : Form
     int _bodyFrame = 1;
     string _lastAction = "";
     long _lastSkin = -1, _lastPart = -1;
-    string _lastNickname;
-    readonly LayeredSurface _surface = new();
+    string _lastNickname;    readonly LayeredSurface _surface = new();
     // Body1/2/3 各缓存一张已合成的底图；按键动作只切换缓存，不再重建整只角色。
     readonly Bitmap[] _baseFrames = new Bitmap[4];
     // 渲染 OOM 后 10 秒内不重试，避免 CatPainter 连续调度造成异常风暴。
@@ -453,10 +452,10 @@ public sealed class RemoteCatWindow : Form
         }
         // 外观与昵称都没变就不要重画：人多时每条动作包都全量重绘是最主要的开销。
         bool appearanceChanged = framesChanged || skin != _lastSkin || part != _lastPart;
-        bool nicknameChanged = !string.Equals(_lastNickname, _member.Nickname);
+        bool nicknameChanged = !string.Equals(_lastNickname, DisplayNickname);
         _lastSkin = skin;
         _lastPart = part;
-        _lastNickname = _member.Nickname;
+        _lastNickname = DisplayNickname;
         if (appearanceChanged || nicknameChanged) Compose();
     }
     void OnFramesChanged()
@@ -547,7 +546,7 @@ public sealed class RemoteCatWindow : Form
         int bodyIndex = _bodyFrame is 2 or 3 ? _bodyFrame : 1;
         var key = (surface.Size, _frames?.Head1, _frames?.Body1, _frames?.Body2, _frames?.Body3, _frames?.Accessory,
             _frames?.AccOffsetX ?? 0, _frames?.AccOffsetY ?? 0, _scale, _remoteNameScale, _barVisible,
-            _member.Nickname, _selected, _mirrored, _pillColor, _pillTextColor);
+            DisplayNickname, _selected, _mirrored, _pillColor, _pillTextColor);
         if (ready && (_baseFrameKey != key || _baseFrames[bodyIndex] == null))
         {
             if (_baseFrameKey != key)
@@ -620,9 +619,9 @@ public sealed class RemoteCatWindow : Form
                     using (var font = new Font("Microsoft YaHei UI", nameFontPx, FontStyle.Bold, GraphicsUnit.Pixel))
                     using (var brush = new SolidBrush(_pillTextColor))
                     using (var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter })
-                        g.DrawString(string.IsNullOrEmpty(_member.Nickname)
+                        g.DrawString(string.IsNullOrEmpty(DisplayNickname)
                             ? Localization.T("remote.defaultNickname", "漂泊者")
-                            : _member.Nickname, font, brush, pill, fmt);
+                            : DisplayNickname, font, brush, pill, fmt);
 
                     // 手/手臂要压住昵称条；角色头部和身体其余部分仍在 UI 后面。
                     if (body != null)

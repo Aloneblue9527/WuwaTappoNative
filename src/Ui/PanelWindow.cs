@@ -57,14 +57,6 @@ public sealed class PanelWindow : Form
     public PanelWindow(App app)
     {
         _app = app;
-        // 高级合成按“面板会话”处理：每次重新打开面板都重置为锁定/关闭，
-        // 必须重新输入隐藏指令并再次确认警告。
-        if (app.Cfg.AnyItemSynthesisUnlocked || app.Cfg.AnyItemSynthesisEnabled)
-        {
-            app.Cfg.AnyItemSynthesisUnlocked = false;
-            app.Cfg.AnyItemSynthesisEnabled = false;
-            ConfigStore.Save(app.Cfg);
-        }
         _maximized = app.Cfg.PanelMaximized;
         Text = "Wuwatappo";
         // 不设 Icon 时任务栏/Alt+Tab 会显示 WinForms 默认图标。
@@ -722,8 +714,6 @@ public sealed class PanelWindow : Form
             themeBackgroundOpacity = _app.Cfg.ThemeBackgroundOpacity,
             themeBackgroundBlur = _app.Cfg.ThemeBackgroundBlur,
             synthCheckMode = _app.Cfg.SynthCheckMode,
-            anyItemSynthesisUnlocked = _app.Cfg.AnyItemSynthesisUnlocked,
-            anyItemSynthesisEnabled = _app.Cfg.AnyItemSynthesisEnabled,
             autoClickBoost = _app.Cfg.AutoClickBoost,
             captureMode = _app.Cfg.CaptureMode,
             captureWidth = _app.Cfg.CaptureWidth,
@@ -1426,14 +1416,6 @@ public sealed class PanelWindow : Form
                 return new { ok = true, hotkeys = normalized };
             }
 
-            case "locks.toggle":
-            {
-                string type = ApiClient.ReadString(data["type"]);
-                long id = ApiClient.ReadLong(data["id"]);
-                bool locked = AssetLockStore.Toggle(type, id);
-                return new { locked, items = AssetLockStore.All() };
-            }
-
             case "theme.preview":
             {
                 var preview = ThemePreviewSettings(cfg, data);
@@ -1693,11 +1675,6 @@ public sealed class PanelWindow : Form
                             cfg.SynthCheckMode = mode == "same" || mode == "off" ? mode : "up";
                             break;
                         }
-                        case "anyItemSynthesisUnlocked": cfg.AnyItemSynthesisUnlocked = ApiClient.ReadBool(kv.Value); break;
-                        case "anyItemSynthesisEnabled":
-                            cfg.AnyItemSynthesisEnabled = ApiClient.ReadBool(kv.Value);
-                            if (cfg.AnyItemSynthesisEnabled) _app.CancelAutoSynth();
-                            break;
                         case "autoClickBoost": cfg.AutoClickBoost = ApiClient.ReadBool(kv.Value); break;
                         case "captureMode": cfg.CaptureMode = ApiClient.ReadBool(kv.Value); break;
                         case "captureWidth": cfg.CaptureWidth = Math.Clamp((int)ApiClient.ReadLong(kv.Value), 160, 1600); break;
