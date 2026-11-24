@@ -178,6 +178,11 @@ public sealed class Settings
     public bool AutoClickAnimate { get; set; } = true;
     /// <summary>自动领取宝箱成功后是否发 Windows 托盘通知。</summary>
     public bool NotifyChestClaimed { get; set; } = true;
+    /// <summary>
+    /// 宝箱领取通知的稀有度/分类过滤矩阵：key = common/uncommon/rare/epic。
+    /// 默认只通知稀有/史诗，且三类物品都通知，避免普通材料刷屏。
+    /// </summary>
+    public Dictionary<string, ChestNotifyRule> ChestNotifyRules { get; set; } = ChestNotificationRules.CreateDefaultRules();
     /// <summary>快捷键触发动作后是否发 Windows 托盘通知。</summary>
     public bool NotifyHotkeys { get; set; } = true;
     /// <summary>开机自动启动（写 HKCU Run 项，启动时会与注册表对齐）。</summary>

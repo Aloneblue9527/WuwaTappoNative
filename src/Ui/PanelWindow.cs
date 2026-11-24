@@ -732,6 +732,7 @@ public sealed class PanelWindow : Form
             autoClickPerSecond = _app.Cfg.AutoClickPerSecond,
             autoClickAnimate = _app.Cfg.AutoClickAnimate,
             notifyChestClaimed = _app.Cfg.NotifyChestClaimed,
+            chestNotifyRules = ChestNotificationRules.ToDto(_app.Cfg.ChestNotifyRules),
             notifyHotkeys = _app.Cfg.NotifyHotkeys,
             launchAtLogin = AutoStart.IsEnabled,
             runAsAdmin = _app.Cfg.RunAsAdmin,
@@ -1680,6 +1681,27 @@ public sealed class PanelWindow : Form
                         case "autoClickPerSecond": cfg.AutoClickPerSecond = Math.Clamp((int)ApiClient.ReadLong(kv.Value), 1, 10); break;
                         case "autoClickAnimate": cfg.AutoClickAnimate = ApiClient.ReadBool(kv.Value); break;
                         case "notifyChestClaimed": cfg.NotifyChestClaimed = ApiClient.ReadBool(kv.Value); break;
+                        case "chestNotifyRules":
+                        {
+                            // 前端提交完整 4×3 矩阵；缺失键由 Normalize 补默认值。
+                            var next = ChestNotificationRules.CreateDefaultRules();
+                            if (kv.Value is JsonObject matrix)
+                            {
+                                foreach (var rarityPair in matrix)
+                                {
+                                    if (rarityPair.Value is not JsonObject ruleObj) continue;
+                                    string rarity = ChestNotificationRules.NormalizeRarity(rarityPair.Key);
+                                    if (rarity.Length == 0) continue;
+                                    var rule = next[rarity];
+                                    if (ruleObj.ContainsKey("enabled")) rule.Enabled = ApiClient.ReadBool(ruleObj["enabled"]);
+                                    if (ruleObj.ContainsKey("character")) rule.Character = ApiClient.ReadBool(ruleObj["character"]);
+                                    if (ruleObj.ContainsKey("accessory")) rule.Accessory = ApiClient.ReadBool(ruleObj["accessory"]);
+                                    if (ruleObj.ContainsKey("emote")) rule.Emote = ApiClient.ReadBool(ruleObj["emote"]);
+                                }
+                            }
+                            cfg.ChestNotifyRules = ChestNotificationRules.Normalize(next);
+                            break;
+                        }
                         case "notifyHotkeys": cfg.NotifyHotkeys = ApiClient.ReadBool(kv.Value); break;
                         case "gameModeRules":
                         {

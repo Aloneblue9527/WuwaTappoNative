@@ -5527,6 +5527,33 @@
     </div>`;
   }
 
+  const CHEST_NOTIFY_RARITIES = ['common', 'uncommon', 'rare', 'epic'];
+  const CHEST_NOTIFY_RARITY_EMOJI = { common: '🟢', uncommon: '🔵', rare: '🟣', epic: '🟡' };
+  const CHEST_NOTIFY_CATEGORIES = ['character', 'accessory', 'emote'];
+  function chestNotifyRuleOf(settings, rarity) {
+    const rule = settings?.chestNotifyRules?.[rarity] || {};
+    return {
+      enabled: rule.enabled === true,
+      character: rule.character !== false,
+      accessory: rule.accessory !== false,
+      emote: rule.emote !== false,
+    };
+  }
+  function chestNotifyMatrixHtml(settings) {
+    const rows = CHEST_NOTIFY_RARITIES.map(rarity => {
+      const rule = chestNotifyRuleOf(settings, rarity);
+      return `<tr data-chest-rarity="${rarity}">
+        <td><span class="chest-notify-rarity">${CHEST_NOTIFY_RARITY_EMOJI[rarity]} ${rarityText(rarity)}</span></td>
+        <td><input type="checkbox" data-chest-notify="enabled" ${rule.enabled ? 'checked' : ''}></td>
+        ${CHEST_NOTIFY_CATEGORIES.map(category => `<td><input type="checkbox" data-chest-notify="${category}" ${rule[category] ? 'checked' : ''}></td>`).join('')}
+      </tr>`;
+    }).join('');
+    return `<table class="chest-notify-matrix">
+      <thead><tr><th>${tr('settings.notify.matrix.rarity', '稀有度')}</th><th>${tr('settings.notify.matrix.notify', '通知')}</th><th>${tr('type.character_skin', '角色')}</th><th>${tr('type.accessory', '配件')}</th><th>${tr('type.emote', '表情')}</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+
   function renderSettings() {
     const viewState = captureSettingsViewState();
     const s = state.boot?.settings || {};
@@ -6175,8 +6202,15 @@
         <div class="section" data-section-id="notify">
           <div class="section-title">${tr('settings.section.notify', '通知')}</div>
           <div class="setting-item">
-            <div><div class="setting-title">${tr('settings.notify.chest.title', '宝箱领取通知')}</div><div class="setting-sub">${tr('settings.notify.chest.sub', '自动领取成功后发送 Windows 通知')}</div></div>
+            <div><div class="setting-title">${tr('settings.notify.chest.title', '宝箱领取通知')}</div><div class="setting-sub">${tr('settings.notify.chest.sub', '自动领取成功后，按下方稀有度/分类过滤发送 Windows 通知')}</div></div>
             <div class="switch ${s.notifyChestClaimed !== false ? 'on' : ''}" data-switch="notifyChestClaimed"></div>
+          </div>
+          <div class="setting-item" style="align-items:flex-start">
+            <div>
+              <div class="setting-title">${tr('settings.notify.chestMatrix.title', '宝箱通知过滤')}</div>
+              <div class="setting-sub">${tr('settings.notify.chestMatrix.sub', '只有稀有度和物品分类都勾选时才会通知；默认只通知稀有/史诗。')}</div>
+            </div>
+            <div class="setting-content" id="chestNotifyMatrix">${chestNotifyMatrixHtml(s)}</div>
           </div>
           <div class="setting-item">
             <div><div class="setting-title">${tr('settings.notify.hotkeys.title', '快捷键操作通知')}</div><div class="setting-sub">${tr('settings.notify.hotkeys.sub', '触发刷新、游戏模式等快捷键时发送 Windows 通知')}</div></div>
@@ -7136,6 +7170,27 @@
         }
       } catch { el.classList.toggle('on', !next); }
     });
+    const chestMatrix = document.getElementById('chestNotifyMatrix');
+    if (chestMatrix) {
+      const collect = () => {
+        const result = {};
+        chestMatrix.querySelectorAll('[data-chest-rarity]').forEach(row => {
+          const rarity = row.dataset.chestRarity;
+          const rule = { enabled: false, character: false, accessory: false, emote: false };
+          row.querySelectorAll('[data-chest-notify]').forEach(box => { rule[box.dataset.chestNotify] = !!box.checked; });
+          result[rarity] = rule;
+        });
+        return result;
+      };
+      chestMatrix.querySelectorAll('[data-chest-notify]').forEach(box => {
+        box.onchange = async () => {
+          try {
+            const boot = await tryCall('settings.set', { chestNotifyRules: collect() });
+            if (boot?.settings) state.boot = boot;
+          } catch { }
+        };
+      });
+    }
     document.querySelectorAll('[data-kb]').forEach(el => el.onclick = async () => {
       try { await tryCall('settings.set', { keyboardMode: el.dataset.kb }); await syncBoot(); renderSettings(); } catch { }
     });
@@ -7713,14 +7768,18 @@
         captureTransparent: false,
         captureCompatibilityMode: false,
         captureStopRenderingMain: false,
-        anyItemSynthesisUnlocked: mode === 'synth' || mode === 'bag-emote',
-        anyItemSynthesisEnabled: mode === 'synth',
         autoClickBoost: false,
         autoChest: true,
         autoSynthUp: false,
         autoEmoteEnabled: false,
         autoClickEnabled: false,
         notifyChestClaimed: false,
+        chestNotifyRules: {
+          common: { enabled: false, character: true, accessory: true, emote: true },
+          uncommon: { enabled: false, character: true, accessory: true, emote: true },
+          rare: { enabled: true, character: true, accessory: true, emote: true },
+          epic: { enabled: true, character: true, accessory: true, emote: true },
+        },
         notifyHotkeys: false,
         launchAtLogin: true,
         runAsAdmin: false,

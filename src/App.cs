@@ -921,14 +921,38 @@ public sealed class App : ApplicationContext
             // 通知只是反馈：任何 UI 异常都不能让它把“已领取”当成失败，否则会重复重试并吃掉冷却。
             try
             {
-                if (auto)
+                if (auto && id > 0)
                 {
-                    string label = place == "left"
+                    // 通知过滤同时看稀有度和该稀有度的物品分类；主开关仍由 NotifyChestClaimed 控制。
+                    // 不匹配时完全不提示（包括面板 toast），避免普通/优良材料刷屏。
+                    string rarity = ApiClient.ReadString(resp?["rarity"]);
+                    if (string.IsNullOrEmpty(rarity)) rarity = ApiClient.ReadString(resp?["data"]?["rarity"]);
+                    if (string.IsNullOrEmpty(rarity))
+                        rarity = Catalog.Rarities.TryGetValue(id, out var catalogRarity) ? catalogRarity : "";
+                    string itemType = string.IsNullOrEmpty(type) ? GuessAssetType(id) : type;
+                    string itemName = ResolveCatalogName(itemType, id);
+                    if (string.IsNullOrEmpty(itemName)) itemName = ApiClient.ReadString(resp?["asset_name"]);
+                    if (string.IsNullOrEmpty(itemName)) itemName = ApiClient.ReadString(resp?["data"]?["asset_name"]);
+                    if (string.IsNullOrEmpty(itemName)) itemName = ApiClient.ReadString(resp?["name"]);
+                    if (string.IsNullOrEmpty(itemName)) itemName = "#" + id;
+                    string sideLabel = place == "left"
+                        ? Localization.T("app.chest.leftSide", "左侧")
+                        : Localization.T("app.chest.rightSide", "右侧");
+                    string sideWord = place == "left"
                         ? Localization.T("app.chest.left", "左")
                         : Localization.T("app.chest.right", "右");
-                    string text = Localization.F("app.chest.auto", "自动领取了{0}侧宝箱", label);
-                    Toast(text);
-                    if (Cfg.NotifyChestClaimed) Pet.Notify(text);
+                    if (ChestNotificationRules.ShouldNotify(Cfg, rarity, itemType))
+                    {
+                        string text = ChestNotificationRules.BuildClaimMessage(rarity, itemName, sideLabel);
+                        Toast(text);
+                        Pet.Notify(text);
+                    }
+                    else
+                    {
+                        // 不满足通知范围时仍保留原来的面板内“自动领取”反馈，
+                        // 只是不发送 Windows 托盘气泡（该气泡才是通知开关控制的对象）。
+                        Toast(Localization.F("app.chest.auto", "自动领取了{0}侧宝箱", sideWord));
+                    }
                 }
             }
             catch (Exception ex) { Log.Write("宝箱提示失败 " + ex.Message); }
