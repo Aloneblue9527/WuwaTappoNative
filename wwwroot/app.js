@@ -204,9 +204,9 @@
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
-  function modal(html, onBind) {
+  function modal(html, onBind, className = '') {
     const host = document.getElementById('modalHost');
-    host.innerHTML = `<div class="modal">${html}</div>`;
+    host.innerHTML = `<div class="modal${className ? ' ' + className : ''}">${html}</div>`;
     host.classList.remove('hidden');
     host.onclick = e => { if (e.target === host) closeModal(); };
     onBind && onBind(host);
@@ -4072,17 +4072,36 @@
           list = list.filter(x => ownedIds.has(Number(x.id)));
         }
         if (search) list = list.filter(x => (catalogName(tab, x.id) || '').toLowerCase().includes(search) || (x.series || '').toLowerCase().includes(search));
+        // 与图鉴一致：高稀有度在前，同稀有度按名称排序，避免角色/配件在长列表里四散。
+        const rarityRank = x => RARITY_ORDER[effRarity(x.rarity)] || 0;
+        list = list.slice().sort((a, b) => {
+          const byRarity = rarityRank(b) - rarityRank(a);
+          if (byRarity) return byRarity;
+          return String(catalogName(tab, a.id) || '').localeCompare(String(catalogName(tab, b.id) || ''), 'zh');
+        });
+        const groups = [];
+        const groupMap = new Map();
+        for (const x of list) {
+          const r = effRarity(x.rarity);
+          if (!groupMap.has(r)) { groupMap.set(r, []); groups.push(r); }
+          groupMap.get(r).push(x);
+        }
         const selectedEmoteIds = new Set(temp.emoteAssetIds.filter(Boolean).map(Number));
         const grid = h.querySelector('#peGrid');
-        grid.innerHTML = list.length ? list.map(x => {
-          const id = Number(x.id);
-          const selected = tab === 'emote' ? selectedEmoteIds.has(id) : id === selectedItemId();
-          return `<button type="button" class="pe-card ${selected ? 'selected' : ''}" data-pe-type="${tab}" data-pe-id="${id}" title="${escAttr(catalogName(tab, id))}">
+        if (!list.length) {
+          grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">${tr('preset.noMatch', '没有符合条件的条目')}</div>`;
+        } else {
+          const cardHtml = x => {
+            const id = Number(x.id);
+            const selected = tab === 'emote' ? selectedEmoteIds.has(id) : id === selectedItemId();
+            return `<button type="button" class="pe-card ${selected ? 'selected' : ''}" data-pe-type="${tab}" data-pe-id="${id}" data-pe-rarity="${effRarity(x.rarity)}" title="${escAttr(catalogName(tab, id))}">
             ${x.thumb ? `<img src="${escAttr(x.thumb)}" alt="">` : '<span class="muted">□</span>'}
             <span class="pe-name">${esc(catalogName(tab, id))}</span>
             <span class="pe-sub">${esc(x.series || (tab === 'emote' ? emoteKindLabel(x) : ''))}</span>
           </button>`;
-        }).join('') : `<div class="empty-state" style="grid-column:1/-1">${tr('preset.noMatch', '没有符合条件的条目')}</div>`;
+          };
+          grid.innerHTML = groups.map(r => `<div class="pe-rarity-head" data-pe-rarity-head="${r}"><span class="pe-rarity-dot ${rarityClass(r)}"></span><span>${esc(rarityText(r) || r)}</span><span class="count">${groupMap.get(r).length}</span></div>${groupMap.get(r).map(cardHtml).join('')}`).join('');
+        }
         h.querySelectorAll('[data-pe-type]').forEach(el => {
           el.onclick = () => {
             const type = el.dataset.peType;
@@ -4172,7 +4191,7 @@
       };
       renderPreview();
       renderGrid();
-    });
+    }, 'preset-edit-modal');
   }
 
   function presetCardHtml(p, index, isLocal) {

@@ -906,14 +906,26 @@ internal static class Program
                         hasClick: !!document.getElementById('peClickSeconds'),
                         hasRandom: !!document.getElementById('peRandomClick'),
                         hasBar: !!document.getElementById('peShowBar'),
-                        hasEmoteTab: !!document.querySelector('[data-pe-tab=""emote""]')
+                        hasEmoteTab: !!document.querySelector('[data-pe-tab=""emote""]'),
+                        wide: !!document.querySelector('.modal.preset-edit-modal')
                       }))()");
                     var editorState = JsonNode.Parse(JsonSerializer.Deserialize<string>(editorUi)!)!.AsObject();
                     if (!editorState["title"]!.GetValue<string>().Contains("添加自定义伙伴", StringComparison.Ordinal)
                         || !editorState["hasName"]!.GetValue<bool>() || !editorState["hasClick"]!.GetValue<bool>()
                         || !editorState["hasRandom"]!.GetValue<bool>() || !editorState["hasBar"]!.GetValue<bool>()
-                        || editorState["hasEmoteTab"]!.GetValue<bool>())
+                        || editorState["hasEmoteTab"]!.GetValue<bool>() || !editorState["wide"]!.GetValue<bool>())
                         throw new InvalidOperationException("Companion editor did not reuse the preset picker/options: " + editorUi);
+                    string pickerOrderUi = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        groups: [...document.querySelectorAll('#peGrid [data-pe-rarity-head]')].map(x => x.dataset.peRarityHead),
+                        cards: [...document.querySelectorAll('#peGrid [data-pe-type=""character_skin""]')].map(x => x.dataset.peRarity)
+                      }))()");
+                    var pickerOrder = JsonNode.Parse(JsonSerializer.Deserialize<string>(pickerOrderUi)!)!.AsObject();
+                    var pickerGroups = pickerOrder["groups"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+                    var pickerCards = pickerOrder["cards"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+                    if (!pickerGroups.SequenceEqual(new[] { "epic", "rare", "common" })
+                        || !pickerCards.SequenceEqual(new[] { "epic", "rare", "rare", "common" }))
+                        throw new InvalidOperationException("Preset/companion picker must group by rarity from high to low: " + pickerOrderUi);
                     await core.ExecuteScriptAsync(@"
                       (() => {
                         document.getElementById('peName').value = '嘉贝莉娜·团团团团转';
@@ -1395,16 +1407,16 @@ internal static class Program
         var list = new JsonArray();
         if (type == "character_skin")
         {
-            list.Add(CatalogItem(3060, "测试角色A", "角色系列"));
-            list.Add(CatalogItem(3061, "测试角色B", "角色系列"));
-            list.Add(CatalogItem(3062, "测试角色C", "角色系列"));
-            list.Add(CatalogItem(3063, "测试角色D", "角色系列"));
+            list.Add(CatalogItem(3060, "测试角色A", "角色系列", "epic"));
+            list.Add(CatalogItem(3061, "测试角色B", "角色系列", "rare"));
+            list.Add(CatalogItem(3062, "测试角色C", "角色系列", "common"));
+            list.Add(CatalogItem(3063, "测试角色D", "角色系列", "rare"));
         }
         else if (type == "accessory")
         {
-            list.Add(CatalogItem(1604, "测试配件A", "配件系列"));
-            list.Add(CatalogItem(1605, "测试配件B", "配件系列"));
-            list.Add(CatalogItem(1606, "测试配件C", "配件系列"));
+            list.Add(CatalogItem(1604, "测试配件A", "配件系列", "rare"));
+            list.Add(CatalogItem(1605, "测试配件B", "配件系列", "uncommon"));
+            list.Add(CatalogItem(1606, "测试配件C", "配件系列", "common"));
         }
         else
         {
@@ -1413,12 +1425,12 @@ internal static class Program
         return list;
     }
 
-    static JsonObject CatalogItem(long id, string name, string series) => new()
+    static JsonObject CatalogItem(long id, string name, string series, string rarity = "rare") => new()
     {
         ["id"] = id,
         ["name"] = name,
         ["series"] = series,
-        ["rarity"] = "rare",
+        ["rarity"] = rarity,
         ["thumb"] = "",
         ["previewUrl"] = "",
         ["gameRoleId"] = 0,
