@@ -106,20 +106,20 @@ jobs:
             return $false
           }
           $log = @(git log --no-merges --pretty=format:'@@%h%x09%s%n' --name-only $range)
-          $notes = New-Object System.Collections.Generic.List[string]
+          $noteLines = New-Object System.Collections.Generic.List[string]
           $current = $null
           $include = $false
           foreach ($line in $log) {
             if ($line -like '@@*') {
-              if ($null -ne $current -and $include) { $notes.Add($current) }
+              if ($null -ne $current -and $include) { $noteLines.Add($current) }
               $current = $line.Substring(2)
               $include = $false
             } elseif ($null -ne $current -and -not [string]::IsNullOrWhiteSpace($line)) {
               if (Test-CodePath $line.Trim()) { $include = $true }
             }
           }
-          if ($null -ne $current -and $include) { $notes.Add($current) }
-          $commits = if ($notes.Count -gt 0) { $notes -join "`n" } else { '- 本次构建' }
+          if ($null -ne $current -and $include) { $noteLines.Add($current) }
+          $commits = if ($noteLines.Count -gt 0) { $noteLines -join "`n" } else { '- 本次构建' }
           $body = @"
           ## 测试版说明
 
