@@ -252,7 +252,8 @@ public sealed class Settings
     public string UpdateHttpProxy { get; set; } = "";
     /// <summary>公告接口完整地址；只读 GET，不携带用户身份。</summary>
     public string AnnouncementApiUrl { get; set; } = AnnouncementService.DefaultApiUrl;
-    public string Locale { get; set; } = "zh";
+    /// <summary>界面语言；空表示新用户/旧配置未设置，启动时按系统 UI 语言选择。</summary>
+    public string Locale { get; set; } = "";
     /// <summary>全局快捷键：动作 id → 组合键描述；空串表示禁用。缺省项使用原版默认键位。</summary>
     public Dictionary<string, string> Hotkeys { get; set; } = new();
     /// <summary>首次启动的免责声明是否已经确认过。</summary>
@@ -314,6 +315,10 @@ public static class ConfigStore
                 var cfg = JsonSerializer.Deserialize<Settings>(json, Options);
                 if (cfg != null)
                 {
+                    // 旧版没有 Locale 属性时用系统 UI 语言；已有值保持用户选择。
+                    cfg.Locale = string.IsNullOrWhiteSpace(cfg.Locale)
+                        ? Localization.SystemDefault()
+                        : Localization.Normalize(cfg.Locale);
                     if (cfg.EmoteAssetIds == null || cfg.EmoteAssetIds.Length != 5)
                     {
                         var slots = new long[5];
@@ -425,6 +430,7 @@ public static class ConfigStore
         }
         catch (Exception ex) { Log.Write("配置读取失败 " + ex.Message); }
         var def = new Settings();
+        def.Locale = Localization.SystemDefault();
         def.ServerRegion = AutoDetectRegion();
         return def;
     }

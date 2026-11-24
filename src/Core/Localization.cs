@@ -32,6 +32,25 @@ public static class Localization
         return "zh";
     }
 
+    /// <summary>
+    /// 新用户/旧配置没有 Locale 时的默认语言：跟随 Windows UI 语言。
+    /// 支持中文、日语、英语；其他系统语言回退英语，不再默认中文。
+    /// </summary>
+    public static string SystemDefault()
+    {
+        var culture = System.Globalization.CultureInfo.CurrentUICulture;
+        if (string.IsNullOrEmpty(culture.TwoLetterISOLanguageName) ||
+            string.Equals(culture.TwoLetterISOLanguageName, "iv", StringComparison.OrdinalIgnoreCase))
+            culture = System.Globalization.CultureInfo.InstalledUICulture;
+        return culture.TwoLetterISOLanguageName.ToLowerInvariant() switch
+        {
+            "zh" => "zh",
+            "ja" => "ja",
+            "en" => "en",
+            _ => "en",
+        };
+    }
+
     /// <summary>切换语言；非 zh 时按需加载字典，失败时保持中文回退。</summary>
     public static void SetLocale(string locale)
     {
