@@ -525,7 +525,7 @@ body.panel-maximized #maxBtn .icon-restore { display: block; }
 
 /* 预设 */
 .preset-page-scroll { overflow-y: auto; padding-right: 6px; min-height: 0; }
-.preset-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; align-content: start; }
+.preset-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 240px)); gap: 14px; align-content: start; justify-content: start; }
 .preset-card { background: var(--cream-2); border: 2px solid var(--border); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .preset-head { display: flex; align-items: center; gap: 10px; }
 .preset-emoji { font-size: 22px; }
@@ -537,11 +537,14 @@ body.panel-maximized #maxBtn .icon-restore { display: block; }
 .preset-preview-acc { left: 0; top: 0; transform-origin: center center; }
 .preset-preview-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 .preset-emote-preview { display: flex; gap: 6px; justify-content: center; }
+.preset-card .preset-emote-preview { padding: 2px 0; }
 .preset-emote { width: 40px; height: 40px; border: 1.5px solid var(--border); border-radius: 50%; background: var(--cream-4); display: flex; align-items: center; justify-content: center; position: relative; }
+.preset-card .preset-emote { width: 36px; height: 36px; }
 .preset-emote img { width: 32px; height: 32px; object-fit: contain; }
+.preset-card .preset-emote img { width: 28px; height: 28px; }
 .preset-emote span { position: absolute; right: -1px; bottom: -4px; font-size: 9px; color: var(--ink-dim); background: var(--cream-4); border-radius: 5px; padding: 0 3px; }
-.preset-actions { display: flex; gap: 8px; margin-top: auto; flex-wrap: wrap; }
-.preset-actions .btn { height: 32px; padding: 0 10px; font-size: 12px; }
+.preset-actions { display: flex; gap: 4px; margin-top: auto; flex-wrap: wrap; }
+.preset-actions .btn { height: 32px; padding: 0 4px; font-size: 11px; }
 .preset-edit-emotes { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
 .modal.preset-edit-modal { width: 560px; }
 .preset-edit .select { height: 34px; padding: 0 8px; }
@@ -995,12 +998,22 @@ body.panel-maximized #maxBtn .icon-restore { display: block; }
 
 /* 自定义伙伴 */
 .companion-page { overflow-y: auto; padding-right: 6px; min-height: 0; }
-.companion-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; align-content: start; }
-.companion-card { background: var(--cream-2); border: 2px solid var(--border); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
-.companion-preview .preset-preview { margin: 0 auto; }
-.companion-info { display: flex; flex-direction: column; gap: 4px; }
-.companion-name { font-size: 17px; font-weight: 800; color: var(--ink-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.companion-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.companion-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; align-content: start; }
+.companion-card {
+  background: var(--cream-2); border: 2px solid var(--border); border-radius: 14px; padding: 10px;
+  display: grid; grid-template-columns: 84px minmax(0, 1fr); grid-template-areas: "preview info" "actions actions";
+  align-items: start; gap: 8px 10px;
+}
+.companion-preview { grid-area: preview; }
+.companion-preview .preset-preview { margin: 0; width: 84px; }
+.companion-info { grid-area: info; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.companion-name { font-size: 14px; line-height: 1.25; font-weight: 800; color: var(--ink-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 2px; }
+.companion-info .detail-row { font-size: 10.5px; line-height: 1.35; gap: 4px; }
+.companion-info .detail-row > span:first-child { flex: 0 0 auto; font-size: 10px; }
+.companion-info .detail-row > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.companion-actions { grid-area: actions; display: flex; gap: 6px; justify-content: flex-end; padding-top: 7px; border-top: 1px solid var(--border); }
+.companion-actions .btn { flex: 1; height: 28px; padding: 0 8px; font-size: 11px; }
+.companion-actions .btn:active { transform: none; }
 .companion-editor-options { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 10px; padding: 10px 12px; border: 1.5px dashed var(--border); border-radius: 12px; background: var(--cream-1); }
 .companion-option-row { display: flex; align-items: center; gap: 8px; }
 .companion-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink); }

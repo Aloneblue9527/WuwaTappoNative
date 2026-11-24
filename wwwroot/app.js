@@ -3795,19 +3795,20 @@
     return { x, y, scalePercent, rotationDegrees };
   }
 
-  function presetStageHtml(characterId, accessoryId, includeLocalOffset = true) {
+  function presetStageHtml(characterId, accessoryId, includeLocalOffset = true, size = 140) {
     const charSrc = catalogPreview('character_skin', characterId);
     const accSrc = catalogPreview('accessory', accessoryId);
     const offset = presetAccessoryOffset(characterId, accessoryId, includeLocalOffset);
-    // 桌宠里角色和头饰共用 200×200 的猫区域；预览统一缩放为 140×140，偏移按同比例缩放。
-    const scale = 140 / 200;
+    // 桌宠里角色和头饰共用 200×200 的猫区域；预览按目标尺寸同比例缩放偏移。
+    const scale = size / 200;
     const accTransform = offset.scalePercent !== 100 || offset.rotationDegrees !== 0
       ? `;transform:rotate(${offset.rotationDegrees}deg) scale(${(offset.scalePercent / 100).toFixed(3)})`
       : '';
-    return `<div class="preset-preview">
-      <div class="preset-preview-stage">
-        ${charSrc ? `<img class="preset-preview-char" src="${esc(charSrc)}" alt="">` : '<span class="muted preset-preview-empty">无角色</span>'}
-        ${accSrc ? `<img class="preset-preview-acc" src="${esc(accSrc)}" alt="" style="left:${(offset.x * scale).toFixed(2)}px;top:${(offset.y * scale).toFixed(2)}px${accTransform}">` : ''}
+    const imageStyle = `width:${size}px;height:${size}px`;
+    return `<div class="preset-preview" style="height:${size + 10}px">
+      <div class="preset-preview-stage" style="width:${size}px;height:${size}px;flex-basis:${size}px">
+        ${charSrc ? `<img class="preset-preview-char" src="${esc(charSrc)}" alt="" style="${imageStyle}">` : '<span class="muted preset-preview-empty">无角色</span>'}
+        ${accSrc ? `<img class="preset-preview-acc" src="${esc(accSrc)}" alt="" style="left:${(offset.x * scale).toFixed(2)}px;top:${(offset.y * scale).toFixed(2)}px;${imageStyle}${accTransform}">` : ''}
       </div>
     </div>`;
   }
@@ -4316,13 +4317,15 @@
     const name = p.name || display || tr('companion.defaultName', '伙伴');
     const charId = Number(p.characterAssetId || 0);
     const accId = Number(p.accessoryAssetId || 0);
+    const charName = catalogName('character_skin', charId);
+    const accName = catalogName('accessory', accId);
     const seconds = Number(p.clickIntervalSeconds || 0);
     return `<div class="companion-card" data-companion-index="${index}">
-      <div class="companion-preview">${presetStageHtml(charId, accId, false)}</div>
+      <div class="companion-preview">${presetStageHtml(charId, accId, false, 84)}</div>
       <div class="companion-info">
         <div class="companion-name" title="${esc(display || name)}">${esc(display || name)}</div>
-        <div class="detail-row"><span>${tr('companion.character', '角色')}</span><span>${esc(catalogName('character_skin', charId))}</span></div>
-        <div class="detail-row"><span>${tr('companion.accessory', '配件')}</span><span>${esc(catalogName('accessory', accId))}</span></div>
+        <div class="detail-row"><span>${tr('companion.character', '角色')}</span><span title="${esc(charName)}">${esc(charName)}</span></div>
+        <div class="detail-row"><span>${tr('companion.accessory', '配件')}</span><span title="${esc(accName)}">${esc(accName)}</span></div>
         <div class="detail-row"><span>${tr('companion.clickFrequency', '点击频率')}</span><span>${seconds > 0 ? tr('companion.everySeconds', '每 {n} 秒', { n: seconds }) : tr('companion.clickOff', '不自动点击')}</span></div>
         <div class="detail-row"><span>${tr('companion.randomClick', '随机点击')}</span><span>${p.randomClick ? tr('common.on', '开') : tr('common.off', '关')}</span></div>
         <div class="detail-row"><span>${tr('companion.showBar', '显示底栏')}</span><span>${p.showBar ? tr('common.on', '开') : tr('common.off', '关')}</span></div>
