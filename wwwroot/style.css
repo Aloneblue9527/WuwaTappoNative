@@ -949,3 +949,23 @@ body.panel-maximized #maxBtn .icon-restore { display: block; }
 .color-hue-row output { width: 34px; text-align: right; }
 .color-recent-label { font-size: 11px; color: var(--ink-dim); margin-top: -4px; }
 .color-rgb-grid { display: grid; gap: 4px; }
+
+/* 自定义伙伴 */
+.companion-page { overflow-y: auto; padding-right: 6px; min-height: 0; }
+.companion-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; align-content: start; }
+.companion-card { background: var(--cream-2); border: 2px solid var(--border); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.companion-preview .preset-preview { margin: 0 auto; }
+.companion-info { display: flex; flex-direction: column; gap: 4px; }
+.companion-name { font-size: 17px; font-weight: 800; color: var(--ink-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.companion-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.companion-editor-options { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 10px; padding: 10px 12px; border: 1.5px dashed var(--border); border-radius: 12px; background: var(--cream-1); }
+.companion-option-row { display: flex; align-items: center; gap: 8px; }
+.companion-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink); }
+.companion-display-hint { margin-top: 6px; text-align: center; font-size: 12px; font-weight: 700; color: var(--ink-dim); }
+
+/* 宝箱通知过滤矩阵 */
+.chest-notify-matrix { border-collapse: collapse; margin-top: 6px; font-size: 12px; }
+.chest-notify-matrix th, .chest-notify-matrix td { padding: 4px 8px; text-align: center; border-bottom: 1px solid var(--theme-line-soft); }
+.chest-notify-matrix th:first-child, .chest-notify-matrix td:first-child { text-align: left; font-weight: 700; color: var(--ink-strong); }
+.chest-notify-matrix input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--theme-accent-strong); }
+.chest-notify-rarity { display: inline-flex; align-items: center; gap: 6px; }

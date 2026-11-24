@@ -21,6 +21,11 @@ public sealed class RemoteCatWindow : Form
     readonly PetImageLoader _loader;
     readonly Catalog _catalog;
     readonly AssetStore _store;
+    /// <summary>
+    /// 本地自定义伙伴：沿用远程窗口的绘制/拖动/缩放/镜像/层级行为，但成员数据是合成的，
+    /// 右键菜单不提供“隐藏该角色”（避免误改真实成员的可见性）。
+    /// </summary>
+    readonly bool _localCompanion;
 
     PetFrames _frames;
     readonly EmoteBubbleLayer _bubbles = new(6);
@@ -57,6 +62,8 @@ public sealed class RemoteCatWindow : Form
     public event Action<RemoteCatWindow, bool> DragEnded;
     /// <summary>右键菜单请求隐藏该成员。</summary>
     public event Action<long> HideRequested;
+    /// <summary>自定义伙伴的临时隐藏请求；与真实成员 HideRequested 分开，避免使用合成 id。</summary>
+    public event Action<long> LocalHideRequested;
     /// <summary>右键菜单请求切换该成员镜像。</summary>
     public event Action<long, bool> MirrorRequested;
 
@@ -91,12 +98,13 @@ public sealed class RemoteCatWindow : Form
 
     public bool BarVisible => _barVisible;
 
-    public RemoteCatWindow(RoomMember member, PetImageLoader loader, Catalog catalog, AssetStore store)
+    public RemoteCatWindow(RoomMember member, PetImageLoader loader, Catalog catalog, AssetStore store, bool localCompanion = false)
     {
         _member = member;
         _loader = loader;
         _catalog = catalog;
         _store = store;
+        _localCompanion = localCompanion;
         FormBorderStyle = FormBorderStyle.None;
         AutoScaleMode = AutoScaleMode.None;
         ShowInTaskbar = false;
@@ -129,14 +137,39 @@ public sealed class RemoteCatWindow : Form
     }
 
     public long MemberId => _member.Id;
+    /// <summary>实际绘制的昵称：自定义伙伴按中点规则截断，真实成员保持服务器昵称原样。</summary>
+    string DisplayNickname => _localCompanion ? CompanionPets.DisplayName(_member.Nickname) : _member.Nickname;
+
+    /// <summary>
+    /// 用最新的本地伙伴配置刷新合成成员快照。只改变本窗口的外观/昵称，
+    /// 不会触碰 RoomManager 或服务器。
+    /// </summary>
+    public void UpdateLocalCompanion(CompanionPet companion)
+    {
+        if (!_localCompanion || companion == null) return;
+        _member.Nickname = companion.Name ?? "";
+        _member.RoleKey = companion.CharacterAssetId.ToString();
+        _member.PartKey = companion.AccessoryAssetId.ToString();
+        Reload();
+    }
 
     void BuildRemoteMenu()
     {
         _menu?.Dispose();
         _menu = new ContextMenuStrip();
-        _hideItem = new ToolStripMenuItem(Localization.T("remote.hide", "隐藏该角色"));
-        _hideItem.Click += (s, e) => HideRequested?.Invoke(MemberId);
-        _menu.Items.Add(_hideItem);
+        // 自定义伙伴的隐藏只写本地伙伴配置；真实成员走 HideRequested。
+        if (_localCompanion)
+        {
+            _hideItem = new ToolStripMenuItem(Localization.T("remote.hideCompanion", "隐藏该伙伴"));
+            _hideItem.Click += (s, e) => LocalHideRequested?.Invoke(MemberId);
+            _menu.Items.Add(_hideItem);
+        }
+        else
+        {
+            _hideItem = new ToolStripMenuItem(Localization.T("remote.hide", "隐藏该角色"));
+            _hideItem.Click += (s, e) => HideRequested?.Invoke(MemberId);
+            _menu.Items.Add(_hideItem);
+        }
         _mirrorItem = new ToolStripMenuItem(Localization.T("remote.mirror", "镜像角色")) { Checked = _mirrored };
         _mirrorItem.Click += (s, e) => MirrorRequested?.Invoke(MemberId, !_mirrored);
         _menu.Items.Add(_mirrorItem);
@@ -178,7 +211,10 @@ public sealed class RemoteCatWindow : Form
     void RefreshRemoteMenu()
     {
         if (_menu == null) return;
-        if (_hideItem != null) _hideItem.Text = Localization.T("remote.hide", "隐藏该角色");
+        if (_hideItem != null)
+            _hideItem.Text = _localCompanion
+                ? Localization.T("remote.hideCompanion", "隐藏该伙伴")
+                : Localization.T("remote.hide", "隐藏该角色");
         if (_mirrorItem != null)
         {
             _mirrorItem.Checked = _mirrored;
@@ -370,9 +406,12 @@ public sealed class RemoteCatWindow : Form
     /// <summary>远端按键包走这里：只切换手部帧，不重建外观。</summary>
     public void ApplyMemberAction(string action) => ApplyAction(action);
 
-    void ApplyAction(string action)
+    /// <summary>自定义伙伴自动点击：即使随机结果与上次同侧，也要重新播放举手动画。</summary>
+    public void ApplyLocalClickAction(string action) => ApplyAction(action, force: true);
+
+    void ApplyAction(string action, bool force = false)
     {
-        if (action == _lastAction) return;
+        if (!force && action == _lastAction) return;
         _lastAction = action;
         if (action == "left") SetBody(2);
         else if (action == "right") SetBody(3);

@@ -30,6 +30,13 @@ public sealed class PetWindow : Form
     readonly RoomManager _room;
     readonly GlobalInputHook _hook = new();
     readonly Dictionary<long, RemoteCatWindow> _cats = new();
+    // 自定义伙伴与真实联机成员完全分开：独立窗口字典、独立位置、独立计时，
+    // 不写入 RoomManager.Members，也不参与任何服务器点击/表情上报。
+    readonly Dictionary<long, RemoteCatWindow> _companionCats = new();
+    readonly Dictionary<long, long> _companionClickSide = new();
+    readonly Dictionary<long, long> _companionNextClickMs = new();
+    readonly Dictionary<long, (int seconds, bool random)> _companionClickConfig = new();
+    readonly Random _companionRandom = new();
     const long SelfSelectionId = -1;
     readonly HashSet<long> _selectedCatIds = new();
     bool _selfSelected;
@@ -72,6 +79,7 @@ public sealed class PetWindow : Form
     readonly KeyBubbleLayer _keyBubbles = new(10);
     readonly EmoteWheelLayer _wheel = new();
     System.Windows.Forms.Timer _blink, _blinkOff, _moveReset, _handReset, _countdownTimer, _wheelCloseTimer, _wheelShowTimer, _hoverFadeTimer, _loadingTimer, _hoverFadeAnimTimer, _hoverPollTimer;
+    System.Windows.Forms.Timer _companionClickTimer;
     System.Windows.Forms.Timer _zOrderWatchdog;
     System.Windows.Forms.Timer _zOrderRestackTimer;
     bool _zOrderRepairing;
@@ -166,7 +174,7 @@ public sealed class PetWindow : Form
 
         _auth.Changed += () => Safe(OnAuthChanged);
         _room.ClicksChanged += () => Safe(() => { CaptureChanged?.Invoke(); RequestCompose(); });
-        _catalog.Loaded += () => Safe(() => { _loader.Clear(); ReloadFrames(); RefreshCats(); });
+        _catalog.Loaded += () => Safe(() => { _loader.Clear(); ReloadFrames(); RefreshCats(); RefreshCompanions(); });
 
         ReloadFrames();
         Location = cfg.PetX >= 0 ? new Point(cfg.PetX, cfg.PetY) : DefaultLocation();
@@ -1057,6 +1065,11 @@ public sealed class PetWindow : Form
             }
             Compose();
         };
+        // 自定义伙伴自动点击：250ms 检查一次即可，真正到点才切换左右手动画。
+        // 计时完全在本地，不经过 RoomManager.AddClicks，也不上传任何点击。
+        _companionClickTimer = new System.Windows.Forms.Timer { Interval = 250 };
+        _companionClickTimer.Tick += (s, e) => TickCompanionClicks();
+        _companionClickTimer.Start();
         _blink.Start();
     }
 
@@ -1436,6 +1449,8 @@ public sealed class PetWindow : Form
         else _cfg.MemberMirrored.Remove(key);
         Save();
         if (_cats.TryGetValue(id, out var cat)) cat.SetMirrored(mirrored);
+        // 自定义伙伴的合成 id 也是负数，但只存在于 _companionCats。
+        else if (_companionCats.TryGetValue(id, out var companionCat)) companionCat.SetMirrored(mirrored);
         NotifySettingsChanged();
     }
 
@@ -1468,16 +1483,22 @@ public sealed class PetWindow : Form
         ApplyBarVisibility();
         ApplyThemeToCats();
         UpdateCatScales();
-        foreach (var cat in _cats.Values) cat.SetMirrored(IsMemberMirrored(cat.MemberId));
+        UpdateCompanionScales();
+        foreach (var cat in AllPetWindows()) cat.SetMirrored(IsMemberMirrored(cat.MemberId));
         ApplyCaptureMode();
         if (!_cfg.AllowOverlap) ResolveOverlaps();
+        // 全局“隐藏其他角色桌宠”同样作用于本地自定义伙伴；统一在这里对齐窗口集合。
+        RefreshCompanions();
         RefreshMenu();
     }
 
-    /// <summary>把当前底栏隐藏设置同步到所有联机角色并立即重绘主角。</summary>
+    /// <summary>把当前底栏隐藏设置同步到所有联机角色/本地伙伴并立即重绘主角。</summary>
     void ApplyBarVisibility()
     {
         foreach (var cat in _cats.Values) cat.SetBarVisible(!_cfg.HideRemoteBars);
+        foreach (var companion in _cfg.Companions ?? new List<CompanionPet>())
+            if (companion != null && _companionCats.TryGetValue(companion.SyntheticId, out var cat))
+                cat.SetBarVisible(CompanionBarVisible(companion));
         Compose();
     }
 
@@ -1741,6 +1762,7 @@ public sealed class PetWindow : Form
         if (!IsHandleCreated || IsDisposed || _zOrderRepairing) return;
 
         var remotes = _cats.Values
+            .Concat(_companionCats.Values)
             .Where(c => c != null && !c.IsDisposed && c.Visible && c.IsHandleCreated && IsWindowVisible(c.Handle))
             .OrderBy(c => c.MemberId)
             .ToList();
@@ -2589,6 +2611,7 @@ public sealed class PetWindow : Form
             _cfg.HideOtherPets = !_cfg.HideOtherPets;
             Save();
             RefreshMembers();
+            RefreshCompanions();
             NotifyHotkey(_cfg.HideOtherPets
                 ? Localization.T("notify.otherPetsHidden", "已隐藏其他成员桌宠")
                 : Localization.T("notify.otherPetsShown", "已显示其他成员桌宠"));
@@ -3004,17 +3027,270 @@ public sealed class PetWindow : Form
     }
 
     string CatKey(long id) => id.ToString();
+    static string CompanionKey(string companionId) => "companion:" + (companionId ?? "");
+
+    /// <summary>真实联机桌宠 + 本地自定义伙伴；任何会“应用到所有角色”的窗口遍历都走这里。</summary>
+    IEnumerable<RemoteCatWindow> AllPetWindows()
+    {
+        foreach (var cat in _cats.Values) yield return cat;
+        foreach (var cat in _companionCats.Values) yield return cat;
+    }
+
+    CompanionPet CompanionBySynthetic(long syntheticId)
+    {
+        foreach (var companion in _cfg.Companions ?? new List<CompanionPet>())
+        {
+            if (companion != null && companion.SyntheticId == syntheticId) return companion;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// 本地伙伴底栏规则：伙伴自己的 ShowBar 控制是否显示；
+    /// 全局“隐藏联机角色底栏”(HideRemoteBars) 优先级更高，开启时全部隐藏。
+    /// </summary>
+    bool CompanionBarVisible(CompanionPet companion)
+        => companion != null && companion.ShowBar && !_cfg.HideRemoteBars;
+
+    /// <summary>
+    /// 让桌面伙伴与配置列表对齐：新增、修改、删除和全局隐藏都在这里收口。
+    /// 自定义伙伴只创建 RemoteCatWindow，不写入 RoomManager.Members。
+    /// </summary>
+    public void RefreshCompanions()
+    {
+        if (IsDisposed) return;
+        _cfg.Companions ??= new List<CompanionPet>();
+        _cfg.CompanionPositions ??= new Dictionary<string, int[]>();
+        var desired = _cfg.Companions;
+        bool globallyHidden = _cfg.HideOtherPets;
+        var wanted = new HashSet<long>();
+        if (!globallyHidden)
+            foreach (var companion in desired)
+                if (companion != null && companion.SyntheticId < 0 && !companion.Hidden)
+                    wanted.Add(companion.SyntheticId);
+
+        foreach (long id in _companionCats.Keys.ToList())
+            if (!wanted.Contains(id)) RemoveCompanionCat(id);
+
+        // 配置中已删除的伙伴不再保留位置记录；避免 state.json 无限积累。
+        var validKeys = new HashSet<string>(desired.Where(c => c != null).Select(c => CompanionKey(c.Id)));        var staleKeys = _cfg.CompanionPositions.Keys
+            .Where(k => k.StartsWith("companion:", StringComparison.Ordinal) && !validKeys.Contains(k))
+            .ToList();
+        if (staleKeys.Count > 0)
+        {
+            foreach (string key in staleKeys) _cfg.CompanionPositions.Remove(key);
+            Save();
+        }
+
+        if (globallyHidden) return;
+        foreach (var companion in desired)
+        {
+            if (companion == null || companion.SyntheticId >= 0 || companion.Hidden) continue;
+            UpdateCompanionCat(companion);
+        }
+        QueueRestackPetWindows();
+    }
+
+    void UpdateCompanionCat(CompanionPet companion)
+    {
+        long id = companion.SyntheticId;
+        if (_companionCats.TryGetValue(id, out var existing))
+        {
+            existing.UpdateLocalCompanion(companion);
+            existing.SetScale(RemoteScaleFactor);
+            existing.SetMirrored(IsMemberMirrored(id));
+            bool topmostChanged = existing.SetWindowOptions(EffectiveRemoteOpacity, _cfg.HoverFade, _cfg.ClickThrough, _cfg.Topmost, _cfg.HoverFadeOpacity);
+            existing.SetRemoteStyle(EffectiveRemoteScale, EffectiveRemoteOpacity, _cfg.RemoteNameScale);
+            existing.SetBarVisible(CompanionBarVisible(companion));
+            var theme = ThemeBarColors();
+            existing.SetTheme(theme.bar, theme.text);
+            if (topmostChanged) QueueRestackPetWindows();
+        }
+        else
+        {
+            var member = new RoomMember
+            {
+                Id = id,
+                Nickname = companion.Name ?? "",
+                RoleKey = companion.CharacterAssetId.ToString(),
+                PartKey = companion.AccessoryAssetId.ToString(),
+                Online = true,
+                Visible = true,
+            };
+            var cat = new RemoteCatWindow(member, _loader, _catalog, _store, localCompanion: true);
+            cat.SetScale(RemoteScaleFactor);
+            cat.SetMirrored(IsMemberMirrored(id));
+            cat.SetWindowOptions(EffectiveRemoteOpacity, _cfg.HoverFade, _cfg.ClickThrough, _cfg.Topmost, _cfg.HoverFadeOpacity);
+            cat.SetRemoteStyle(EffectiveRemoteScale, EffectiveRemoteOpacity, _cfg.RemoteNameScale);
+            cat.SetBarVisible(CompanionBarVisible(companion));
+            var theme = ThemeBarColors();
+            cat.SetTheme(theme.bar, theme.text);
+            cat.RemoteScaleRequested += ApplyRemoteScale;
+            cat.RemoteOpacityRequested += ApplyRemoteOpacity;
+            cat.MirrorRequested += (memberId, mirrored) => SetMemberMirrored(memberId, mirrored);
+            cat.LocalHideRequested += OnCompanionHideRequested;
+            cat.Location = PlaceNewCompanion(companion);
+            cat.DragStarted += OnCompanionDragStarted;
+            cat.DragEnded += OnCompanionDragEnded;
+            cat.Moved += p =>
+            {
+                _cfg.CompanionPositions[CompanionKey(companion.Id)] = new[] { p.X, p.Y };
+                Save();
+            };
+            _companionCats[id] = cat;
+            if (!_hiddenByHotkey)
+            {
+                cat.Show();
+                // 与真实远程成员一致：先放到主桌宠后面，再由层级守护统一排序。
+                if (Visible && IsWindowVisible(Handle))
+                    SetWindowPos(cat.Handle, Handle, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+            }
+        }
+
+        var config = (companion.ClickIntervalSeconds, companion.RandomClick);
+        if (!_companionClickConfig.TryGetValue(id, out var previous) || previous != config)
+        {
+            _companionClickConfig[id] = config;
+            ResetCompanionClickSchedule(id, companion.ClickIntervalSeconds);
+        }
+    }
+
+    void RemoveCompanionCat(long syntheticId)
+    {
+        if (!_companionCats.TryGetValue(syntheticId, out var cat)) return;
+        if (ReferenceEquals(_draggingCat, cat)) _draggingCat = null;
+        _companionCats.Remove(syntheticId);
+        _companionClickSide.Remove(syntheticId);
+        _companionNextClickMs.Remove(syntheticId);
+        _companionClickConfig.Remove(syntheticId);
+        cat.Close();
+        cat.Dispose();
+        FlushPendingZOrderRestack();
+    }
+
+    Point PlaceNewCompanion(CompanionPet companion)
+    {
+        var stored = StoredPoint(CompanionKey(companion.Id));
+        if (stored.HasValue && !HasSignificantOverlap(CatVisibleRectAt(stored.Value), VisibleCatRects()))
+            return stored.Value;
+        var point = DefaultCatPoint();
+        _cfg.CompanionPositions[CompanionKey(companion.Id)] = new[] { point.X, point.Y };
+        Save();
+        return point;
+    }
+
+    void ResetCompanionClickSchedule(long syntheticId, int seconds)
+    {
+        if (seconds <= 0)
+        {
+            _companionNextClickMs[syntheticId] = 0;
+            return;
+        }
+        _companionNextClickMs[syntheticId] = Environment.TickCount64 + Math.Max(1000L, seconds * 1000L);
+    }
+
+    /// <summary>
+    /// 自动点击只是本地装饰动画：随机/固定间隔切换左右手帧，绝不调用 RoomManager.AddClicks，
+    /// 也不发送 cr 点击包。0 秒 = 关闭该伙伴的自动点击。
+    /// </summary>
+    void TickCompanionClicks()
+    {
+        if (_hiddenByHotkey || _companionCats.Count == 0) return;
+        long now = Environment.TickCount64;
+        foreach (var companion in _cfg.Companions ?? new List<CompanionPet>())
+        {
+            if (companion == null || companion.SyntheticId >= 0 || companion.ClickIntervalSeconds <= 0) continue;
+            if (!_companionCats.TryGetValue(companion.SyntheticId, out var cat) || !cat.Visible) continue;
+            if (!_companionNextClickMs.TryGetValue(companion.SyntheticId, out long next) || next <= 0)
+            {
+                ResetCompanionClickSchedule(companion.SyntheticId, companion.ClickIntervalSeconds);
+                continue;
+            }
+            if (now < next) continue;
+
+            long side = _companionClickSide.TryGetValue(companion.SyntheticId, out long previousSide) ? previousSide : 0;
+            side = companion.RandomClick ? _companionRandom.Next(2) : (side == 0 ? 1 : 0);
+            _companionClickSide[companion.SyntheticId] = side;
+            cat.ApplyLocalClickAction(side == 0 ? "left" : "right");
+
+            long baseMs = Math.Max(1000L, companion.ClickIntervalSeconds * 1000L);
+            long delay = companion.RandomClick
+                ? (long)(baseMs * (0.5 + _companionRandom.NextDouble()))
+                : baseMs;
+            _companionNextClickMs[companion.SyntheticId] = now + Math.Max(500L, delay);
+        }
+    }
+
+    void OnCompanionHideRequested(long syntheticId)
+    {
+        var companion = CompanionBySynthetic(syntheticId);
+        if (companion == null) return;
+        companion.Hidden = true;
+        Save();
+        RefreshCompanions();
+    }
+
+    void OnCompanionDragStarted(RemoteCatWindow cat)
+    {
+        _draggingCat = cat;
+        _multiSelectClickPending = false;
+        // 自定义伙伴可以单独拖动，但不参与真实成员的多选/整组拖动。
+        cat.ExternalDrag = false;
+    }
+
+    void OnCompanionDragEnded(RemoteCatWindow cat, bool moved)
+    {
+        if (ReferenceEquals(_draggingCat, cat)) _draggingCat = null;
+        cat.ExternalDrag = false;
+        FlushPendingZOrderRestack();
+    }
+
+    void UpdateCompanionScales()
+    {
+        foreach (var companion in _cfg.Companions ?? new List<CompanionPet>())
+        {
+            if (companion == null || !_companionCats.TryGetValue(companion.SyntheticId, out var cat)) continue;
+            int oldWidth = cat.Width;
+            cat.SetScale(RemoteScaleFactor);
+            cat.SetWindowOptions(EffectiveRemoteOpacity, _cfg.HoverFade, _cfg.ClickThrough, _cfg.Topmost, _cfg.HoverFadeOpacity);
+            cat.SetRemoteStyle(EffectiveRemoteScale, EffectiveRemoteOpacity, _cfg.RemoteNameScale);
+            cat.SetBarVisible(CompanionBarVisible(companion));
+            if (cat.Width != oldWidth) ClampCompanionToScreen(companion, cat);
+        }
+    }
+
+    void ClampCompanionToScreen(CompanionPet companion, RemoteCatWindow cat)
+    {
+        var rect = CatVisibleRect(cat);
+        var wa = Screen.FromRectangle(rect).WorkingArea;
+        int dx = 0, dy = 0;
+        if (rect.Right > wa.Right) dx = wa.Right - rect.Right;
+        if (rect.Left + dx < wa.Left) dx = wa.Left - rect.Left;
+        if (rect.Bottom > wa.Bottom) dy = wa.Bottom - rect.Bottom;
+        if (rect.Top + dy < wa.Top) dy = wa.Top - rect.Top;
+        if (dx == 0 && dy == 0) return;
+        cat.Location = new Point(cat.Left + dx, cat.Top + dy);
+        _cfg.CompanionPositions[CompanionKey(companion.Id)] = new[] { cat.Left, cat.Top };
+        Save();
+    }
+
 
     void ApplyThemeToCats((Color bar, Color text, Color accent, Color icon, Color iconMuted)? preview = null)
     {
         var theme = preview.HasValue ? preview.Value : ThemeBarColors();
-        foreach (var cat in _cats.Values)
+        foreach (var cat in AllPetWindows())
             cat.SetTheme(theme.bar, theme.text);
     }
 
-    Point? StoredCatPoint(long id)
+    Point? StoredCatPoint(long id) => StoredPoint(CatKey(id));
+
+    /// <summary>按位置字典 key 恢复窗口左上角；位置字典对真实成员和自定义伙伴完全独立。</summary>
+    Point? StoredPoint(string key)
     {
-        if (!_cfg.MemberPositions.TryGetValue(CatKey(id), out var a) || a == null || a.Length < 2) return null;
+        if (!_cfg.MemberPositions.TryGetValue(key, out var a) || a == null || a.Length < 2)
+        {
+            if (!_cfg.CompanionPositions.TryGetValue(key, out a) || a == null || a.Length < 2) return null;
+        }
         var p = new Point(a[0], a[1]);
         float s = RemoteScaleFactor;
         int w = (int)Math.Round(RemoteCatWindow.W * s);
@@ -3307,6 +3583,10 @@ public sealed class PetWindow : Form
         var cats = _cats.Where(kv => kv.Value.Visible).OrderBy(kv => kv.Key).ToList();
         if (priorityId.HasValue)
             cats = cats.OrderBy(kv => kv.Key == priorityId.Value ? 0 : 1).ThenBy(kv => kv.Key).ToList();
+        // 自定义伙伴保留自己的独立位置，只作为障碍物，不参与真实成员的自动挪位。
+        var companionRects = new List<Rectangle>();
+        foreach (var companionCat in _companionCats.Values)
+            if (companionCat.Visible) companionRects.Add(CatVisibleRect(companionCat));
 
         bool changed = false;
         for (int pass = 0; pass < 8; pass++)
@@ -3319,6 +3599,7 @@ public sealed class PetWindow : Form
                 var obstacles = new List<Rectangle>();
                 var local = LocalVisibleRect();
                 if (!local.IsEmpty) obstacles.Add(local);
+                obstacles.AddRange(companionRects);
                 foreach (var other in cats)
                     if (other.Key != pair.Key) obstacles.Add(CatVisibleRect(other.Value));
                 if (!HasSignificantOverlap(rect, obstacles)) continue;
@@ -3432,6 +3713,7 @@ public sealed class PetWindow : Form
         _cfg.RemoteScale = Math.Clamp(value, 0.25, 2.0);
         Save();
         UpdateCatScales();
+        UpdateCompanionScales();
         if (!_cfg.AllowOverlap) ResolveOverlaps();
         NotifySettingsChanged();
     }
@@ -3442,6 +3724,7 @@ public sealed class PetWindow : Form
         _cfg.RemoteOpacity = Math.Clamp(value, 0.2, 1.0);
         Save();
         UpdateCatScales();
+        UpdateCompanionScales();
         NotifySettingsChanged();
     }
 
@@ -3474,13 +3757,13 @@ public sealed class PetWindow : Form
 
     public void RefreshMembers() => RefreshCats();
 
-    /// <summary>当前实际可见的桌宠窗口数（主角 + 远程成员）。只应在 UI 线程读取。</summary>
+    /// <summary>当前实际可见的桌宠窗口数（主角 + 远程成员 + 自定义伙伴）。只应在 UI 线程读取。</summary>
     public int VisiblePetCount
     {
         get
         {
             int count = Visible ? 1 : 0;
-            foreach (var cat in _cats.Values)
+            foreach (var cat in AllPetWindows())
             {
                 if (!cat.IsDisposed && cat.Visible) count++;
             }
@@ -3508,6 +3791,8 @@ public sealed class PetWindow : Form
         base.OnLoad(e);
         Size = WindowSize();
         Compose();
+        // 构造阶段主窗口还没有句柄；首次显示时再把已保存的本地伙伴放上桌面。
+        RefreshCompanions();
         GeometryChanged?.Invoke();
     }
 
@@ -3517,6 +3802,7 @@ public sealed class PetWindow : Form
         Size = WindowSize();
         Compose();
         UpdateCatScales();
+        UpdateCompanionScales();
         if (!_cfg.AllowOverlap) ResolveOverlaps();
         GeometryChanged?.Invoke();
     }
@@ -3526,10 +3812,13 @@ public sealed class PetWindow : Form
         try { if (_capture != null) { _capture.ClosingFromOwner = true; _capture.Close(); _capture.Dispose(); } } catch { }
         _captureFrame?.Dispose();
         _captureFrame = null;
-        _capture = null;
-        foreach (var t in new[] { _blink, _blinkOff, _moveReset, _handReset, _countdownTimer, _wheelCloseTimer, _wheelShowTimer, _hoverFadeTimer, _hoverFadeAnimTimer, _hoverPollTimer, _loadingTimer, _zOrderWatchdog, _zOrderRestackTimer }) { try { t?.Stop(); t?.Dispose(); } catch { } }
-        foreach (var c in _cats.Values.ToList()) { try { c.Close(); c.Dispose(); } catch { } }
+        _capture = null;        foreach (var t in new[] { _blink, _blinkOff, _moveReset, _handReset, _countdownTimer, _wheelCloseTimer, _wheelShowTimer, _hoverFadeTimer, _hoverFadeAnimTimer, _hoverPollTimer, _loadingTimer, _zOrderWatchdog, _zOrderRestackTimer, _companionClickTimer }) { try { t?.Stop(); t?.Dispose(); } catch { } }
+        foreach (var c in AllPetWindows().ToList()) { try { c.Close(); c.Dispose(); } catch { } }
         _cats.Clear();
+        _companionCats.Clear();
+        _companionClickSide.Clear();
+        _companionNextClickMs.Clear();
+        _companionClickConfig.Clear();
         _composeTimer.Dispose();
         _bubbles.Clear();
         _keyBubbles.Dispose();

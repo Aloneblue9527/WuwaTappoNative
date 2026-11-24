@@ -1317,7 +1317,7 @@ public sealed class PanelWindow : Form
                 bool hide = ApiClient.ReadBool(data["hide"]);
                 cfg.HideOtherPets = hide;
                 ConfigStore.Save(cfg);
-                _app.Pet.BeginInvoke(new Action(() => { _app.Pet.ApplySettings(); _app.Pet.RefreshMembers(); }));
+                _app.Pet.BeginInvoke(new Action(() => { _app.Pet.ApplySettings(); _app.Pet.RefreshMembers(); _app.Pet.RefreshCompanions(); }));
                 return _app.RoomState();
             }
 
@@ -1797,7 +1797,12 @@ public sealed class PanelWindow : Form
                     if (data.ContainsKey("petScreen")) _app.Pet.MoveToScreen(cfg.PetScreen);
                     if (!cfg.AllowOverlap) _app.Pet.ResolveOverlaps();
                     // “隐藏其他成员”开关必须立刻重建/移除联机桌宠，不能等下一次房间事件。
-                    if (hideOthersChanged) _app.Pet.RefreshMembers();
+                    // 同一开关也覆盖本地自定义伙伴（见 PetWindow.RefreshCompanions 的规则注释）。
+                    if (hideOthersChanged)
+                    {
+                        _app.Pet.RefreshMembers();
+                        _app.Pet.RefreshCompanions();
+                    }
                 }));
                 _app.Pet.BeginInvoke(new Action(_app.ApplyKeyboardMode));
                 return BootPayload();
@@ -1905,6 +1910,72 @@ public sealed class PanelWindow : Form
                     accessory_asset_id = cloud.accessory,
                     emote_asset_ids = cloud.emotes,
                 });
+            }
+
+            case "companions.list":
+                return MapCompanions(cfg.Companions);
+
+            case "companions.save":
+            {
+                string id = ApiClient.ReadString(data["id"]).Trim();
+                string name = ApiClient.ReadString(data["name"]).Trim();
+                if (string.IsNullOrEmpty(name)) name = "伙伴";
+                if (name.Length > 64) name = name[..64];
+                long character = ApiClient.ReadLong(data["characterAssetId"]);
+                long accessory = ApiClient.ReadLong(data["accessoryAssetId"]);
+                if (character <= 0) character = cfg.CharacterAssetId;
+                int clickSeconds = Math.Clamp((int)ApiClient.ReadLong(data["clickIntervalSeconds"]), 0, 3600);
+                bool randomClick = ApiClient.ReadBool(data["randomClick"]);
+                bool showBar = !data.ContainsKey("showBar") || ApiClient.ReadBool(data["showBar"]);
+                cfg.Companions ??= new List<CompanionPet>();
+                var companion = string.IsNullOrEmpty(id)
+                    ? null
+                    : cfg.Companions.FirstOrDefault(c => c != null && string.Equals(c.Id, id, StringComparison.Ordinal));
+                if (companion == null)
+                {
+                    companion = new CompanionPet { Id = Guid.NewGuid().ToString("N") };
+                    cfg.Companions.Add(companion);
+                }
+                companion.Name = name;
+                companion.CharacterAssetId = character;
+                companion.AccessoryAssetId = accessory;
+                companion.ClickIntervalSeconds = clickSeconds;
+                companion.RandomClick = randomClick;
+                companion.ShowBar = showBar;
+                // Normalize 会为新伙伴分配唯一负数合成 id；它只用于本机窗口，不进入房间。
+                CompanionPets.Normalize(cfg);
+                ConfigStore.Save(cfg);
+                _app.Pet.BeginInvoke(new Action(_app.Pet.RefreshCompanions));
+                return MapCompanions(cfg.Companions);
+            }
+
+            case "companions.visibility":
+            {
+                string id = ApiClient.ReadString(data["id"]).Trim();
+                var companion = cfg.Companions?.FirstOrDefault(c => c != null && string.Equals(c.Id, id, StringComparison.Ordinal));
+                if (companion == null) throw new ApiException(-1, "自定义伙伴不存在");
+                bool hidden = data.ContainsKey("hidden") ? ApiClient.ReadBool(data["hidden"]) : !companion.Hidden;
+                companion.Hidden = hidden;
+                ConfigStore.Save(cfg);
+                _app.Pet.BeginInvoke(new Action(_app.Pet.RefreshCompanions));
+                return MapCompanions(cfg.Companions);
+            }
+
+            case "companions.delete":
+            {
+                string id = ApiClient.ReadString(data["id"]).Trim();
+                cfg.Companions ??= new List<CompanionPet>();
+                cfg.CompanionPositions ??= new Dictionary<string, int[]>();
+                var companion = cfg.Companions.FirstOrDefault(c => c != null && string.Equals(c.Id, id, StringComparison.Ordinal));
+                if (companion != null)
+                {
+                    cfg.CompanionPositions.Remove("companion:" + companion.Id);
+                    cfg.MemberMirrored?.Remove(companion.SyntheticId.ToString());
+                }
+                cfg.Companions.RemoveAll(c => c == null || string.Equals(c.Id, id, StringComparison.Ordinal));
+                ConfigStore.Save(cfg);
+                _app.Pet.BeginInvoke(new Action(_app.Pet.RefreshCompanions));
+                return MapCompanions(cfg.Companions);
             }
 
             case "presets.local.list":
@@ -2323,6 +2394,27 @@ public sealed class PanelWindow : Form
             accessoryAssetId = p.AccessoryAssetId,
             emoteAssetIds = NormalizeEmoteSlots(p.EmoteAssetIds),
         }).ToArray();
+    }
+
+    /// <summary>自定义伙伴前端 DTO：displayName 统一按中点规则截断，页面列表和桌宠底栏共用同一规则。</summary>
+    internal static object[] MapCompanions(IEnumerable<CompanionPet> companions)
+    {
+        return (companions ?? Enumerable.Empty<CompanionPet>())
+            .Where(c => c != null)
+            .Select(c => new
+            {
+                id = c.Id,
+                syntheticId = c.SyntheticId,
+                name = c.Name,
+                displayName = CompanionPets.DisplayName(c.Name),
+                characterAssetId = c.CharacterAssetId,
+                accessoryAssetId = c.AccessoryAssetId,
+                clickIntervalSeconds = c.ClickIntervalSeconds,
+                randomClick = c.RandomClick,
+                showBar = c.ShowBar,
+                hidden = c.Hidden,
+            })
+            .ToArray();
     }
 
     /// <summary>主题预设的前端 DTO。所有字段必须保持 camelCase，Boot 与命令返回共用。</summary>

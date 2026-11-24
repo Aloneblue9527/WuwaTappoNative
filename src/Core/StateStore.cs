@@ -61,6 +61,7 @@ public static class StateStore
                     ["lastRoom"] = cfg.LastRoom ?? "",
                     ["roomHistory"] = ToArray(cfg.RoomHistory),
                     ["memberPositions"] = ToPositions(cfg.MemberPositions),
+                    ["companionPositions"] = ToPositions(cfg.CompanionPositions),
                     ["memberVisibility"] = ToVisibility(cfg.MemberVisibility),
                     ["memberCustomPositions"] = ToTrueFlags(cfg.MemberCustomPositions),
                     ["readAnnouncementIds"] = ToArray(cfg.ReadAnnouncementIds),
@@ -95,6 +96,7 @@ public static class StateStore
         cfg.LastRoom = ReadString(root["lastRoom"]);
         cfg.RoomHistory = ReadStringArray(root["roomHistory"]);
         cfg.MemberPositions = ReadPositions(root["memberPositions"]);
+        cfg.CompanionPositions = ReadPositions(root["companionPositions"]);
         cfg.MemberVisibility = ReadVisibility(root["memberVisibility"]);
         cfg.MemberCustomPositions = ReadTrueFlags(root["memberCustomPositions"]);
         cfg.ReadAnnouncementIds = ReadStringArray(root["readAnnouncementIds"]).ToList();

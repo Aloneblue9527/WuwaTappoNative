@@ -16,6 +16,7 @@
     { key: 'synth', title: '合成', titleKey: 'nav.synth', icon: 'synth' },
     { key: 'preset', title: '我的预设', titleKey: 'nav.preset', icon: 'preset' },
     { key: 'room', title: '联机', titleKey: 'nav.room', icon: 'room' },
+    { key: 'companion', title: '自定义伙伴', titleKey: 'nav.companion', icon: 'companion' },
     { key: 'settings', title: '设置', titleKey: 'nav.settings', icon: 'settings' }
   ];
 
@@ -87,13 +88,10 @@
     synthRarity: 'all',
     synthSlots: [],
     synthCanCraft: false,
-    synthPanelVisible: false,
-    synthUnlocked: false,
-    synthEnabled: false,
     synthBusy: false,
-    locks: new Set(),
     presets: null,
     localPresets: null,
+    companions: null,
     presetBusy: false,
     emoteNames: {},
     emoteCatalog: null
@@ -1202,9 +1200,9 @@
       const prevRegion = state.boot?.settings?.serverRegion || 'cn';
       adoptBootThemeBackground(b);
       state.boot = b;
+      if (Array.isArray(b.companions)) state.companions = b.companions;
       applyLocale(b.settings?.locale);
       migrateLegacyAssetStorage();
-      applySynthSettings(b);
       applyTheme(b.settings);
       state.update = b.update || state.update;
       state.announcements = Array.isArray(b.announcements) ? b.announcements : [];
@@ -1499,6 +1497,7 @@
       const prevRoomSig = roomSignature(prev?.room);
       adoptBootThemeBackground(data);
       state.boot = data;
+      if (Array.isArray(data.companions)) state.companions = data.companions;
       applyLocale(data.settings?.locale);
       migrateLegacyAssetStorage();
       state.update = data.update || state.update;
@@ -1549,6 +1548,8 @@
         if (prevSynthSig !== bootSynthSignature(data)) renderSynth(true);
       } else if (state.page === 'room') {
         if (prevRoomSig !== roomSignature(data.room)) renderRoom();
+      } else if (state.page === 'companion') {
+        renderCompanion();
       }
       maybeShowDisclaimer();
       maybeShowUacPrompt();
@@ -1743,14 +1744,15 @@
   function renderPage() {
     resetDocumentScroll();
     const host = document.getElementById('pageHost');
-    if (!isLogged() && state.page !== 'settings') {
+    // 自定义伙伴是纯本地装饰，不依赖登录/联机；未登录或暂停时也可管理。
+    if (!isLogged() && state.page !== 'settings' && state.page !== 'companion') {
       host.innerHTML = renderLogin();
       bindLogin();
       return;
     }
     // 账号 HTTP 已暂停时不要触发背包/图鉴/合成等页面自动请求。
-    // 房间页仍渲染，让用户看到“联机已暂停”和上次房间号；设置页始终可进。
-    if (authPaused() && state.page !== 'settings' && state.page !== 'room') {
+    // 房间页仍渲染，让用户看到“联机已暂停”和上次房间号；设置/伙伴页始终可进。
+    if (authPaused() && state.page !== 'settings' && state.page !== 'room' && state.page !== 'companion') {
       renderAuthPaused();
       return;
     }
@@ -1759,12 +1761,14 @@
     else if (state.page === 'synth') renderSynth();
     else if (state.page === 'preset') renderPreset();
     else if (state.page === 'room') renderRoom();
+    else if (state.page === 'companion') renderCompanion();
     else renderSettings();
   }
 
   // 异步页面渲染可能在登录态变化后才完成；这里统一兜底，防止旧页面覆盖登录/暂停页。
   function pageAuthBlocked(pageKey) {
     if (state.page !== pageKey) return true;
+    if (pageKey === 'companion') return false;
     if (!isLogged() && state.page !== 'settings') {
       const host = document.getElementById('pageHost');
       if (host) { host.innerHTML = renderLogin(); bindLogin(); }
@@ -3866,10 +3870,11 @@
     });
   }
 
-  async function openPresetEditor(p, isLocal) {
+  async function openPresetEditor(p, isLocal, companionMode = false) {
     await Promise.all([
-      ...['character_skin', 'accessory', 'emote'].map(t => ensureCatalog(t).catch(() => [])),
-      ensureBag().catch(() => []),
+      ...(companionMode ? ['character_skin', 'accessory'] : ['character_skin', 'accessory', 'emote'])
+        .map(t => ensureCatalog(t).catch(() => [])),
+      companionMode && !isLogged() ? Promise.resolve([]) : ensureBag().catch(() => []),
     ]);
     const temp = {
       characterAssetId: Number(p.character_asset_id ?? p.characterAssetId ?? 0),
@@ -3887,13 +3892,22 @@
     const selectedItemId = () => tab === 'character_skin' ? temp.characterAssetId : tab === 'accessory' ? temp.accessoryAssetId : 0;
 
     modal(`<div class="preset-edit">
-      <div class="preset-title" style="margin-bottom:10px">${isLocal ? tr('preset.editingLocal', '编辑本地外观') : tr('preset.editingCloud', '修改云外观配置')}</div>
-      ${isLocal ? `<label class="setting-title">${tr('preset.name', '名称')}</label><input class="input" id="peName" value="${esc(p.name || '')}" style="margin:6px 0 10px">` : ''}
+      <div class="preset-title" style="margin-bottom:10px">${companionMode ? (p.id ? tr('companion.editTitle', '编辑自定义伙伴') : tr('companion.addTitle', '添加自定义伙伴')) : (isLocal ? tr('preset.editingLocal', '编辑本地外观') : tr('preset.editingCloud', '修改云外观配置'))}</div>
+      ${isLocal ? `<label class="setting-title">${tr('preset.name', '名称')}</label><input class="input" id="peName" value="${esc(p.name || '')}" placeholder="${companionMode ? tr('companion.namePlaceholder', '例如：菲比·Miratsu（显示为菲比）') : ''}" style="margin:6px 0 10px">` : ''}
+      ${companionMode ? `<div class="companion-editor-options">
+        <label class="setting-title">${tr('companion.clickFrequency', '点击频率')}</label>
+        <div class="companion-option-row">
+          <input class="input" id="peClickSeconds" type="number" min="0" max="3600" step="1" value="${Number(p.clickIntervalSeconds || 0)}" style="width:92px">
+          <span class="muted">${tr('companion.secondsUnit', '秒/次；0 表示不自动点击')}</span>
+        </div>
+        <label class="companion-check"><input type="checkbox" id="peRandomClick" ${p.randomClick ? 'checked' : ''}> ${tr('companion.randomClickHint', '随机化点击间隔与左右手动作')}</label>
+        <label class="companion-check"><input type="checkbox" id="peShowBar" ${p.showBar !== false ? 'checked' : ''}> ${tr('companion.showBarHint', '显示该伙伴的昵称底栏（全局隐藏联机底栏时仍会隐藏）')}</label>
+      </div>` : ''}
       <div id="pePreview"></div>
       <div class="pe-tabs">
         <button type="button" class="pill active" data-pe-tab="character_skin">${tr('preset.tabCharacter', '角色')}</button>
         <button type="button" class="pill" data-pe-tab="accessory">${tr('preset.tabAccessory', '配件')}</button>
-        <button type="button" class="pill" data-pe-tab="emote">${tr('preset.tabEmote', '表情')}</button>
+        ${companionMode ? '' : `<button type="button" class="pill" data-pe-tab="emote">${tr('preset.tabEmote', '表情')}</button>`}
         <span class="spacer"></span>
         <span class="muted" id="peSlotHint" style="font-size:11px"></span>
       </div>
@@ -3903,7 +3917,7 @@
         <button type="button" class="pill" id="peOwnedOnly" title="${tr('preset.ownedOnlyTitle', '只显示当前账号已拥有的条目')}">${tr('preset.ownedOnly', '仅拥有')}</button>
       </div>
       <div class="pe-grid" id="peGrid"></div>
-      <div class="muted" style="font-size:11px;margin-top:8px">${isLocal ? tr('preset.localHint', '本地预设可以任意搭配；云端修改会创建新预设并删除旧预设。') : tr('preset.cloudHint', '云端预设需要角色、配件和表情都满足拥有/角色匹配条件才能保存。')}</div>
+      <div class="muted" style="font-size:11px;margin-top:8px">${companionMode ? tr('companion.pickerHint', '自定义伙伴可使用任意角色与配件（未拥有也可选）；只保存在本机，不会上传服务器。') : (isLocal ? tr('preset.localHint', '本地预设可以任意搭配；云端修改会创建新预设并删除旧预设。') : tr('preset.cloudHint', '云端预设需要角色、配件和表情都满足拥有/角色匹配条件才能保存。'))}</div>
       <div style="display:flex;gap:10px;margin-top:14px;justify-content:flex-end">
         <button class="btn ghost" id="peCancel">${tr('common.cancel', '取消')}</button>
         <button class="btn" id="peSave">${tr('common.save', '保存')}</button>
@@ -3915,12 +3929,15 @@
         return `<div class="preset-emote ${i === selectedSlot ? 'selected' : ''}" data-pe-slot="${i}" title="${tr('bag.slotLabel', '槽位 {n}', { n: i + 1 })}">${thumb ? `<img src="${escAttr(thumb)}" alt="">` : `<span class="muted">${tr('common.empty', '空')}</span>`}<span>${i + 1}</span></div>`;
       }).join('');
       const renderPreview = () => {
-        h.querySelector('#pePreview').innerHTML = `${presetStageHtml(temp.characterAssetId, temp.accessoryAssetId)}<div class="preset-emote-preview">${emoteSlotsHtml()}</div>`;
-        h.querySelector('#peSlotHint').textContent = tab === 'emote' ? tr('preset.editSlot', '正在编辑槽位 {n}', { n: selectedSlot + 1 }) : tr('preset.clickEmote', '点击下方表情可放入当前槽位');
+        h.querySelector('#pePreview').innerHTML = companionMode
+          ? `${presetStageHtml(temp.characterAssetId, temp.accessoryAssetId, false)}<div class="companion-display-hint">${tr('companion.displayPreview', '桌面显示名：{name}', { name: esc(companionDisplayName(h.querySelector('#peName')?.value || p.name || '') || tr('companion.defaultName', '伙伴')) })}</div>`
+          : `${presetStageHtml(temp.characterAssetId, temp.accessoryAssetId)}<div class="preset-emote-preview">${emoteSlotsHtml()}</div>`;
+        h.querySelector('#peSlotHint').textContent = tabsEmote() ? (tab === 'emote' ? tr('preset.editSlot', '正在编辑槽位 {n}', { n: selectedSlot + 1 }) : tr('preset.clickEmote', '点击下方表情可放入当前槽位')) : '';
         h.querySelectorAll('[data-pe-slot]').forEach(el => {
           el.onclick = () => { selectedSlot = Number(el.dataset.peSlot); renderPreview(); renderGrid(); };
         });
       };
+      const tabsEmote = () => !companionMode;
 
       const renderGrid = () => {
         const all = itemsOf(tab);
@@ -4005,7 +4022,9 @@
             renderGrid();
           };
         });
-        h.querySelector('#peSlotHint').textContent = tab === 'emote' ? tr('preset.editSlot', '正在编辑槽位 {n}', { n: selectedSlot + 1 }) : tr('preset.clickEmote', '点击下方表情可放入当前槽位');
+        h.querySelector('#peSlotHint').textContent = companionMode
+          ? ''
+          : (tab === 'emote' ? tr('preset.editSlot', '正在编辑槽位 {n}', { n: selectedSlot + 1 }) : tr('preset.clickEmote', '点击下方表情可放入当前槽位'));
       };
 
       h.querySelectorAll('[data-pe-tab]').forEach(btn => btn.onclick = () => {
@@ -4026,9 +4045,28 @@
         renderGrid();
       };
       h.querySelector('#peCancel').onclick = closeModal;
+      const nameInput = h.querySelector('#peName');
+      if (nameInput) nameInput.oninput = () => renderPreview();
       h.querySelector('#peSave').onclick = async () => {
         const emoteAssetIds = temp.emoteAssetIds.slice(0, 5);
         try {
+          if (companionMode) {
+            const next = await tryCall('companions.save', {
+              id: p.id || '',
+              name: h.querySelector('#peName')?.value.trim() || tr('companion.defaultName', '伙伴'),
+              characterAssetId: temp.characterAssetId,
+              accessoryAssetId: temp.accessoryAssetId,
+              clickIntervalSeconds: Math.max(0, Math.min(3600, Number(h.querySelector('#peClickSeconds')?.value) || 0)),
+              randomClick: !!h.querySelector('#peRandomClick')?.checked,
+              showBar: h.querySelector('#peShowBar')?.checked !== false,
+            });
+            state.companions = Array.isArray(next) ? next : [];
+            closeModal();
+            await ensureCompanions(true);
+            renderCompanion();
+            toast(tr('companion.saved', '自定义伙伴已保存'));
+            return;
+          }
           if (isLocal) {
             await tryCall('presets.local.save', {
               id: p.id || '',
@@ -4157,6 +4195,119 @@
       if (!p.id) return;
       try { await tryCall('presets.local.delete', { id: p.id }); state.localPresets = null; await ensureLocalPresets(true); renderPreset(); toast(tr('preset.localDeleted', '已删除本地预设')); } catch { }
     });
+  }
+
+  /* ---------------- 自定义伙伴 ---------------- */
+  /** 与 C# CompanionPets.DisplayName 一致：中点前为显示名（菲比·Miratsu → 菲比）。 */
+  function companionDisplayName(name) {
+    const full = String(name ?? '').trim();
+    const idx = full.search(/[·・]/);
+    if (idx > 0) {
+      const head = full.slice(0, idx).trim();
+      if (head) return head;
+    }
+    return full;
+  }
+
+  async function ensureCompanions(force = false) {
+    if (Array.isArray(state.companions) && state.companions.length && !force) return state.companions;
+    const data = await tryCall('companions.list');
+    state.companions = Array.isArray(data) ? data : [];
+    return state.companions;
+  }
+
+  function companionCardHtml(p, index) {
+    const display = p.displayName || companionDisplayName(p.name);
+    const name = p.name || display || tr('companion.defaultName', '伙伴');
+    const charId = Number(p.characterAssetId || 0);
+    const accId = Number(p.accessoryAssetId || 0);
+    const seconds = Number(p.clickIntervalSeconds || 0);
+    return `<div class="companion-card" data-companion-index="${index}">
+      <div class="companion-preview">${presetStageHtml(charId, accId, false)}</div>
+      <div class="companion-info">
+        <div class="companion-name" title="${esc(display || name)}">${esc(display || name)}</div>
+        <div class="detail-row"><span>${tr('companion.character', '角色')}</span><span>${esc(catalogName('character_skin', charId))}</span></div>
+        <div class="detail-row"><span>${tr('companion.accessory', '配件')}</span><span>${esc(catalogName('accessory', accId))}</span></div>
+        <div class="detail-row"><span>${tr('companion.clickFrequency', '点击频率')}</span><span>${seconds > 0 ? tr('companion.everySeconds', '每 {n} 秒', { n: seconds }) : tr('companion.clickOff', '不自动点击')}</span></div>
+        <div class="detail-row"><span>${tr('companion.randomClick', '随机点击')}</span><span>${p.randomClick ? tr('common.on', '开') : tr('common.off', '关')}</span></div>
+        <div class="detail-row"><span>${tr('companion.showBar', '显示底栏')}</span><span>${p.showBar ? tr('common.on', '开') : tr('common.off', '关')}</span></div>
+        <div class="detail-row"><span>${tr('companion.visibility', '桌面显示')}</span><span>${p.hidden ? tr('companion.hidden', '已隐藏') : tr('companion.visible', '显示中')}</span></div>
+      </div>
+      <div class="companion-actions">
+        <button class="btn ghost" data-companion-visibility="${index}">${p.hidden ? tr('companion.show', '显示') : tr('companion.hide', '隐藏')}</button>
+        <button class="btn ghost" data-companion-edit="${index}">${tr('common.edit', '修改')}</button>
+        <button class="btn danger" data-companion-delete="${index}">${tr('common.delete', '删除')}</button>
+      </div>
+    </div>`;
+  }
+
+  async function renderCompanion() {
+    if (pageAuthBlocked('companion')) return;
+    setPage(`<div class="loading">${tr('companion.loading', '正在读取自定义伙伴…')}</div>`);
+    try {
+      await Promise.all([
+        ensureCompanions(),
+        ensureCatalog('character_skin').catch(() => []),
+        ensureCatalog('accessory').catch(() => []),
+      ]);
+    } catch {
+      setPage(`<div class="empty-state">${tr('companion.loadFailed', '自定义伙伴读取失败')}</div>`);
+      return;
+    }
+    const list = state.companions || [];
+    setPage(`
+      <div class="companion-page">
+        <div class="pill-row" style="margin-bottom:12px;flex-wrap:wrap">
+          <span class="muted" style="font-size:13px">${tr('companion.intro', '仅保存在本机的装饰伙伴：可任意选择角色和配件，不会上传服务器，也不影响联机房间、成员或点击统计。')}</span>
+          <span class="spacer"></span>
+          <button class="btn" id="companionAdd">${tr('companion.add', '添加伙伴')}</button>
+        </div>
+        <div class="companion-grid">
+          ${list.length ? list.map((p, i) => companionCardHtml(p, i)).join('') : `<div class="empty-state">${tr('companion.empty', '还没有自定义伙伴，点击「添加伙伴」创建')}</div>`}
+        </div>
+      </div>`);
+    document.getElementById('companionAdd').onclick = () => openCompanionEditor(null);
+    document.querySelectorAll('[data-companion-visibility]').forEach(b => b.onclick = async () => {
+      const p = list[Number(b.dataset.companionVisibility)];
+      if (!p) return;
+      try {
+        const next = await tryCall('companions.visibility', { id: p.id, hidden: !p.hidden });
+        state.companions = Array.isArray(next) ? next : [];
+        renderCompanion();
+        toast(p.hidden ? tr('companion.shown', '已显示自定义伙伴') : tr('companion.hiddenToast', '已隐藏自定义伙伴'));
+      } catch { }
+    });
+    document.querySelectorAll('[data-companion-edit]').forEach(b => b.onclick = () => openCompanionEditor(list[Number(b.dataset.companionEdit)]));
+    document.querySelectorAll('[data-companion-delete]').forEach(b => b.onclick = () => {
+      const p = list[Number(b.dataset.companionDelete)];
+      if (!p) return;
+      confirmRoomAction(
+        tr('companion.deleteTitle', '删除自定义伙伴'),
+        tr('companion.deleteBody', '确定要删除「{name}」吗？本机位置记录也会一起清除。', { name: p.displayName || companionDisplayName(p.name) }),
+        tr('common.delete', '删除'),
+        async () => {
+          try {
+            const next = await tryCall('companions.delete', { id: p.id });
+            state.companions = Array.isArray(next) ? next : [];
+            renderCompanion();
+            toast(tr('companion.deleted', '已删除自定义伙伴'));
+          } catch { }
+        });
+    });
+  }
+
+  function openCompanionEditor(companion) {
+    const initial = companion || {
+      id: '',
+      name: '',
+      characterAssetId: state.boot?.appearance?.characterAssetId || 0,
+      accessoryAssetId: state.boot?.appearance?.accessoryAssetId || 0,
+      clickIntervalSeconds: 0,
+      randomClick: false,
+      showBar: true,
+    };
+    // 复用“本地外观”编辑器：隐藏表情页，只保留角色/配件选择 + 伙伴选项。
+    openPresetEditor(initial, true, true);
   }
 
   /* ---------------- 联机 ---------------- */
@@ -7594,8 +7745,19 @@
         cloudAccessoryAssetId: 1604,
         cloudEmoteAssetIds: [1971, 1965, 1969, 1970, 1968],
       },
+      rotation: {
+        enabled: true,
+        intervalMinutes: 30,
+        characterIds: [3060, 3061],
+        accessoryIds: [1604, 1605],
+        lastAppliedUtcMs: 0,
+      },
       catalog: {},
-      locks: [],
+      companions: mode === 'companion'
+        ? [
+            { id: 'preview-companion-1', syntheticId: -1000, name: '菲比·Miratsu', displayName: '菲比', characterAssetId: 3061, accessoryAssetId: 1604, clickIntervalSeconds: 12, randomClick: true, showBar: true },
+          ]
+        : [],
       themePresets: [],
       themeRotation: { enabled: false, intervalMinutes: 30, currentPresetId: '', lastAppliedMs: 0 },
       update: null,

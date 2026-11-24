@@ -61,6 +61,7 @@
   "obs.noticeBody": "In OBS, open the Window Capture properties and set Capture Method to \"Windows 10 (1903 and later)\".\nThe default automatic method may show only a black shadow or a black screen.\n\nFor a transparent background, also enable \"Allow transparency\".\nIf problems persist, enable \"Compatibility mode\" in Settings to use a solid background with chroma key.",
 
   "remote.hide": "Hide this character",
+  "remote.hideCompanion": "Hide this companion",
   "remote.mirror": "Mirror character",
   "remote.unmirror": "Cancel mirror",
   "remote.scale": "Remote character size",

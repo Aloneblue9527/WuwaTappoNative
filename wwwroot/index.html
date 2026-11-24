@@ -75,11 +75,29 @@
       const savePreviewRotation = () => {
         try { localStorage.setItem(previewRotationKey, JSON.stringify(previewRotation)); } catch { }
       };
+      const savePreviewAppearanceRotation = () => {
+        try { localStorage.setItem(previewAppearanceRotationKey, JSON.stringify(previewAppearanceRotation)); } catch { }
+      };
+      const savePreviewCompanions = () => {
+        try { localStorage.setItem(previewCompanionsKey, JSON.stringify(previewCompanions || [])); } catch { }
+      };
+      const displayCompanionName = name => {
+        const full = String(name || '').trim();
+        const at = full.search(/[·・]/);
+        if (at > 0) {
+          const head = full.slice(0, at).trim();
+          if (head) return head;
+        }
+        return full;
+      };
       const buildPreviewBoot = () => {
         const mode = window.__previewMode || params.get('preview') || '';
         const boot = window.__previewBoot ? window.__previewBoot(mode) : { settings: {} };
         boot.settings = { ...(boot.settings || {}), ...previewSettings };
         if (params.has('lang')) boot.settings.locale = params.get('lang');
+        if (!previewCompanions && mode === 'companion')
+          previewCompanions = Array.isArray(boot.companions) ? boot.companions.slice() : [];
+        boot.companions = previewCompanions || [];
         try {
           const image = localStorage.getItem(previewImageKey) || '';
           boot.settings.themeBackgroundImage = image;

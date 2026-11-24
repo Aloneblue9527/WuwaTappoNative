@@ -35,11 +35,12 @@ public sealed class Settings
     public long[] PresetIds { get; set; } = Array.Empty<long>();
     /// <summary>用户自建的本地外观预设，不依赖官方预设接口。</summary>
     public List<LocalPreset> LocalPresets { get; set; } = new();
+    /// <summary>
+    /// 本地自定义伙伴桌宠。仅保存在本机配置中，不进入房间快照、不上传服务器，
+    /// 也不会影响真实联机成员的显示或点击统计。
+    /// </summary>
+    public List<CompanionPet> Companions { get; set; } = new();
 
-    /// <summary>隐藏高级合成功能是否已解锁。</summary>
-    public bool AnyItemSynthesisUnlocked { get; set; }
-    /// <summary>是否启用任意库存物品合成。</summary>
-    public bool AnyItemSynthesisEnabled { get; set; }
     /// <summary>可用点击低于 1000 时自动补充 10000。</summary>
     public bool AutoClickBoost { get; set; }
 
@@ -204,6 +205,11 @@ public sealed class Settings
     [JsonIgnore] public string[] RoomHistory { get; set; } = Array.Empty<string>();
     /// <summary>成员位置：key = 成员 id；由 StateStore 持久化，不写入 config.json。</summary>
     [JsonIgnore] public Dictionary<string, int[]> MemberPositions { get; set; } = new();
+    /// <summary>
+    /// 自定义伙伴窗口位置：key = CompanionPet.Id（"companion:{guid}"）；由 StateStore 持久化，
+    /// 与真实成员位置分开，避免相同数值的合成 id 覆盖联机成员坐标。
+    /// </summary>
+    [JsonIgnore] public Dictionary<string, int[]> CompanionPositions { get; set; } = new();
     /// <summary>联机成员单独显示/隐藏；key = 成员 id，false 表示隐藏，缺省为显示。</summary>
     [JsonIgnore] public Dictionary<string, bool> MemberVisibility { get; set; } = new();
     /// <summary>手动拖动过的联机成员；key = 成员 id，true 表示离开默认排序位置。</summary>
@@ -251,6 +257,27 @@ public sealed class LocalPreset
     public long CharacterAssetId { get; set; }
     public long AccessoryAssetId { get; set; }
     public long[] EmoteAssetIds { get; set; } = new long[5];
+}
+
+/// <summary>
+/// 本地自定义伙伴。字段刻意保持简单并带默认值，方便旧配置/缺字段时安全回退。
+/// SyntheticId 是仅用于 RemoteCatWindow 的合成负数 id，永远不进入 RoomManager 或服务器载荷。
+/// </summary>
+public sealed class CompanionPet
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public long SyntheticId { get; set; }
+    public string Name { get; set; } = "";
+    public long CharacterAssetId { get; set; }
+    public long AccessoryAssetId { get; set; }
+    /// <summary>自动点击间隔秒数；0 表示不自动点击。</summary>
+    public int ClickIntervalSeconds { get; set; }
+    /// <summary>随机化点击间隔和左右手动作；关闭时固定间隔并左右交替。</summary>
+    public bool RandomClick { get; set; }
+    /// <summary>该伙伴自己的底栏开关；全局“隐藏联机角色底栏”始终优先。</summary>
+    public bool ShowBar { get; set; } = true;
+    /// <summary>仅暂时隐藏桌面窗口，保留伙伴配置和位置；可随时重新显示。</summary>
+    public bool Hidden { get; set; }
 }
 
 public static class ConfigStore
