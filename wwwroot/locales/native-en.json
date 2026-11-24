@@ -4,6 +4,7 @@
   "tray.topmost": "Always on top",
   "tray.mirror": "Mirror character",
   "tray.hoverFade": "Translucent on hover",
+  "tray.hideOtherPets": "Hide other character pets",
   "tray.clickThrough": "Click-through",
   "tray.cancelClickThrough": "Disable click-through",
   "tray.petScale": "Pet size",

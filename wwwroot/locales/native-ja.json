@@ -4,6 +4,7 @@
   "tray.topmost": "常に最前面",
   "tray.mirror": "キャラクターを反転",
   "tray.hoverFade": "ホバー時に半透明",
+  "tray.hideOtherPets": "他のキャラクターのペットを非表示",
   "tray.clickThrough": "マウス透過",
   "tray.cancelClickThrough": "マウス透過を解除",
   "tray.petScale": "ペットサイズ",

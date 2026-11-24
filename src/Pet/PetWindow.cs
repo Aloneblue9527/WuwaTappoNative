@@ -101,6 +101,7 @@ public sealed class PetWindow : Form
     ContextMenuStrip _menu;
     NotifyIcon _tray;
     ToolStripMenuItem _topmostItem, _passthroughItem, _passthroughOffItem, _hoverItem, _scaleMenuItem, _opacityMenuItem, _mirrorItem;
+    ToolStripMenuItem _hideOtherPetsItem;
     ToolStripMenuItem _layoutHorizontalItem, _layoutVerticalItem;
     ToolStripMenuItem _keyboardMenuItem;
     Icon _icon;
@@ -2745,6 +2746,18 @@ public sealed class PetWindow : Form
         _hoverItem = new ToolStripMenuItem(Localization.T("tray.hoverFade", "鼠标悬停时半透明")) { Checked = _cfg.HoverFade };
         _hoverItem.Click += (s, e) => { _cfg.HoverFade = _hoverItem.Checked = !_hoverItem.Checked; Save(); ApplySettings(); NotifySettingsChanged(); };
         _menu.Items.Add(_hoverItem);
+        // 与联机页“隐藏其他成员桌宠”共用 HideOtherPets：托盘/右键菜单和页面双向同步。
+        // 规则：开启后真实远程成员和本地自定义伙伴都隐藏；关闭后恢复各自原有的显示状态。
+        _hideOtherPetsItem = new ToolStripMenuItem(Localization.T("tray.hideOtherPets", "隐藏其他角色桌宠")) { Checked = _cfg.HideOtherPets };
+        _hideOtherPetsItem.Click += (s, e) =>
+        {
+            _cfg.HideOtherPets = _hideOtherPetsItem.Checked = !_cfg.HideOtherPets;
+            Save();
+            RefreshMembers();
+            RefreshCompanions();
+            NotifySettingsChanged();
+        };
+        _menu.Items.Add(_hideOtherPetsItem);
         _passthroughItem = new ToolStripMenuItem(Localization.T("tray.clickThrough", "鼠标穿透"));
         _passthroughItem.Click += (s, e) => { _cfg.ClickThrough = true; Save(); ApplySettings(); NotifySettingsChanged(); };
         _menu.Items.Add(_passthroughItem);
@@ -2835,6 +2848,11 @@ public sealed class PetWindow : Form
         _topmostItem.Checked = _cfg.Topmost;
         _mirrorItem.Checked = _cfg.MainMirrored;
         _hoverItem.Checked = _cfg.HoverFade;
+        if (_hideOtherPetsItem != null)
+        {
+            _hideOtherPetsItem.Checked = _cfg.HideOtherPets;
+            _hideOtherPetsItem.Text = Localization.T("tray.hideOtherPets", "隐藏其他角色桌宠");
+        }
         _passthroughOffItem.Visible = _cfg.ClickThrough;
         _passthroughItem.Enabled = !_cfg.ClickThrough;
         if (_scaleMenuItem != null)
