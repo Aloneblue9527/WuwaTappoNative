@@ -95,8 +95,31 @@ jobs:
           $notes = Join-Path $env:RUNNER_TEMP "beta-notes.md"
           $prev = git describe --tags --abbrev=0 --exclude '*-beta*' HEAD 2>$null
           $range = if ($prev) { "$prev..HEAD" } else { "HEAD" }
-          $commits = @(git log --no-merges --pretty=format:'- %s (%h)' $range) -join "`n"
-          if (-not $commits) { $commits = '- 本次构建' }
+          # 只把真正修改源码/资源/构建文件的提交放进测试版说明；README、docs、测试等文档提交不展示。
+          $codeRoots = @('src/','wwwroot/','assets/','data/','installer/','launcher/','token-extractor/')
+          $codeFiles = @('WuwatappoNative.csproj','app.manifest','global.json','Directory.Build.props','Directory.Build.targets')
+          function Test-CodePath([string]$path) {
+            $path = $path.Replace('\','/')
+            if ($path -like '*.md' -or $path -like 'docs/*' -or $path -like 'tests/*' -or $path -like '.github/*' -or $path -like 'out/*') { return $false }
+            if ($codeFiles -contains $path) { return $true }
+            foreach ($root in $codeRoots) { if ($path.StartsWith($root)) { return $true } }
+            return $false
+          }
+          $log = @(git log --no-merges --pretty=format:'@@%h%x09%s%n' --name-only $range)
+          $notes = New-Object System.Collections.Generic.List[string]
+          $current = $null
+          $include = $false
+          foreach ($line in $log) {
+            if ($line -like '@@*') {
+              if ($null -ne $current -and $include) { $notes.Add($current) }
+              $current = $line.Substring(2)
+              $include = $false
+            } elseif ($null -ne $current -and -not [string]::IsNullOrWhiteSpace($line)) {
+              if (Test-CodePath $line.Trim()) { $include = $true }
+            }
+          }
+          if ($null -ne $current -and $include) { $notes.Add($current) }
+          $commits = if ($notes.Count -gt 0) { $notes -join "`n" } else { '- 本次构建' }
           $body = @"
           ## 测试版说明
 
