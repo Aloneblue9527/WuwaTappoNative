@@ -105,7 +105,7 @@ jobs:
             foreach ($root in $codeRoots) { if ($path.StartsWith($root)) { return $true } }
             return $false
           }
-          $log = @(git log --no-merges --pretty=format:'@@%h%x09%s%n' --name-only $range)
+          $log = @(git log --no-merges --pretty=format:'@@- %s (%h)%n' --name-only $range)
           $noteLines = New-Object System.Collections.Generic.List[string]
           $current = $null
           $include = $false
