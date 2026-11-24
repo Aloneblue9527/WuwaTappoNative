@@ -3,12 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Wuwatappo Native：WuwaTappo 的 Windows 原生实现，支持国服/国际服联机、官方登录继承、桌宠互动和 OBS 绿幕采集，提供中文 / English / 日本語 界面。" />
-  <meta name="keywords" content="WuwaTappo, Wuwatappo Native, 鸣潮桌宠, 鸣潮 WuwaTappo, 鸣潮辅助工具, 国际服桌宠, 国服桌宠, 鸣潮联机, Wuthering Waves desktop pet, Wuthering Waves companion, Wuthering Waves multiplayer, 鳴潮 デスクトップペット, 鳴潮 マルチプレイ, OBS 桌面采集, Windows 桌宠" />
+  <meta name="description" content="Wuwatappo Native（Wuwa Tappo / WuwaTappo）是 WuwaTappo 的 Windows 原生实现，支持国服/国际服联机、官方登录继承、桌宠互动和 OBS 绿幕采集，提供中文 / English / 日本語 界面。" />
+  <meta name="keywords" content="Wuwa Tappo, WuwaTappo, wuwa tappo, wuwatappo, Wuwa Tappo Native, Wuwatappo Native, wuwa tappo 桌宠, 鸣潮桌宠, 鸣潮 Wuwa Tappo, 鸣潮 WuwaTappo, 鸣潮辅助工具, 国际服桌宠, 国服桌宠, 鸣潮联机, Wuthering Waves desktop pet, Wuthering Waves companion, Wuthering Waves multiplayer, 鳴潮 デスクトップペット, 鳴潮 マルチプレイ, OBS 桌面采集, Windows 桌宠" />
+  <meta name="application-name" content="Wuwatappo Native (Wuwa Tappo)" />
   <meta name="robots" content="index,follow" />
   <meta property="og:type" content="website" />
-  <meta property="og:title" content="Wuwatappo Native · Windows 原生桌宠" />
-  <meta property="og:description" content="WuwaTappo 的 Windows 原生实现，支持国服/国际服联机、官方登录继承、桌宠互动和 OBS 采集。" />
+  <meta property="og:title" content="Wuwatappo Native (Wuwa Tappo) · Windows 原生桌宠" />
+  <meta property="og:description" content="Wuwatappo Native（Wuwa Tappo / WuwaTappo）的 Windows 原生实现，支持国服/国际服联机、官方登录继承、桌宠互动和 OBS 采集。" />
+  <meta property="og:site_name" content="Wuwatappo Native (Wuwa Tappo)" />
   <meta property="og:url" content="https://code.danieluu.top/WuwaTappoNative/" />
   <meta property="og:image" content="https://code.danieluu.top/WuwaTappoNative/assets/pet-hero-1.png" />
   <meta property="og:locale" content="zh_CN" />
@@ -22,17 +24,18 @@
   <link rel="alternate" hreflang="ja" href="https://code.danieluu.top/WuwaTappoNative/?lang=ja" />
   <link rel="alternate" hreflang="x-default" href="https://code.danieluu.top/WuwaTappoNative/" />
   <meta name="theme-color" content="#fff8e9" />
-  <title>Wuwatappo Native · Windows 原生桌宠</title>
+  <title>Wuwatappo Native (Wuwa Tappo) · Windows 原生桌宠</title>
   <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "SoftwareApplication",
       "name": "Wuwatappo Native",
-      "alternateName": "WuwaTappo Native",
+      "alternateName": ["WuwaTappo Native", "Wuwa Tappo", "Wuwa Tappo Native", "WuwaTappo"],
       "applicationCategory": "UtilitiesApplication",
       "operatingSystem": "Windows 10, Windows 11",
       "inLanguage": ["zh-CN", "en", "ja"],
-      "description": "WuwaTappo 的 Windows 原生实现，支持国服/国际服联机、官方登录继承、桌宠互动和 OBS 采集。",
+      "keywords": "Wuwa Tappo, WuwaTappo, Wuthering Waves desktop pet, 鸣潮桌宠, 鳴潮 デスクトップペット",
+      "description": "Wuwatappo Native（Wuwa Tappo / WuwaTappo）的 Windows 原生实现，支持国服/国际服联机、官方登录继承、桌宠互动和 OBS 采集。",
       "downloadUrl": "https://github.com/DanielToyama/WuwaTappoNative/releases/latest",
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" }
     }
@@ -378,14 +381,14 @@
     <main id="top">
       <section class="hero">
         <div class="hero-copy">
-          <div class="hero-kicker"><span class="dot"></span> Wuwatappo Native / Windows</div>
+          <div class="hero-kicker"><span class="dot"></span> Wuwatappo Native / Wuwa Tappo / Windows</div>
           <h1>
             <span class="line" data-i18n="hero.title1">更轻更快，</span>
             <span class="line" data-i18n="hero.title2">更多自定义的</span>
-            <span class="line accent" data-i18n="hero.title3">鸣潮 WuwaTappo</span>
+            <span class="line accent" data-i18n="hero.title3">鸣潮 Wuwa Tappo</span>
           </h1>
           <p class="hero-lead" data-i18n="hero.lead">
-            WuwaTappo 1.0.2 的 Windows 原生实现。使用 C# / .NET 8、WinForms 和 WebView2 编写，连接库洛官方桌宠服务。
+            Wuwa Tappo（WuwaTappo）1.0.2 的 Windows 原生实现。使用 C# / .NET 8、WinForms 和 WebView2 编写，连接库洛官方桌宠服务。
             支持国服与国际服联机、官方登录继承、桌宠互动和主播采集。
           </p>
           <div class="hero-actions">
@@ -606,7 +609,7 @@
 
     <footer>
       <div class="footer-row">
-        <span data-i18n="footer.disclaimer">Wuwatappo Native · 本项目不是库洛官方项目，角色素材版权归库洛游戏所有。</span>
+        <span data-i18n="footer.disclaimer">Wuwatappo Native（Wuwa Tappo / WuwaTappo） · 本项目不是库洛官方项目，角色素材版权归库洛游戏所有。</span>
         <span class="footer-spacer"></span>
         <a href="https://github.com/DanielToyama/WuwaTappoNative" target="_blank" rel="noreferrer">GitHub</a>
         <a href="https://github.com/DanielToyama/WuwaTappoNative/releases" target="_blank" rel="noreferrer">Releases</a>

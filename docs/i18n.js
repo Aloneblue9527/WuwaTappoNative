@@ -2,9 +2,9 @@
 (() => {
   const messages = {
     zh: {
-      'meta.title': 'Wuwatappo Native · Windows 原生桌宠',
-      'meta.description': 'Wuwatappo Native：WuwaTappo 的 Windows 原生实现，支持国服/国际服联机、官方登录继承、桌宠互动和 OBS 绿幕采集，提供中文 / English / 日本語 界面。',
-      'meta.keywords': 'WuwaTappo, Wuwatappo Native, 鸣潮桌宠, 鸣潮 WuwaTappo, 鸣潮辅助工具, 国际服桌宠, 国服桌宠, 鸣潮联机, Wuthering Waves desktop pet, Wuthering Waves companion, 鳴潮 デスクトップペット, OBS 桌面采集, Windows 桌宠',
+      'meta.title': 'Wuwatappo Native (Wuwa Tappo) · Windows 原生桌宠',
+      'meta.description': 'Wuwatappo Native（Wuwa Tappo / WuwaTappo）是 WuwaTappo 的 Windows 原生实现，支持国服/国际服联机、官方登录继承、桌宠互动和 OBS 绿幕采集，提供中文 / English / 日本語 界面。',
+      'meta.keywords': 'Wuwa Tappo, WuwaTappo, wuwa tappo, wuwatappo, Wuwa Tappo Native, Wuwatappo Native, wuwa tappo 桌宠, 鸣潮桌宠, 鸣潮 Wuwa Tappo, 鸣潮 WuwaTappo, 鸣潮辅助工具, 国际服桌宠, 国服桌宠, 鸣潮联机, Wuthering Waves desktop pet, Wuthering Waves companion, Wuthering Waves multiplayer, 鳴潮 デスクトップペット, 鳴潮 マルチプレイ, OBS 桌面采集, Windows 桌宠',
 
       'nav.home': 'Wuwatappo Native 首页',
       'nav.label': '页面导航',
@@ -16,8 +16,8 @@
 
       'hero.title1': '更轻更快，',
       'hero.title2': '更多自定义的',
-      'hero.title3': '鸣潮 WuwaTappo',
-      'hero.lead': 'WuwaTappo 1.0.2 的 Windows 原生实现。使用 C# / .NET 8、WinForms 和 WebView2 编写，连接库洛官方桌宠服务。支持国服与国际服联机、官方登录继承、桌宠互动和主播采集。',
+      'hero.title3': '鸣潮 Wuwa Tappo',
+      'hero.lead': 'Wuwa Tappo（WuwaTappo）1.0.2 的 Windows 原生实现。使用 C# / .NET 8、WinForms 和 WebView2 编写，连接库洛官方桌宠服务。支持国服与国际服联机、官方登录继承、桌宠互动和主播采集。',
       'hero.download': '下载最新版',
       'hero.repo': 'GitHub 仓库',
       'hero.meta.os': 'Windows 10 / 11 x64',
@@ -114,15 +114,15 @@
       'start.s3.body': '打开「联机」创建房间或输入房间号。联机桌宠会按当前横向/纵向排列方案自动就位。',
       'start.requirements': 'Windows 10/11 x64 · WebView2 Runtime（通常已内置）· 发布包无需安装 .NET Runtime · 首次启动创建',
 
-      'footer.disclaimer': 'Wuwatappo Native · 本项目不是库洛官方项目，角色素材版权归库洛游戏所有。',
+      'footer.disclaimer': 'Wuwatappo Native（Wuwa Tappo / WuwaTappo） · 本项目不是库洛官方项目，角色素材版权归库洛游戏所有。',
       'footer.demo': '演示视频',
       'footer.note': '状态页只读取静态 compatibility.json，不会上传任何数据。交流 QQ 群：1130030892。'
     },
 
     en: {
-      'meta.title': 'Wuwatappo Native · Native Windows desktop pet',
-      'meta.description': 'Wuwatappo Native is a native Windows implementation of WuwaTappo with CN/Global multiplayer, official login inheritance, desktop pet interaction, OBS capture, and Chinese / English / Japanese UI.',
-      'meta.keywords': 'WuwaTappo, Wuwatappo Native, Wuthering Waves desktop pet, Wuthering Waves companion, Wuthering Waves multiplayer, CN server, Global server, OBS capture, Windows desktop pet',
+      'meta.title': 'Wuwatappo Native (Wuwa Tappo) · Native Windows desktop pet',
+      'meta.description': 'Wuwatappo Native (Wuwa Tappo / WuwaTappo) is a native Windows implementation of WuwaTappo with CN/Global multiplayer, official login inheritance, desktop pet interaction, OBS capture, and Chinese / English / Japanese UI.',
+      'meta.keywords': 'Wuwa Tappo, WuwaTappo, wuwa tappo, wuwatappo, Wuwa Tappo Native, Wuwatappo Native, Wuwa Tappo desktop pet, Wuthering Waves desktop pet, Wuthering Waves companion, Wuthering Waves multiplayer, CN server, Global server, OBS capture, Windows desktop pet',
 
       'nav.home': 'Wuwatappo Native home',
       'nav.label': 'Page navigation',
@@ -134,8 +134,8 @@
 
       'hero.title1': 'Lighter and faster,',
       'hero.title2': 'More customizable',
-      'hero.title3': 'Wuthering Waves · WuwaTappo',
-      'hero.lead': 'Native Windows implementation of WuwaTappo 1.0.2, built with C# / .NET 8, WinForms, and WebView2, connecting to Kuro Games\' official desktop pet service. Supports CN/Global multiplayer, official login inheritance, desktop pet interaction, and streamer capture.',
+      'hero.title3': 'Wuthering Waves · Wuwa Tappo',
+      'hero.lead': 'Native Windows implementation of Wuwa Tappo (WuwaTappo) 1.0.2, built with C# / .NET 8, WinForms, and WebView2, connecting to Kuro Games\' official desktop pet service. Supports CN/Global multiplayer, official login inheritance, desktop pet interaction, and streamer capture.',
       'hero.download': 'Download latest',
       'hero.repo': 'GitHub repository',
       'hero.meta.os': 'Windows 10 / 11 x64',
@@ -232,15 +232,15 @@
       'start.s3.body': 'Open Multiplayer, create a room or enter a room number. Remote pets are arranged according to the current horizontal/vertical layout.',
       'start.requirements': 'Windows 10/11 x64 · WebView2 Runtime (usually preinstalled) · no .NET Runtime required with release builds · created on first launch',
 
-      'footer.disclaimer': 'Wuwatappo Native · This is not an official Kuro Games project. Character assets are copyright Kuro Games.',
+      'footer.disclaimer': 'Wuwatappo Native (Wuwa Tappo / WuwaTappo) · This is not an official Kuro Games project. Character assets are copyright Kuro Games.',
       'footer.demo': 'Demo video',
       'footer.note': 'The status page only reads the static compatibility.json and uploads no data. QQ group: 1130030892.'
     },
 
     ja: {
-      'meta.title': 'Wuwatappo Native · Windows ネイティブデスクトップペット',
-      'meta.description': 'Wuwatappo Native は WuwaTappo の Windows ネイティブ実装。中国/国際サーバーのマルチプレイ、公式ログインの引き継ぎ、デスクトップペット操作、OBS キャプチャ、中国語 / English / 日本語 UI に対応。',
-      'meta.keywords': 'WuwaTappo, Wuwatappo Native, 鳴潮 デスクトップペット, 鳴潮 マルチプレイ, 鳴潮 支援ツール, 中国サーバー, 国際サーバー, OBS キャプチャ, Windows デスクトップペット',
+      'meta.title': 'Wuwatappo Native (Wuwa Tappo) · Windows ネイティブデスクトップペット',
+      'meta.description': 'Wuwatappo Native（Wuwa Tappo / WuwaTappo）は WuwaTappo の Windows ネイティブ実装。中国/国際サーバーのマルチプレイ、公式ログインの引き継ぎ、デスクトップペット操作、OBS キャプチャ、中国語 / English / 日本語 UI に対応。',
+      'meta.keywords': 'Wuwa Tappo, WuwaTappo, wuwa tappo, wuwatappo, Wuwa Tappo Native, Wuwatappo Native, 鳴潮 デスクトップペット, 鳴潮 マルチプレイ, 鳴潮 支援ツール, 中国サーバー, 国際サーバー, OBS キャプチャ, Windows デスクトップペット',
 
       'nav.home': 'Wuwatappo Native ホーム',
       'nav.label': 'ページナビゲーション',
@@ -252,8 +252,8 @@
 
       'hero.title1': 'より軽く、より速く、',
       'hero.title2': 'もっと自由にカスタマイズ',
-      'hero.title3': '鳴潮 WuwaTappo',
-      'hero.lead': 'WuwaTappo 1.0.2 の Windows ネイティブ実装。C# / .NET 8、WinForms、WebView2 で構築され、Kuro Games 公式のデスクトップペットサービスに接続します。中国サーバー/国際サーバーのマルチプレイ、公式ログインの引き継ぎ、ペット操作、配信者向けキャプチャに対応。',
+      'hero.title3': '鳴潮 Wuwa Tappo',
+      'hero.lead': 'Wuwa Tappo（WuwaTappo）1.0.2 の Windows ネイティブ実装。C# / .NET 8、WinForms、WebView2 で構築され、Kuro Games 公式のデスクトップペットサービスに接続します。中国サーバー/国際サーバーのマルチプレイ、公式ログインの引き継ぎ、ペット操作、配信者向けキャプチャに対応。',
       'hero.download': '最新版をダウンロード',
       'hero.repo': 'GitHub リポジトリ',
       'hero.meta.os': 'Windows 10 / 11 x64',
@@ -350,7 +350,7 @@
       'start.s3.body': '「マルチ」を開き、ルームを作成するかルーム番号を入力します。マルチペットは現在の横/縦の並び順に従って配置されます。',
       'start.requirements': 'Windows 10/11 x64 · WebView2 Runtime（通常はインストール済み）· リリース版は .NET Runtime 不要 · 初回起動時に作成',
 
-      'footer.disclaimer': 'Wuwatappo Native · 本プロジェクトは Kuro Games の公式プロジェクトではありません。キャラクター素材の著作権は Kuro Games に帰属します。',
+      'footer.disclaimer': 'Wuwatappo Native（Wuwa Tappo / WuwaTappo） · 本プロジェクトは Kuro Games の公式プロジェクトではありません。キャラクター素材の著作権は Kuro Games に帰属します。',
       'footer.demo': 'デモ動画',
       'footer.note': '状態ページは静的 compatibility.json を読み取るだけで、データを送信しません。QQ グループ：1130030892。'
     }
