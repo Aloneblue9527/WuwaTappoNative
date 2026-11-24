@@ -14,3 +14,10 @@ installer/product.wxs
 config.json
 log.txt
 *.log
+
+# AI/Agent 相关文档与本地配置（只保留在本机，不进入仓库）
+AGENTS.md
+CLAUDE.md
+.zcode/
+.cursor/
+.github/copilot-instructions.md
