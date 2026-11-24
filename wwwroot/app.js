@@ -7,8 +7,11 @@
     synth: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6"/><path d="M10 3v5l-5 9.5A2.5 2.5 0 0 0 7.2 21h9.6a2.5 2.5 0 0 0 2.2-3.5L14 8V3"/><path d="M7.5 15h9"/></svg>',
     preset: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9L12 3.5Z"/></svg>',
     room: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><circle cx="17.5" cy="9.5" r="2.4"/><path d="M15 20a4.5 4.5 0 0 1 6 0"/></svg>',
+    companion: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7-4.4-7-9.2A3.8 3.8 0 0 1 12 8a3.8 3.8 0 0 1 7 2.8C19 15.6 12 20 12 20Z"/><path d="M9.5 12.5h5M12 10v5"/></svg>',
     settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6h.09A1.7 1.7 0 0 0 10.1 3.05V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9v.09A1.7 1.7 0 0 0 20.95 10.1H21a2 2 0 1 1 0 4h-.09A1.7 1.7 0 0 0 19.4 15Z"/></svg>'
   };
+  // 轮换按钮：两枚加粗的循环箭头，沿用 currentColor，无文字。
+  const ROTATION_ICON = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20.2 8.7A8.2 8.2 0 0 0 5.4 6.3" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><path d="M5.1 3.6v3.9h3.9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.8 15.3a8.2 8.2 0 0 0 14.8 2.4" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><path d="M18.9 20.4v-3.9h-3.9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   const PAGES = [
     { key: 'bag', title: '我的背包', titleKey: 'nav.bag', icon: 'bag' },
@@ -40,6 +43,58 @@
   const TYPE_TEXT = { character_skin: '角色', accessory: '配件', emote: '表情' };
   const rarityText = r => tr('rarity.' + r, RARITY_TEXT[r] || r);
   const typeText = t => tr('type.' + t, TYPE_TEXT[t] || t);
+
+  /* ---------------- 外观轮换基础 ---------------- */
+  function rotationState() {
+    return state.boot?.rotation || {};
+  }
+  function rotationList(type) {
+    const r = rotationState();
+    const raw = type === 'character_skin' ? r.characterIds : type === 'accessory' ? r.accessoryIds : [];
+    return Array.isArray(raw) ? raw.map(Number).filter(id => Number.isFinite(id) && id > 0) : [];
+  }
+  function rotationContains(type, id) {
+    const target = Number(id);
+    if (!Number.isFinite(target) || target <= 0) return false;
+    return rotationList(type).some(x => Number(x) === target);
+  }
+  /** 角色/配件卡片右上角的轮换开关；表情返回空串。 */
+  function rotationButtonHtml(type, id) {
+    if (type !== 'character_skin' && type !== 'accessory') return '';
+    const n = Number(id);
+    if (!Number.isFinite(n) || n <= 0) return '';
+    const active = rotationContains(type, n);
+    const title = active ? tr('rotation.toggleRemove', '移出轮换') : tr('rotation.toggleAdd', '加入轮换');
+    return `<button type="button" class="rotation-toggle ${active ? 'active' : ''}" data-rotation-toggle data-rotation-type="${type}" data-rotation-id="${n}" aria-pressed="${active ? 'true' : 'false'}" title="${title}">${ROTATION_ICON}</button>`;
+  }
+  /** 给任意卡片容器绑定轮换按钮；点击不会冒泡到卡片详情/双击装备。 */
+  function bindRotationButtons(host, onChanged) {
+    if (!host) return;
+    host.querySelectorAll('[data-rotation-toggle]').forEach(el => {
+      el.onclick = async e => {
+        e.preventDefault();
+        e.stopPropagation();
+        const type = el.dataset.rotationType;
+        const id = Number(el.dataset.rotationId);
+        if (!type || !id) return;
+        state.bagActionUntil = performance.now() + 500;
+        try {
+          state.boot = await tryCall('rotation.toggle', { type, id });
+          const active = rotationContains(type, id);
+          host.querySelectorAll('[data-rotation-toggle]').forEach(btn => {
+            if (btn.dataset.rotationType !== type) return;
+            const on = rotationContains(type, Number(btn.dataset.rotationId));
+            btn.classList.toggle('active', on);
+            btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+            btn.title = on ? tr('rotation.toggleRemove', '移出轮换') : tr('rotation.toggleAdd', '加入轮换');
+          });
+          if (state.page === 'bag' && state.bagTab === 'rotation') renderRotationHost();
+          toast(active ? tr('rotation.added', '已加入轮换') : tr('rotation.removed', '已移出轮换'));
+          onChanged?.(active);
+        } catch { }
+      };
+    });
+  }
 
   const state = {
     boot: null,
@@ -1529,7 +1584,9 @@
         // 只更新真正变化的设置；点击/宝箱倒计时等 auth 字段不会触发整页重建。
         if (prevSettingsSig !== bootSettingsSignature(data)) renderSettings();
       } else if (state.page === 'bag') {
-        if (state.bag && prevBagSig !== bootBagSignature(data)) {
+        if (state.bagTab === 'rotation') {
+          renderRotationHost();
+        } else if (state.bag && prevBagSig !== bootBagSignature(data)) {
           const host = document.getElementById('bagGroups');
           const scroll = host?.scrollTop || 0;
           renderBagList();
@@ -1671,10 +1728,10 @@
     return JSON.stringify([boot?.settings || {}, boot?.themePresets || [], boot?.themeRotation || {}]);
   }
   function bootBagSignature(boot) {
-    return JSON.stringify([boot?.appearance || {}, boot?.locks || [], boot?.auth?.cuid || '', boot?.settings?.serverRegion || '']);
+    return JSON.stringify([boot?.appearance || {}, boot?.rotation || {}, boot?.auth?.cuid || '', boot?.settings?.serverRegion || '']);
   }
   function bootSynthSignature(boot) {
-    return JSON.stringify([boot?.locks || [], boot?.settings?.synthCheckMode || '', boot?.settings?.anyItemSynthesisUnlocked || false, boot?.settings?.anyItemSynthesisEnabled || false, boot?.settings?.autoSynthUp || false]);
+    return JSON.stringify([boot?.settings?.synthCheckMode || '', boot?.settings?.autoSynthUp || false]);
   }
   /** auth 推送只做字段级刷新：昵称、UID、点击数、宝箱时间；不重建当前页面。 */
   function applyAuthFields(auth) {
@@ -2099,9 +2156,14 @@
     ['recent', () => tr('bag.tab.recent', '最近获得')],
     ['character_skin', () => tr('bag.tab.character', '角色')],
     ['accessory', () => tr('bag.tab.accessory', '配件')],
-    ['emote', () => tr('bag.tab.emote', '表情')]
+    ['emote', () => tr('bag.tab.emote', '表情')],
+    ['rotation', () => tr('bag.tab.rotation', '轮换')]
   ];
-  const BAG_TAB_COUNT = k => k === 'recent' ? (state.bagRecentIds || []).length : 0;
+  const BAG_TAB_COUNT = k => k === 'recent'
+    ? (state.bagRecentIds || []).length
+    : k === 'rotation'
+      ? rotationList('character_skin').length + rotationList('accessory').length
+      : 0;
 
   function assetMeta(item) {
     if (!item) return { role: '0', series: '' };
@@ -2308,9 +2370,12 @@
     const counts = { character_skin: 0, accessory: 0, emote: 0 };
     state.bag.forEach(x => { if (counts[x.type] != null) counts[x.type]++; });
     const tab = state.bagTab;
+    const isRotation = tab === 'rotation';
     const isChar = tab === 'character_skin';
     const showRole = tab === 'character_skin' || tab === 'emote';
     const equippedAccessoryId = Number(state.boot?.appearance?.accessoryAssetId || 0);
+    // 轮换列表可以使用未拥有的图鉴素材，因此额外加载完整目录用于名称/缩略图。
+    if (isRotation) await Promise.all(['character_skin', 'accessory'].map(t => ensureCatalog(t).catch(() => [])));
 
     const seriesOptions = [...new Set(state.bag.filter(x => x.type === 'character_skin' && x.series).map(x => x.series))].sort((a, b) => String(a).localeCompare(String(b), 'zh'));
     const roleMap = new Map();
@@ -2327,11 +2392,12 @@
     const roleOptions = [...roleMap.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'zh'));
 
     setPage(`
-      <div class="bag-layout">
+      <div class="bag-layout ${isRotation ? 'bag-layout-rotation' : ''}">
         <div class="bag-main">
           <div class="seg-tabs">
-            ${BAG_TABS.map(([k, label]) => `<button class="seg-tab ${tab === k ? 'active' : ''}" data-btab="${k}">${label()} ${k === 'recent' ? BAG_TAB_COUNT(k) : (counts[k] || 0)}</button>`).join('')}
+            ${BAG_TABS.map(([k, label]) => `<button class="seg-tab ${tab === k ? 'active' : ''}" data-btab="${k}">${label()} ${k === 'recent' || k === 'rotation' ? BAG_TAB_COUNT(k) : (counts[k] || 0)}</button>`).join('')}
           </div>
+          ${isRotation ? `<div class="rotation-page" id="rotationHost"></div>` : `
           <div class="filter-row">
             ${isChar ? `<select class="select" id="bagSeries"><option value="">${tr('bag.seriesPrefix', '系列：')}${tr('common.all', '全部')}</option>${seriesOptions.map(s => `<option value="${esc(s)}" ${state.bagSeries === s ? 'selected' : ''}>${tr('bag.seriesPrefix', '系列：')}${esc(s)}</option>`).join('')}</select>` : ''}
             ${showRole ? `<select class="select" id="bagRole"><option value="">${tr('bag.rolePrefix', '角色：')}${tr('common.all', '全部')}</option>${roleOptions.map(([id, label]) => `<option value="${id}" ${state.bagRole === id ? 'selected' : ''}>${tr('bag.rolePrefix', '角色：')}${esc(label)}</option>`).join('')}</select>` : ''}
@@ -2346,9 +2412,9 @@
             <button class="btn" id="bagSync">${tr('bag.sync', '同步角色/配件')}</button>
             ${tab === 'accessory' ? `<button class="btn ghost" id="bagRemoveAccessory" ${equippedAccessoryId ? '' : 'disabled'} title="${tr('bag.removeAccessoryTitle', '从本地和云端摘除当前头饰')}">${tr('bag.removeAccessory', '摘下头饰')}</button>` : ''}
           </div>
-          <div class="bag-groups" id="bagGroups"></div>
+          <div class="bag-groups" id="bagGroups"></div>`}
         </div>
-        <aside class="detail-panel" id="bagDetail"></aside>
+        ${isRotation ? '' : `<aside class="detail-panel" id="bagDetail"></aside>`}
       </div>`);
 
     document.querySelectorAll('[data-btab]').forEach(b => b.onclick = () => {
@@ -2358,6 +2424,10 @@
       state.bagHidden = new Set();
       renderBag();
     });
+    if (isRotation) {
+      renderRotationHost();
+      return;
+    }
     document.getElementById('bagSeries')?.addEventListener('change', e => { state.bagSeries = e.target.value; renderBagList(); });
     document.getElementById('bagRole')?.addEventListener('change', e => { state.bagRole = e.target.value; renderBagList(); });
     document.getElementById('bagRarity').addEventListener('change', e => { state.bagRarity = e.target.value; renderBagList(); });
@@ -2403,6 +2473,180 @@
     renderBagList();
     renderBagDetail();
     ensureBagPreviewAssets();
+  }
+
+  function rotationSectionHtml(type, title, ids) {
+    const currentId = type === 'character_skin'
+      ? Number(state.boot?.appearance?.characterAssetId || 0)
+      : Number(state.boot?.appearance?.accessoryAssetId || 0);
+    const rows = ids.length ? ids.map(raw => {
+      const id = Number(raw);
+      const name = catalogName(type, id);
+      const thumb = catalogThumb(type, id);
+      const current = currentId === id;
+      return `<div class="rotation-item ${current ? 'current' : ''}">
+        <div class="rotation-item-thumb">${thumb ? `<img src="${esc(thumb)}" alt="">` : `<span class="muted">?</span>`}</div>
+        <div class="rotation-item-meta">
+          <div class="rotation-item-name">${esc(name)}</div>
+          ${current ? `<div class="rotation-item-sub">${tr('rotation.current', '当前显示')}</div>` : ''}
+        </div>
+        <button type="button" class="rotation-remove" data-rotation-remove-type="${type}" data-rotation-remove-id="${id}" title="${tr('rotation.remove', '移除')}">×</button>
+      </div>`;
+    }).join('') : `<div class="rotation-empty">${type === 'character_skin'
+      ? tr('rotation.emptyCharacter', '还没有要轮换的角色，点击右上角「更换/选择」添加')
+      : tr('rotation.emptyAccessory', '还没有要轮换的配件，点击右上角「更换/选择」添加')}</div>`;
+    return `<section class="rotation-section">
+      <div class="rotation-section-head">
+        <div class="rotation-section-title">${title}<span class="rotation-count">${ids.length}</span></div>
+        <button type="button" class="btn ghost rotation-pick" data-rotation-pick="${type}">${tr('rotation.change', '更换/选择')}</button>
+      </div>
+      <div class="rotation-list">${rows}</div>
+    </section>`;
+  }
+
+  function renderRotationHost() {
+    const host = document.getElementById('rotationHost');
+    if (!host) return;
+    const scroll = host.scrollTop;
+    const r = rotationState();
+    const enabled = !!r.enabled;
+    const interval = Math.max(1, Math.min(1440, Math.round(Number(r.intervalMinutes) || 30)));
+    const characterIds = rotationList('character_skin');
+    const accessoryIds = rotationList('accessory');
+    const total = characterIds.length + accessoryIds.length;
+    const status = !enabled
+      ? tr('rotation.statusOff', '轮换已关闭')
+      : total === 0
+        ? tr('rotation.statusEmpty', '轮换已开启，但列表为空')
+        : tr('rotation.statusOn', '每 {n} 分钟轮换一次', { n: interval });
+    host.innerHTML = `
+      <div class="rotation-toolbar">
+        <label class="rotation-switch" title="${tr('rotation.enableTitle', '只在本地轮换角色与配件，不上传服务器')}">
+          <input type="checkbox" id="rotationEnabled" ${enabled ? 'checked' : ''}>
+          <span class="rotation-switch-track" aria-hidden="true"></span>
+          <span>${tr('rotation.enable', '启用轮换')}</span>
+        </label>
+        <label class="rotation-interval">
+          <span>${tr('rotation.interval', '轮换间隔')}</span>
+          <input class="input" id="rotationInterval" type="number" min="1" max="1440" step="1" value="${interval}" aria-label="${tr('rotation.interval', '轮换间隔')}">
+          <span>${tr('rotation.minutes', '分钟')}</span>
+        </label>
+        <span class="rotation-status muted">${status}</span>
+      </div>
+      <div class="rotation-hint">${tr('rotation.hint', '在「图鉴」中点击角色或配件右上角的轮换按钮即可加入列表；未拥有的物品也可以加入，只在本机生效，不会上传服务器。')}</div>
+      <div class="rotation-sections">
+        ${rotationSectionHtml('character_skin', tr('rotation.section.character', '角色'), characterIds)}
+        ${rotationSectionHtml('accessory', tr('rotation.section.accessory', '配件'), accessoryIds)}
+      </div>`;
+    host.scrollTop = scroll;
+    const rotationTab = document.querySelector('[data-btab="rotation"]');
+    if (rotationTab) rotationTab.textContent = `${tr('bag.tab.rotation', '轮换')} ${total}`;
+
+    document.getElementById('rotationEnabled').onchange = async e => {
+      const next = !!e.target.checked;
+      try {
+        state.boot = await tryCall('rotation.set', { enabled: next });
+        renderRotationHost();
+        toast(next ? tr('rotation.enabledToast', '轮换已开启') : tr('rotation.disabledToast', '轮换已关闭'));
+      } catch { }
+    };
+    document.getElementById('rotationInterval').onchange = async e => {
+      const value = Math.max(1, Math.min(1440, Math.round(Number(e.target.value) || 30)));
+      e.target.value = String(value);
+      try {
+        state.boot = await tryCall('rotation.set', { intervalMinutes: value });
+        renderRotationHost();
+        toast(tr('rotation.intervalSaved', '轮换间隔已保存'));
+      } catch { }
+    };
+    host.querySelectorAll('[data-rotation-pick]').forEach(el => {
+      el.onclick = () => openRotationPicker(el.dataset.rotationPick);
+    });
+    host.querySelectorAll('[data-rotation-remove-type]').forEach(el => {
+      el.onclick = async () => {
+        const type = el.dataset.rotationRemoveType;
+        const id = Number(el.dataset.rotationRemoveId);
+        try {
+          state.boot = await tryCall('rotation.remove', { type, id });
+          renderRotationHost();
+          toast(tr('rotation.removed', '已移出轮换'));
+        } catch { }
+      };
+    });
+  }
+
+  /** 复用预设页的 pe-grid/pe-card 选择器，只展示当前类型；未拥有也可添加。 */
+  async function openRotationPicker(type) {
+    if (type !== 'character_skin' && type !== 'accessory') return;
+    await Promise.all([
+      ensureCatalog(type).catch(() => []),
+      ensureAtlasOne(type).catch(() => []),
+      ensureBag().catch(() => []),
+    ]);
+    const itemMap = new Map();
+    (state.catalog[type] || []).forEach(x => {
+      const id = Number(x.id);
+      if (id > 0) itemMap.set(id, x);
+    });
+    (state.atlas[type] || []).forEach(x => {
+      const id = Number(x.mainId);
+      if (id > 0 && !itemMap.has(id)) itemMap.set(id, { id, name: x.name, series: x.series, thumb: x.thumb });
+    });
+    const items = [...itemMap.values()];
+    const isCharacter = type === 'character_skin';
+    let search = '';
+    const updateHost = () => {
+      if (state.page === 'bag' && state.bagTab === 'rotation') renderRotationHost();
+    };
+    modal(`<div class="preset-edit rotation-picker">
+      <div class="preset-title">${isCharacter
+        ? tr('rotation.pickerTitleCharacter', '选择轮换角色')
+        : tr('rotation.pickerTitleAccessory', '选择轮换配件')}</div>
+      <div class="muted" style="font-size:12px;line-height:1.6;margin:6px 0 8px">${tr('rotation.pickerHint', '点击物品加入或移出轮换；未拥有也可选择，只在本机生效。')}</div>
+      <div class="pe-filters">
+        <input class="input" id="rotationPickerSearch" placeholder="${tr('rotation.pickerSearch', '搜索名称 / 系列')}" style="flex:1;min-width:140px" autocomplete="off">
+        <span class="muted" id="rotationPickerCount"></span>
+      </div>
+      <div class="pe-grid" id="rotationPickerGrid"></div>
+      <div style="display:flex;gap:10px;margin-top:14px;justify-content:flex-end">
+        <button class="btn ghost" id="rotationPickerClose">${tr('common.close', '关闭')}</button>
+        <button class="btn" id="rotationPickerDone">${tr('rotation.done', '完成')}</button>
+      </div>
+    </div>`, h => {
+      const grid = h.querySelector('#rotationPickerGrid');
+      const count = h.querySelector('#rotationPickerCount');
+      const render = () => {
+        const q = search.trim().toLowerCase();
+        const list = items.filter(x => !q
+          || catalogName(type, x.id).toLowerCase().includes(q)
+          || String(x.series || '').toLowerCase().includes(q));
+        if (count) count.textContent = tr('rotation.count', '已选 {n} 件', { n: rotationList(type).length });
+        grid.innerHTML = list.length ? list.map(x => {
+          const id = Number(x.id);
+          const selected = rotationContains(type, id);
+          return `<button type="button" class="pe-card rotation-pick-card ${selected ? 'selected' : ''}" data-rotation-pick-id="${id}" title="${esc(catalogName(type, id))}">
+            ${x.thumb ? `<img src="${esc(x.thumb)}" alt="">` : '<span class="muted">□</span>'}
+            <span class="pe-name">${esc(catalogName(type, id))}</span>
+            <span class="pe-sub">${esc(x.series || '')}</span>
+            <span class="rotation-pick-mark">${selected ? '✓' : '+'}</span>
+          </button>`;
+        }).join('') : `<div class="empty-state" style="grid-column:1/-1">${tr('rotation.pickerEmpty', '没有匹配的物品')}</div>`;
+        grid.querySelectorAll('[data-rotation-pick-id]').forEach(el => {
+          el.onclick = async () => {
+            try {
+              state.boot = await tryCall('rotation.toggle', { type, id: Number(el.dataset.rotationPickId) });
+              render();
+              updateHost();
+            } catch { }
+          };
+        });
+      };
+      h.querySelector('#rotationPickerSearch').oninput = e => { search = e.target.value; render(); };
+      const close = () => { closeModal(); updateHost(); };
+      h.querySelector('#rotationPickerClose').onclick = close;
+      h.querySelector('#rotationPickerDone').onclick = close;
+      render();
+    });
   }
 
   function bagListItems() {
@@ -2484,20 +2728,14 @@
         renderBagDetail();
       };
       // 默认双击 = 装备并同步到云端；仅本地显示仍可通过详情按钮选择。
-      // 右上角锁定/收藏按钮的快速连点不能冒泡成卡片的双击装备。
+      // 收藏/轮换按钮的快速连点不能冒泡成卡片的双击装备。
       el.ondblclick = e => {
-        if (e.target.closest('[data-lock-type], .fav')) return;
+        if (e.target.closest('.fav, .rotation-toggle')) return;
         if (performance.now() < (state.bagActionUntil || 0)) return;
         equip(itemOrId(id), true);
       };
     });
-    host.querySelectorAll('[data-lock-type]').forEach(el => {
-      el.onclick = async e => {
-        e.stopPropagation();
-        state.bagActionUntil = performance.now() + 500;
-        await toggleAssetLock(el.dataset.lockType, Number(el.dataset.lockId));
-      };
-    });
+    bindRotationButtons(host);
     host.querySelectorAll('.fav').forEach(el => {
       el.onclick = async e => {
         e.stopPropagation();
@@ -2525,15 +2763,16 @@
   function cardHtml(item, selected, withFav) {
     const fav = state.favors.has(item.id) ? '★' : '☆';
     const isNew = (state.bagNewIds || []).includes(item.id);
-    return `<div class="card ${selected ? 'selected' : ''}" data-id="${item.id}">
+    const rotation = rotationButtonHtml(item.type, item.id);
+    return `<div class="card ${selected ? 'selected' : ''} ${rotation ? 'has-rotation' : ''}" data-id="${item.id}">
       ${isNew ? `<span class="new-dot" title="${tr('bag.newItem', '最近获得')}"></span>` : ''}
       ${withFav ? `<div class="fav" data-id="${item.id}" title="${tr('bag.favorites', '收藏')}">${fav}</div>` : ''}
-      ${lockButtonHtml(item.type, item.id)}
       ${img(item.thumb, 'thumb', item.name)}
       <div class="rarity-bar ${rarityClass(item.rarity)}"></div>
       <div class="name" title="${esc(item.name)}">${esc(item.name)}</div>
       <div class="sub">${esc(item.series || typeText(item.type) || '')}</div>
       ${item.quantity > 1 ? `<div class="qty">×${item.quantity}</div>` : ''}
+      ${rotation}
     </div>`;
   }
 
@@ -2910,13 +3149,14 @@
   }
 
   function atlasCard(x, owned) {
-    return `<div class="card ${owned ? '' : 'unowned'}" data-key="${x.type}:${x.mainId}" title="${esc(x.name)}">
-      ${owned ? lockButtonHtml(x.type, x.mainId) : ''}
+    const rotation = rotationButtonHtml(x.type, x.mainId);
+    return `<div class="card ${owned ? '' : 'unowned'} ${rotation ? 'has-rotation' : ''}" data-key="${x.type}:${x.mainId}" title="${esc(x.name)}">
       ${img(x.thumb, 'thumb', x.name)}
       <div class="rarity-bar ${rarityClass(x.rarity)}"></div>
       <div class="name">${esc(x.name)}</div>
       <div class="sub">${esc(x.series || '')}</div>
       <div class="atlas-badge ${owned ? 'owned' : 'locked'}">${owned ? tr('atlas.owned', '已拥有') : tr('atlas.unowned', '未拥有')}</div>
+      ${rotation}
     </div>`;
   }
 
@@ -2968,9 +3208,7 @@
         host.scrollTop = scroll;
       };
     }
-    host.querySelectorAll('[data-lock-type]').forEach(el => {
-      el.onclick = async e => { e.stopPropagation(); await toggleAssetLock(el.dataset.lockType, Number(el.dataset.lockId)); };
-    });
+    bindRotationButtons(host);
     host.querySelectorAll('.card').forEach(el => {
       el.onclick = async () => {
         const x = byKey.get(el.dataset.key);
@@ -7979,10 +8217,30 @@
       ];
     }
     if (PREVIEW === 'bag-emote') state.bagTab = 'emote';
+    if (PREVIEW === 'bag-rotation') state.bagTab = 'rotation';
+    if (PREVIEW === 'bag-rotation') {
+      state.bag = [
+        { id: 3060, type: 'character_skin', assetName: 'role_1407', name: '测试角色A', rarity: 'epic', quantity: 1, thumb: '', isCollect: false },
+        { id: 3062, type: 'character_skin', assetName: 'role_1408', name: '测试角色B', rarity: 'rare', quantity: 1, thumb: '', isCollect: false },
+        { id: 1604, type: 'accessory', assetName: 'acc_1604', name: '测试配件A', rarity: 'rare', quantity: 1, thumb: '', isCollect: false },
+        { id: 201, type: 'emote', assetName: 'emote_2000_happy', name: '收藏测试·普通', rarity: 'common', quantity: 1, thumb: '', isCollect: false },
+      ];
+      state.catalog.character_skin = [
+        { id: 3060, name: '测试角色A', series: '角色系列', rarity: 'epic', thumb: '', previewUrl: '' },
+        { id: 3061, name: '测试角色B', series: '角色系列', rarity: 'rare', thumb: '', previewUrl: '' },
+        { id: 3062, name: '测试角色C', series: '角色系列', rarity: 'rare', thumb: '', previewUrl: '' },
+        { id: 3063, name: '测试角色D', series: '角色系列', rarity: 'uncommon', thumb: '', previewUrl: '' },
+      ];
+      state.catalog.accessory = [
+        { id: 1604, name: '测试配件A', series: '配件系列', rarity: 'rare', thumb: '', previewUrl: '' },
+        { id: 1605, name: '测试配件B', series: '配件系列', rarity: 'uncommon', thumb: '', previewUrl: '' },
+        { id: 1606, name: '测试配件C', series: '配件系列', rarity: 'common', thumb: '', previewUrl: '' },
+      ];
+    }
     state.page = PREVIEW === 'room' ? 'room'
       : PREVIEW === 'synth' ? 'synth'
       : PREVIEW === 'preset' ? 'preset'
-      : PREVIEW === 'bag-emote' ? 'bag'
+      : PREVIEW === 'bag-emote' || PREVIEW === 'bag-rotation' ? 'bag'
       : 'settings';
     init();
     renderChrome();

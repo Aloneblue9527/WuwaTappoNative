@@ -26,6 +26,17 @@ public sealed class Settings
     public long[] EmoteAssetIds { get; set; } = new long[5];
     /// <summary>本地换装标记：为 true 时 user/me 不再覆盖角色/配件。</summary>
     public bool LocalAppearance { get; set; }
+    /// <summary>
+    /// 本地外观轮换：角色皮肤 / 配件的素材 id 列表。只在本机生效，
+    /// 不校验拥有状态、不进入房间快照、不上传服务器。
+    /// </summary>
+    public long[] RotationCharacterIds { get; set; } = Array.Empty<long>();
+    public long[] RotationAccessoryIds { get; set; } = Array.Empty<long>();
+    /// <summary>轮换间隔（分钟），范围 1–1440，默认 30。</summary>
+    public int RotationIntervalMinutes { get; set; } = AppearanceRotation.DefaultIntervalMinutes;
+    public bool RotationEnabled { get; set; }
+    /// <summary>上次轮换的 UTC 毫秒时间戳；用于面板关闭/重启后继续计时。</summary>
+    public long RotationLastAppliedUtcMs { get; set; }
     /// <summary>表情栏已被本地编辑过；为 true 时 user/me 不再覆盖槽位。</summary>
     public bool LocalEmoteSlots { get; set; }
     /// <summary>服务器最近一次确认过的角色/配件/表情；本地装扮可以任意，但上传云端时用这组安全值。</summary>
@@ -335,6 +346,9 @@ public static class ConfigStore
                     cfg.RemoteNameScale = Math.Clamp(cfg.RemoteNameScale, 0.5, 2.0);
                     cfg.AnimationFps = Settings.NormalizeAnimationFps(cfg.AnimationFps);
                     cfg.GameModeRules = GameModeRules.Normalize(cfg.GameModeRules);
+                    cfg.RotationCharacterIds = AppearanceRotation.NormalizeIds(cfg.RotationCharacterIds);
+                    cfg.RotationAccessoryIds = AppearanceRotation.NormalizeIds(cfg.RotationAccessoryIds);
+                    cfg.RotationIntervalMinutes = AppearanceRotation.NormalizeInterval(cfg.RotationIntervalMinutes);
                     if (cfg.AutoEmoteMode != "specific" && cfg.AutoEmoteMode != "library") cfg.AutoEmoteMode = "quickbar";
                     cfg.ServerRegion = NormalizeRegion(cfg.ServerRegion);
                     cfg.ScreenSwitchMode = cfg.ScreenSwitchMode switch
@@ -457,6 +471,17 @@ public static class ConfigStore
 
     public static void Save(Settings cfg)
     {
+        CompanionPets.Normalize(cfg);
+        if (cfg != null)
+        {
+            cfg.Locale = string.IsNullOrWhiteSpace(cfg.Locale)
+                ? Localization.SystemDefault()
+                : Localization.Normalize(cfg.Locale);
+            cfg.ChestNotifyRules = ChestNotificationRules.Normalize(cfg.ChestNotifyRules);
+            cfg.RotationCharacterIds = AppearanceRotation.NormalizeIds(cfg.RotationCharacterIds);
+            cfg.RotationAccessoryIds = AppearanceRotation.NormalizeIds(cfg.RotationAccessoryIds);
+            cfg.RotationIntervalMinutes = AppearanceRotation.NormalizeInterval(cfg.RotationIntervalMinutes);
+        }
         // 先写独立状态，再写 config；避免状态写入失败时 config 已经丢掉旧字段。
         StateStore.Save(cfg);
         try

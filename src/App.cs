@@ -27,6 +27,8 @@ public sealed class App : ApplicationContext
     public KeyboardWindow Keyboard { get; }
     /// <summary>主题预设与轮换状态；独立 JSON 持久化，轮换定时器跟随 App 生命周期。</summary>
     public ThemePresetManager ThemePresets { get; }
+    /// <summary>主桌宠外观轮换；配置写入 Settings，定时器由 App 持有。</summary>
+    public AppearanceRotationService Rotation { get; }
     public PanelWindow Panel { get; private set; }
     /// <summary>GitHub Pages 上发布的版本兼容状态；读取失败时为 null。</summary>
     public CompatibilityInfo Compatibility { get; private set; }
@@ -83,6 +85,7 @@ public sealed class App : ApplicationContext
         ConfigStore.Save(Cfg);
         ThemePresets = new ThemePresetManager(Cfg);
         ThemePresets.CleanupOrphans();
+        Rotation = new AppearanceRotationService(Cfg);
         Announcements = new AnnouncementService(Cfg);
         // 配置与注册表对齐：用户手动删了 Run 项、或换过安装目录，都在启动时修正。
         Cfg.LaunchAtLogin = AutoStart.Sync(Cfg.LaunchAtLogin, Cfg.RunAsAdmin);
@@ -102,6 +105,12 @@ public sealed class App : ApplicationContext
             // 预设应用/自动轮换走同一条 UI 线程链路，键盘三种模式与桌宠同时换色。
             try { Keyboard.ApplyTheme(Cfg); } catch { }
             try { Pet.BeginInvoke(new Action(() => Pet.ApplySettings())); } catch { }
+            try { Panel?.PushBoot(); } catch { }
+        };
+        // 外观轮换只改本地桌宠外观：刷新主宠预览和面板状态，不发任何房间/服务器消息。
+        Rotation.Applied += (_, __) =>
+        {
+            try { Pet.BeginInvoke(new Action(() => Pet.ReloadAppearance())); } catch { }
             try { Panel?.PushBoot(); } catch { }
         };
 
@@ -180,11 +189,12 @@ public sealed class App : ApplicationContext
         Keyboard.PadButtonDown += () => Pet.BeginInvoke(new Action(Pet.GamepadTap));
         Keyboard.PadButtonUp += () => Pet.BeginInvoke(new Action(Pet.GamepadRelease));
         Keyboard.PadButtonPressed += label => Pet.BeginInvoke(new Action(() => Pet.PushGamepadBubble(label)));
-        Pet.FormClosed += (s, e) => { ThemePresets.Dispose(); ExitThread(); };
+        Pet.FormClosed += (s, e) => { ThemePresets.Dispose(); Rotation.Dispose(); ExitThread(); };
 
         Pet.Show();
         Pet.ApplyCaptureMode();
         ThemePresets.Start();
+        Rotation.Start();
         if (!Cfg.AllowOverlap) Pet.ResolveOverlaps();
         ApplyKeyboardMode();
         Keyboard.ModeRequested += mode =>

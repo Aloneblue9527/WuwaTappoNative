@@ -58,14 +58,23 @@
       const previewImageKey = 'wuwa.preview.serverThemeImage.v1';
       const previewPresetsKey = 'wuwa.preview.themePresets.v1';
       const previewRotationKey = 'wuwa.preview.themeRotation.v1';
+      const previewAppearanceRotationKey = 'wuwa.preview.appearanceRotation.v1';
+      const previewCompanionsKey = 'wuwa.preview.companions.v1';
       const uploads = new Map();
       let uploadSeq = 0;
       let previewSettings = {};
       let previewPresets = [];
       let previewRotation = { enabled: false, intervalMinutes: 30, currentPresetId: '', lastAppliedMs: 0 };
+      let previewAppearanceRotation = { enabled: false, intervalMinutes: 30, characterIds: [], accessoryIds: [], lastAppliedUtcMs: 0 };
+      let previewCompanions = null;
       try { previewSettings = JSON.parse(localStorage.getItem(previewSettingsKey) || '{}') || {}; } catch { previewSettings = {}; }
       try { previewPresets = JSON.parse(localStorage.getItem(previewPresetsKey) || '[]') || []; } catch { previewPresets = []; }
       try { previewRotation = { ...previewRotation, ...(JSON.parse(localStorage.getItem(previewRotationKey) || '{}') || {}) }; } catch { }
+      try { previewAppearanceRotation = { ...previewAppearanceRotation, ...(JSON.parse(localStorage.getItem(previewAppearanceRotationKey) || '{}') || {}) }; } catch { }
+      try {
+        const storedCompanions = JSON.parse(localStorage.getItem(previewCompanionsKey) || 'null');
+        if (Array.isArray(storedCompanions)) previewCompanions = storedCompanions;
+      } catch { }
       const savePreviewSettings = () => {
         try { localStorage.setItem(previewSettingsKey, JSON.stringify(previewSettings)); } catch { }
       };
@@ -105,6 +114,13 @@
         } catch { }
         boot.themePresets = previewPresets;
         boot.themeRotation = previewRotation;
+        boot.rotation = {
+          ...previewAppearanceRotation,
+          characterIds: [...(previewAppearanceRotation.characterIds || [])],
+          accessoryIds: [...(previewAppearanceRotation.accessoryIds || [])],
+          currentCharacterId: Number(boot.appearance?.characterAssetId) || 0,
+          currentAccessoryId: Number(boot.appearance?.accessoryAssetId) || 0,
+        };
         return boot;
       };
       window.chrome = window.chrome || {};
@@ -292,8 +308,60 @@
             savePreviewRotation();
             reply({ rotation: previewRotation });
           }
-          else if (msg.cmd === 'locks.toggle') {
-            reply({ locked: false, items: [] });
+          else if (msg.cmd === 'rotation.get' || msg.cmd === 'rotation.set' || msg.cmd === 'rotation.toggle' || msg.cmd === 'rotation.remove') {
+            const data = msg.data || {};
+            if (msg.cmd === 'rotation.set') {
+              if ('enabled' in data) previewAppearanceRotation.enabled = !!data.enabled;
+              if ('intervalMinutes' in data) previewAppearanceRotation.intervalMinutes = Math.max(1, Math.min(1440, Number(data.intervalMinutes) || 30));
+              if (previewAppearanceRotation.enabled && !previewAppearanceRotation.lastAppliedUtcMs) previewAppearanceRotation.lastAppliedUtcMs = Date.now();
+              savePreviewAppearanceRotation();
+            } else if (msg.cmd === 'rotation.toggle' || msg.cmd === 'rotation.remove') {
+              const type = String(data.type || '');
+              const key = type === 'character_skin' ? 'characterIds' : type === 'accessory' ? 'accessoryIds' : '';
+              if (key) {
+                const list = Array.isArray(previewAppearanceRotation[key]) ? previewAppearanceRotation[key].map(Number) : [];
+                const id = Number(data.id);
+                const at = list.indexOf(id);
+                if (msg.cmd === 'rotation.remove' || at >= 0) {
+                  if (at >= 0) list.splice(at, 1);
+                } else if (id > 0) {
+                  list.push(id);
+                }
+                previewAppearanceRotation[key] = [...new Set(list.filter(x => x > 0))];
+                savePreviewAppearanceRotation();
+              }
+            }
+            reply(buildPreviewBoot());
+          }
+          else if (msg.cmd === 'companions.list') {
+            if (!previewCompanions) buildPreviewBoot();
+            reply(previewCompanions || []);
+          }
+          else if (msg.cmd === 'companions.save') {
+            if (!previewCompanions) buildPreviewBoot();
+            const data = msg.data || {};
+            const id = String(data.id || '');
+            let item = previewCompanions.find(x => x.id === id);
+            if (!item) {
+              item = { id: 'preview-companion-' + (previewCompanions.length + 1), syntheticId: -1000 - previewCompanions.length };
+              previewCompanions.push(item);
+            }
+            item.name = String(data.name || '伙伴').trim();
+            item.displayName = displayCompanionName(item.name);
+            item.characterAssetId = Number(data.characterAssetId) || 0;
+            item.accessoryAssetId = Number(data.accessoryAssetId) || 0;
+            item.clickIntervalSeconds = Math.max(0, Math.min(3600, Number(data.clickIntervalSeconds) || 0));
+            item.randomClick = !!data.randomClick;
+            item.showBar = data.showBar !== false;
+            savePreviewCompanions();
+            reply(previewCompanions);
+          }
+          else if (msg.cmd === 'companions.delete') {
+            if (!previewCompanions) buildPreviewBoot();
+            const id = String(msg.data?.id || '');
+            previewCompanions = previewCompanions.filter(x => x.id !== id);
+            savePreviewCompanions();
+            reply(previewCompanions);
           }
           else if (msg.cmd === 'synthesize') {
             reply({ asset_id: 101 });

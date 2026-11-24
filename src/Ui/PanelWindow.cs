@@ -625,6 +625,18 @@ public sealed class PanelWindow : Form
 
     string RecentChestScope => (_app.Cfg.ServerRegion == "global" ? "global" : "cn") + ":" + (_app.Auth.Cuid ?? "");
 
+    /// <summary>外观轮换状态；只包含本地配置，前端用来渲染列表、开关和按钮选中态。</summary>
+    object RotationPayload() => new
+    {
+        enabled = _app.Cfg.RotationEnabled,
+        intervalMinutes = _app.Cfg.RotationIntervalMinutes,
+        characterIds = _app.Cfg.RotationCharacterIds ?? Array.Empty<long>(),
+        accessoryIds = _app.Cfg.RotationAccessoryIds ?? Array.Empty<long>(),
+        lastAppliedUtcMs = _app.Cfg.RotationLastAppliedUtcMs,
+        currentCharacterId = _app.Cfg.CharacterAssetId,
+        currentAccessoryId = _app.Cfg.AccessoryAssetId,
+    };
+
     object BootPayload()
     {
         var barTheme = PetWindow.ResolveThemeBarColors(_app.Cfg);
@@ -766,6 +778,7 @@ public sealed class PanelWindow : Form
             cloudAccessoryAssetId = _app.Cfg.CloudAccessoryAssetId,
             cloudEmoteAssetIds = _app.Cfg.CloudEmoteAssetIds,
         },
+        rotation = RotationPayload(),
         catalog = new
         {
             assetsHost = _app.Catalog.AssetsHost,
@@ -773,10 +786,8 @@ public sealed class PanelWindow : Form
             accessories = _app.Catalog.Count("accessory"),
             emotes = _app.Catalog.Count("emote"),
         },
-        locks = AssetLockStore.All(),
-        // Boot 与 save/rename 共用同一个映射，避免再次出现 PascalCase / camelCase 分叉。
-        themePresets = MapThemePresets(_app.ThemePresets.Presets),
-        themeRotation = MapThemeRotation(_app.ThemePresets.Rotation),
+        companions = MapCompanions(_app.Cfg.Companions),        // Boot 与 save/rename 共用同一个映射，避免再次出现 PascalCase / camelCase 分叉。
+        themePresets = MapThemePresets(_app.ThemePresets.Presets),        themeRotation = MapThemeRotation(_app.ThemePresets.Rotation),
         panelMaximized = _maximized,
         version = typeof(PanelWindow).Assembly.GetName().Version?.ToString(3) ?? "0.0.1",
         displayVersion = CurrentDisplayVersion(),
@@ -1204,6 +1215,44 @@ public sealed class PanelWindow : Form
                 }
                 else throw new ApiException(-1, "未知类型");
                 Log.Write($"应用本地外观 type={type} id={id}（不上传）");
+                return BootPayload();
+            }
+
+            case "rotation.get":
+                return RotationPayload();
+
+            case "rotation.set":
+            {
+                bool enabled = data.ContainsKey("enabled")
+                    ? ApiClient.ReadBool(data["enabled"])
+                    : cfg.RotationEnabled;
+                int interval = data.ContainsKey("intervalMinutes")
+                    ? (int)ApiClient.ReadLong(data["intervalMinutes"])
+                    : cfg.RotationIntervalMinutes;
+                _app.Rotation.SetRotation(enabled, interval);
+                Log.Write($"外观轮换设置 enabled={cfg.RotationEnabled} interval={cfg.RotationIntervalMinutes}");
+                return BootPayload();
+            }
+
+            case "rotation.toggle":
+            {
+                string type = ApiClient.ReadString(data["type"]);
+                long id = ApiClient.ReadLong(data["id"]);
+                if (!AppearanceRotationService.IsValidType(type) || id <= 0)
+                    throw new ApiException(-1, "未知的轮换类型或素材无效");
+                // Toggle 的返回值表示“加入(true)/移出(false)”，移出不是错误。
+                _app.Rotation.Toggle(type, id);
+                Log.Write($"外观轮换切换 type={type} id={id}");
+                return BootPayload();
+            }
+
+            case "rotation.remove":
+            {
+                string type = ApiClient.ReadString(data["type"]);
+                long id = ApiClient.ReadLong(data["id"]);
+                if (!_app.Rotation.Remove(type, id))
+                    throw new ApiException(-1, "该物品不在轮换列表中");
+                Log.Write($"外观轮换移除 type={type} id={id}");
                 return BootPayload();
             }
 
