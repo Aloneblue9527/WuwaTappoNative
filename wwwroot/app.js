@@ -3930,7 +3930,8 @@
     return Number.isFinite(n) ? Math.max(-180, Math.min(180, Math.round(n))) : 0;
   }
 
-  function presetAccessoryOffset(accessoryId, includeLocal = true) {
+  function presetAccessoryOffset(characterId, accessoryId, includeLocal = true) {
+    const char = Number(characterId) || 0;
     const id = Number(accessoryId) || 0;
     const item = (state.catalog.accessory || []).find(v => Number(v.id) === id);
     let x = Number(item?.offsetX || 0);
@@ -3940,14 +3941,17 @@
     // 预设预览按“应用后实际看到的样子”叠加该头饰自己的本地微调。
     // 云端形态预览不应包含只在本机生效的微调，因此可以传 includeLocal=false。
     if (includeLocal) {
-      const stored = state.boot?.appearance?.accessoryOffsets?.[String(id)];
+      const all = state.boot?.appearance?.accessoryOffsets || {};
+      const keyed = char > 0 ? all[`${char}:${id}`] : null;
+      const stored = Array.isArray(keyed) ? keyed : all[String(id)];
       if (Array.isArray(stored) && stored.length >= 2) {
         x += Number(stored[0] || 0);
         y += Number(stored[1] || 0);
         // 旧配置只有 [x,y]，缺失的缩放/旋转按默认值处理。
         if (stored.length >= 3) scalePercent = normalizeAccessoryScale(stored[2]);
         if (stored.length >= 4) rotationDegrees = normalizeAccessoryRotation(stored[3]);
-      } else if (id > 0 && id === Number(state.boot?.appearance?.accessoryAssetId || 0)) {
+      } else if (id > 0 && id === Number(state.boot?.appearance?.accessoryAssetId || 0)
+          && char === Number(state.boot?.appearance?.characterAssetId || 0)) {
         x += Number(state.boot?.appearance?.accessoryOffsetX || 0);
         y += Number(state.boot?.appearance?.accessoryOffsetY || 0);
         scalePercent = normalizeAccessoryScale(state.boot?.appearance?.accessoryScalePercent);
@@ -3960,7 +3964,7 @@
   function presetStageHtml(characterId, accessoryId, includeLocalOffset = true) {
     const charSrc = catalogPreview('character_skin', characterId);
     const accSrc = catalogPreview('accessory', accessoryId);
-    const offset = presetAccessoryOffset(accessoryId, includeLocalOffset);
+    const offset = presetAccessoryOffset(characterId, accessoryId, includeLocalOffset);
     // 桌宠里角色和头饰共用 200×200 的猫区域；预览统一缩放为 140×140，偏移按同比例缩放。
     const scale = 140 / 200;
     const accTransform = offset.scalePercent !== 100 || offset.rotationDegrees !== 0

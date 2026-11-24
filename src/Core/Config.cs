@@ -394,6 +394,21 @@ public static class ConfigStore
                         cfg.SdkDeviceNum = Guid.NewGuid().ToString("N");
                     cfg.LocalPresets ??= new List<LocalPreset>();
                     cfg.AccessoryOffsets ??= new Dictionary<string, int[]>();
+                    // 头饰偏移升级为“角色:头饰”独立 key；旧版只用头饰 id，
+                    // 迁移到当前角色，避免开启轮换后新角色沿用上一个角色的偏移。
+                    if (cfg.CharacterAssetId > 0)
+                    {
+                        foreach (string key in new List<string>(cfg.AccessoryOffsets.Keys))
+                        {
+                            if (key.Contains(':') || !long.TryParse(key, out _)) continue;
+                            string migrated = cfg.CharacterAssetId + ":" + key;
+                            if (!cfg.AccessoryOffsets.ContainsKey(migrated))
+                                cfg.AccessoryOffsets[migrated] = cfg.AccessoryOffsets[key];
+                            cfg.AccessoryOffsets.Remove(key);
+                        }
+                    }
+                    CompanionPets.Normalize(cfg);
+                    cfg.ChestNotifyRules = ChestNotificationRules.Normalize(cfg.ChestNotifyRules);
                     foreach (var preset in cfg.LocalPresets)
                     {
                         if (preset == null) continue;

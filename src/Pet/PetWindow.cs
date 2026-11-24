@@ -517,13 +517,28 @@ public sealed class PetWindow : Form
 
     /// <summary>取当前头饰的本地微调参数；旧 [x,y] 数据自动补默认缩放/旋转。</summary>
     public AccessoryTransform AccessoryTransformFor(long accessoryId)
+        => AccessoryTransformFor(_cfg.CharacterAssetId, accessoryId);
+
+    /// <summary>
+    /// 取指定角色+头饰的本地微调。头饰位置按角色独立保存；旧版仅按头饰保存的
+    /// key 仍作为回退兼容，迁移后新角色不会继承其他角色的偏移。
+    /// </summary>
+    public AccessoryTransform AccessoryTransformFor(long characterId, long accessoryId)
     {
         if (accessoryId <= 0) return AccessoryTransform.Default;
         var offsets = _cfg.AccessoryOffsets;
-        return offsets != null && offsets.TryGetValue(accessoryId.ToString(), out var arr) && arr != null
-            ? AccessoryTransform.FromArray(arr)
+        if (offsets == null) return AccessoryTransform.Default;
+        if (characterId > 0 &&
+            offsets.TryGetValue(AccessoryKey(characterId, accessoryId), out var perCharacter) &&
+            perCharacter != null)
+            return AccessoryTransform.FromArray(perCharacter);
+        return offsets.TryGetValue(accessoryId.ToString(), out var legacy) && legacy != null
+            ? AccessoryTransform.FromArray(legacy)
             : AccessoryTransform.Default;
     }
+
+    static string AccessoryKey(long characterId, long accessoryId)
+        => characterId > 0 ? characterId + ":" + accessoryId : accessoryId.ToString();
 
     /// <summary>取当前头饰的用户微调偏移（逻辑像素）。</summary>
     public (int x, int y) AccessoryOffsetFor(long accessoryId)
@@ -538,11 +553,14 @@ public sealed class PetWindow : Form
 
     public AccessoryTransform SetAccessoryTransform(AccessoryTransform transform)
     {
+        long characterId = _cfg.CharacterAssetId;
         long id = _cfg.AccessoryAssetId;
         if (id <= 0) return AccessoryTransform.Default;
         var next = transform.Clamped();
         _cfg.AccessoryOffsets ??= new Dictionary<string, int[]>();
-        _cfg.AccessoryOffsets[id.ToString()] = next.ToArray();
+        _cfg.AccessoryOffsets[AccessoryKey(characterId, id)] = next.ToArray();
+        // 迁移/规范化后只保留角色级 key，避免其他角色继续共用旧偏移。
+        if (characterId > 0) _cfg.AccessoryOffsets.Remove(id.ToString());
         ConfigStore.Save(_cfg);
         Compose();
         return next;
