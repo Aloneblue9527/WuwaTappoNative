@@ -4006,8 +4006,11 @@
         return `<div class="preset-emote ${i === selectedSlot ? 'selected' : ''}" data-pe-slot="${i}" title="${tr('bag.slotLabel', '槽位 {n}', { n: i + 1 })}">${thumb ? `<img src="${escAttr(thumb)}" alt="">` : `<span class="muted">${tr('common.empty', '空')}</span>`}<span>${i + 1}</span></div>`;
       }).join('');
       const renderPreview = () => {
+        const previewName = (h.querySelector('#peName')?.value || '').trim()
+          || companionCharacterName(temp.characterAssetId)
+          || tr('companion.defaultName', '伙伴');
         h.querySelector('#pePreview').innerHTML = companionMode
-          ? `${presetStageHtml(temp.characterAssetId, temp.accessoryAssetId, false)}<div class="companion-display-hint">${tr('companion.displayPreview', '桌面显示名：{name}', { name: esc(companionDisplayName(h.querySelector('#peName')?.value || p.name || '') || tr('companion.defaultName', '伙伴')) })}</div>`
+          ? `${presetStageHtml(temp.characterAssetId, temp.accessoryAssetId, false)}<div class="companion-display-hint">${tr('companion.displayPreview', '桌面显示名：{name}', { name: esc(companionDisplayName(previewName)) })}</div>`
           : `${presetStageHtml(temp.characterAssetId, temp.accessoryAssetId)}<div class="preset-emote-preview">${emoteSlotsHtml()}</div>`;
         h.querySelector('#peSlotHint').textContent = tabsEmote() ? (tab === 'emote' ? tr('preset.editSlot', '正在编辑槽位 {n}', { n: selectedSlot + 1 }) : tr('preset.clickEmote', '点击下方表情可放入当前槽位')) : '';
         h.querySelectorAll('[data-pe-slot]').forEach(el => {
@@ -4147,9 +4150,10 @@
         const emoteAssetIds = temp.emoteAssetIds.slice(0, 5);
         try {
           if (companionMode) {
+            const typedName = h.querySelector('#peName')?.value.trim() || '';
             const next = await tryCall('companions.save', {
               id: p.id || '',
-              name: h.querySelector('#peName')?.value.trim() || tr('companion.defaultName', '伙伴'),
+              name: typedName || companionCharacterName(temp.characterAssetId) || tr('companion.defaultName', '伙伴'),
               characterAssetId: temp.characterAssetId,
               accessoryAssetId: temp.accessoryAssetId,
               clickIntervalSeconds: Math.max(0, Math.min(3600, Number(h.querySelector('#peClickSeconds')?.value) || 0)),
@@ -4305,11 +4309,151 @@
     return full;
   }
 
+  /** 图鉴角色名去掉皮肤系列后缀；拿不到有效名称时返回空串，交给后端兜底。 */
+  function companionCharacterName(characterId) {
+    const display = companionDisplayName(catalogName('character_skin', characterId));
+    return display && display !== '无' && !/^#?\d+$/.test(display) ? display : '';
+  }
+
   async function ensureCompanions(force = false) {
     if (Array.isArray(state.companions) && state.companions.length && !force) return state.companions;
     const data = await tryCall('companions.list');
     state.companions = Array.isArray(data) ? data : [];
     return state.companions;
+  }
+
+  const COMPANION_BATCH_MAX = 50;
+
+  /** 从给定角色/配件池随机组合，一次命令批量创建；名称使用角色名（去掉皮肤系列后缀）。 */
+  async function addRandomCompanions(count, characters, accessories, clickMin, clickMax, randomClick) {
+    if (!characters.length) throw new Error(tr('companion.batchNoCharacters', '图鉴里没有可用角色'));
+    const minSeconds = Math.max(0, Math.min(3600, Math.floor(Number(clickMin) || 0)));
+    const maxSeconds = Math.max(minSeconds, Math.min(3600, Math.floor(Number(clickMax) || 0)));
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const character = characters[Math.floor(Math.random() * characters.length)];
+      const accessory = accessories.length ? accessories[Math.floor(Math.random() * accessories.length)] : null;
+      const clickSeconds = maxSeconds > 0
+        ? minSeconds + Math.floor(Math.random() * (maxSeconds - minSeconds + 1))
+        : 0;
+      items.push({
+        name: companionCharacterName(Number(character.id)),
+        characterAssetId: Number(character.id),
+        accessoryAssetId: accessory ? Number(accessory.id) : 0,
+        clickIntervalSeconds: clickSeconds,
+        randomClick: clickSeconds > 0 && !!randomClick,
+        showBar: true,
+      });
+    }
+    const next = await tryCall('companions.bulkSave', { items });
+    state.companions = Array.isArray(next) ? next : [];
+    return items.length;
+  }
+
+  /** 批量添加工具：先决定数量与角色/配件范围，再生成随机伙伴。 */
+  async function openBatchAddDialog() {
+    await ensureBag().catch(() => []);
+    const allCharacters = (state.catalog.character_skin || []).filter(x => Number(x.id) > 0);
+    const allAccessories = (state.catalog.accessory || []).filter(x => Number(x.id) > 0);
+    const ownedIds = new Set((state.bag || []).map(x => Number(x.id)));
+    const poolOf = (items, scope) => scope === 'none'
+      ? []
+      : scope === 'owned'
+        ? items.filter(x => ownedIds.has(Number(x.id)))
+        : items;
+    modal(`<div class="preset-edit batch-add-dialog">
+      <div class="preset-title">${tr('companion.batchToolTitle', '随机批量添加伙伴')}</div>
+      <div class="muted batch-add-hint">${tr('companion.batchToolHint', '选择本次批量生成的数量和范围；只保存在本机，不会上传服务器。')}</div>
+      <label class="setting-title">${tr('companion.batchCount', '数量')}</label>
+      <input class="input" id="batchAddCount" type="number" min="1" max="${COMPANION_BATCH_MAX}" step="1" value="5" inputmode="numeric" style="width:100px">
+      <label class="setting-title">${tr('companion.batchCharacterScope', '角色范围')}</label>
+      <select class="select" id="batchCharacterScope">
+        <option value="all">${tr('companion.scopeAll', '全部图鉴')}</option>
+        <option value="owned">${tr('companion.scopeOwned', '仅已拥有')}</option>
+      </select>
+      <label class="setting-title">${tr('companion.batchAccessoryScope', '配件范围')}</label>
+      <select class="select" id="batchAccessoryScope">
+        <option value="all">${tr('companion.scopeAll', '全部图鉴')}</option>
+        <option value="owned">${tr('companion.scopeOwned', '仅已拥有')}</option>
+        <option value="none">${tr('companion.scopeNone', '不使用配件')}</option>
+      </select>
+      <label class="setting-title">${tr('companion.batchClickRange', '点击频率范围')}</label>
+      <div class="batch-add-range">
+        <input class="input" id="batchClickMin" type="number" min="0" max="3600" step="1" value="0" inputmode="numeric">
+        <span>–</span>
+        <input class="input" id="batchClickMax" type="number" min="0" max="3600" step="1" value="0" inputmode="numeric">
+        <span class="muted">${tr('companion.batchClickHint', '秒/次；0–0 表示不自动点击')}</span>
+      </div>
+      <label class="companion-check"><input type="checkbox" id="batchRandomClick"> ${tr('companion.batchRandomClick', '每次点击再随机浮动')}</label>
+      <div class="batch-add-summary" id="batchAddSummary"></div>
+      <div style="display:flex;gap:10px;margin-top:14px;justify-content:flex-end">
+        <button class="btn ghost" id="batchAddCancel">${tr('common.cancel', '取消')}</button>
+        <button class="btn" id="batchAddConfirm">${tr('companion.batchAdd', '批量添加')}</button>
+      </div>
+    </div>`, h => {
+      const countInput = h.querySelector('#batchAddCount');
+      const characterScope = h.querySelector('#batchCharacterScope');
+      const accessoryScope = h.querySelector('#batchAccessoryScope');
+      const clickMinInput = h.querySelector('#batchClickMin');
+      const clickMaxInput = h.querySelector('#batchClickMax');
+      const randomClickBox = h.querySelector('#batchRandomClick');
+      const summary = h.querySelector('#batchAddSummary');
+      const confirm = h.querySelector('#batchAddConfirm');
+      const currentPools = () => ({
+        characters: poolOf(allCharacters, characterScope.value),
+        accessories: poolOf(allAccessories, accessoryScope.value),
+      });
+      const currentCount = () => Math.max(1, Math.min(COMPANION_BATCH_MAX, Math.floor(Number(countInput.value)) || 1));
+      const currentClickRange = () => {
+        const a = Math.max(0, Math.min(3600, Math.floor(Number(clickMinInput.value) || 0)));
+        const b = Math.max(0, Math.min(3600, Math.floor(Number(clickMaxInput.value) || 0)));
+        return { min: Math.min(a, b), max: Math.max(a, b) };
+      };
+      const update = () => {
+        const pools = currentPools();
+        const noOwnedAccessory = accessoryScope.value === 'owned' && !pools.accessories.length;
+        const click = currentClickRange();
+        const clickText = click.max <= 0
+          ? tr('companion.batchClickOff', '不自动点击')
+          : tr('companion.batchClickSummary', '点击频率 {min}–{max} 秒', { min: click.min, max: click.max });
+        summary.textContent = !pools.characters.length
+          ? tr('companion.batchNoCharacters', '图鉴里没有可用角色')
+          : noOwnedAccessory
+            ? tr('companion.batchNoAccessories', '没有已拥有的配件')
+            : tr('companion.batchSummary', '将随机添加 {count} 个伙伴（角色 {chars} 种，配件 {accessories} 种）', {
+              count: currentCount(),
+              chars: pools.characters.length,
+              accessories: pools.accessories.length,
+            }) + ' · ' + clickText;
+        confirm.disabled = !pools.characters.length || noOwnedAccessory;
+      };
+      countInput.oninput = update;
+      clickMinInput.oninput = update;
+      clickMaxInput.oninput = update;
+      characterScope.onchange = update;
+      accessoryScope.onchange = update;
+      h.querySelector('#batchAddCancel').onclick = closeModal;
+      confirm.onclick = async () => {
+        const count = currentCount();
+        countInput.value = String(count);
+        const pools = currentPools();
+        if (!pools.characters.length) return toast(tr('companion.batchNoCharacters', '图鉴里没有可用角色'), 'err');
+        if (accessoryScope.value === 'owned' && !pools.accessories.length)
+          return toast(tr('companion.batchNoAccessories', '没有已拥有的配件'), 'err');
+        const click = currentClickRange();
+        confirm.disabled = true;
+        try {
+          const added = await addRandomCompanions(count, pools.characters, pools.accessories, click.min, click.max, randomClickBox.checked);
+          closeModal();
+          renderCompanion();
+          toast(tr('companion.batchAdded', '已随机添加 {count} 个伙伴', { count: added }));
+        } catch (err) {
+          confirm.disabled = false;
+          toast(err?.message || tr('companion.batchAddFailed', '批量添加失败'), 'err');
+        }
+      };
+      update();
+    });
   }
 
   function companionCardHtml(p, index) {
@@ -4323,7 +4467,12 @@
     return `<div class="companion-card" data-companion-index="${index}">
       <div class="companion-preview">${presetStageHtml(charId, accId, false, 84)}</div>
       <div class="companion-info">
-        <div class="companion-name" title="${esc(display || name)}">${esc(display || name)}</div>
+        <div class="companion-title-row">
+          <label class="companion-select" title="${tr('companion.select', '选择伙伴')}">
+            <input type="checkbox" data-companion-select="${index}">
+          </label>
+          <div class="companion-name" title="${esc(display || name)}">${esc(display || name)}</div>
+        </div>
         <div class="detail-row"><span>${tr('companion.character', '角色')}</span><span title="${esc(charName)}">${esc(charName)}</span></div>
         <div class="detail-row"><span>${tr('companion.accessory', '配件')}</span><span title="${esc(accName)}">${esc(accName)}</span></div>
         <div class="detail-row"><span>${tr('companion.clickFrequency', '点击频率')}</span><span>${seconds > 0 ? tr('companion.everySeconds', '每 {n} 秒', { n: seconds }) : tr('companion.clickOff', '不自动点击')}</span></div>
@@ -4355,16 +4504,85 @@
     const list = state.companions || [];
     setPage(`
       <div class="companion-page">
-        <div class="pill-row" style="margin-bottom:12px;flex-wrap:wrap">
-          <span class="muted" style="font-size:13px">${tr('companion.intro', '仅保存在本机的装饰伙伴：可任意选择角色和配件，不会上传服务器，也不影响联机房间、成员或点击统计。')}</span>
-          <span class="spacer"></span>
-          <button class="btn" id="companionAdd">${tr('companion.add', '添加伙伴')}</button>
+        <div class="companion-page-head">
+          <span class="muted companion-intro">${tr('companion.intro', '仅保存在本机的装饰伙伴：可任意选择角色和配件，不会上传服务器，也不影响联机房间、成员或点击统计。')}</span>
+          <div class="companion-toolbar-actions">
+            <button class="btn ghost" id="companionBatchAdd">${tr('companion.batchAdd', '批量添加')}</button>
+            <button class="btn danger" id="companionBatchDelete" ${list.length ? '' : 'disabled'}>${tr('companion.batchDelete', '批量删除')}</button>
+            <label class="companion-select-all" id="companionSelectAllWrap" style="display:none">
+              <input type="checkbox" id="companionSelectAll"> ${tr('companion.selectAll', '全选')}
+            </label>
+            <button class="btn danger" id="companionDeleteSelected" style="display:none" disabled>${tr('companion.deleteSelected', '删除选中')}</button>
+            <button class="btn" id="companionAdd">${tr('companion.add', '添加伙伴')}</button>
+          </div>
         </div>
         <div class="companion-grid">
           ${list.length ? list.map((p, i) => companionCardHtml(p, i)).join('') : `<div class="empty-state">${tr('companion.empty', '还没有自定义伙伴，点击「添加伙伴」创建')}</div>`}
         </div>
       </div>`);
     document.getElementById('companionAdd').onclick = () => openCompanionEditor(null);
+    document.getElementById('companionBatchAdd').onclick = () => openBatchAddDialog();
+
+    const page = document.querySelector('.companion-page');
+    const selectToggle = document.getElementById('companionBatchDelete');
+    const deleteSelectedBtn = document.getElementById('companionDeleteSelected');
+    const selectAllWrap = document.getElementById('companionSelectAllWrap');
+    const selectAllBox = document.getElementById('companionSelectAll');
+    const selectedIds = new Set();
+    let selectMode = false;
+
+    const updateSelection = () => {
+      deleteSelectedBtn.disabled = selectedIds.size === 0;
+      deleteSelectedBtn.textContent = tr('companion.deleteSelected', '删除选中') + (selectedIds.size ? ` (${selectedIds.size})` : '');
+      const boxes = [...document.querySelectorAll('[data-companion-select]')];
+      selectAllBox.checked = boxes.length > 0 && boxes.every(x => x.checked);
+      selectAllBox.indeterminate = selectedIds.size > 0 && !selectAllBox.checked;
+    };
+    const setSelectMode = on => {
+      selectMode = on;
+      page.classList.toggle('select-mode', on);
+      selectToggle.textContent = on ? tr('companion.exitSelect', '退出多选') : tr('companion.batchDelete', '批量删除');
+      deleteSelectedBtn.style.display = on ? '' : 'none';
+      selectAllWrap.style.display = on ? 'inline-flex' : 'none';
+      if (!on) {
+        selectedIds.clear();
+        document.querySelectorAll('[data-companion-select]').forEach(x => { x.checked = false; });
+      }
+      updateSelection();
+    };
+    selectToggle.onclick = () => { if (list.length) setSelectMode(!selectMode); };
+    document.querySelectorAll('[data-companion-select]').forEach(el => el.onchange = () => {
+      const p = list[Number(el.dataset.companionSelect)];
+      if (!p?.id) return;
+      if (el.checked) selectedIds.add(p.id); else selectedIds.delete(p.id);
+      updateSelection();
+    });
+    selectAllBox.onchange = () => {
+      document.querySelectorAll('[data-companion-select]').forEach(x => { x.checked = selectAllBox.checked; });
+      selectedIds.clear();
+      if (selectAllBox.checked) list.forEach(p => { if (p.id) selectedIds.add(p.id); });
+      updateSelection();
+    };
+    deleteSelectedBtn.onclick = () => {
+      const ids = [...selectedIds];
+      if (!ids.length) return;
+      confirmRoomAction(
+        tr('companion.batchDeleteTitle', '删除选中伙伴'),
+        tr('companion.batchDeleteBody', '确定删除选中的 {count} 个自定义伙伴吗？位置记录也会一起清除。', { count: ids.length }),
+        tr('common.delete', '删除'),
+        async () => {
+          try {
+            const next = await tryCall('companions.bulkDelete', { ids });
+            state.companions = Array.isArray(next) ? next : [];
+            setSelectMode(false);
+            renderCompanion();
+            toast(tr('companion.batchDeleted', '已删除 {count} 个自定义伙伴', { count: ids.length }));
+          } catch (err) {
+            toast(err?.message || tr('companion.batchDeleteFailed', '批量删除失败'), 'err');
+          }
+        });
+    };
+    updateSelection();
     document.querySelectorAll('[data-companion-visibility]').forEach(b => b.onclick = async () => {
       const p = list[Number(b.dataset.companionVisibility)];
       if (!p) return;

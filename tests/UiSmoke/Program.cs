@@ -952,7 +952,102 @@ internal static class Program
                     string deletedUi = await core.ExecuteScriptAsync("String(document.querySelectorAll('.companion-card').length)");
                     if (JsonSerializer.Deserialize<string>(deletedUi) != "1")
                         throw new InvalidOperationException("Deleting a companion did not remove the card.");
-                    Console.WriteLine("PASS: WebView2 custom companion page is ordered between multiplayer/settings and supports add/delete with name truncation.");
+
+                    // 批量随机添加工具：数量 + 角色/配件范围；名称取图鉴角色名（去掉皮肤系列后缀）。
+                    await core.ExecuteScriptAsync("document.getElementById('companionBatchAdd')?.click()");
+                    await Task.Delay(400);
+                    string batchToolUi = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        hasCount: !!document.getElementById('batchAddCount'),
+                        hasCharacterScope: !!document.getElementById('batchCharacterScope'),
+                        hasAccessoryScope: !!document.getElementById('batchAccessoryScope'),
+                        hasClickMin: !!document.getElementById('batchClickMin'),
+                        hasClickMax: !!document.getElementById('batchClickMax'),
+                        hasRandomClick: !!document.getElementById('batchRandomClick'),
+                        hasSummary: !!document.getElementById('batchAddSummary'),
+                        confirmEnabled: !!document.getElementById('batchAddConfirm') && !document.getElementById('batchAddConfirm').disabled
+                      }))()");
+                    var batchTool = JsonNode.Parse(JsonSerializer.Deserialize<string>(batchToolUi)!)!.AsObject();
+                    if (!batchTool["hasCount"]!.GetValue<bool>() || !batchTool["hasCharacterScope"]!.GetValue<bool>()
+                        || !batchTool["hasAccessoryScope"]!.GetValue<bool>() || !batchTool["hasClickMin"]!.GetValue<bool>()
+                        || !batchTool["hasClickMax"]!.GetValue<bool>() || !batchTool["hasRandomClick"]!.GetValue<bool>()
+                        || !batchTool["hasSummary"]!.GetValue<bool>()
+                        || !batchTool["confirmEnabled"]!.GetValue<bool>())
+                        throw new InvalidOperationException("Random batch tool is missing count/range/click controls: " + batchToolUi);
+                    await core.ExecuteScriptAsync(@"
+                      (() => {
+                        document.getElementById('batchAddCount').value = '2';
+                        document.getElementById('batchClickMin').value = '7';
+                        document.getElementById('batchClickMax').value = '7';
+                        document.getElementById('batchAddConfirm').click();
+                      })()");
+                    await Task.Delay(900);
+                    string batchUi = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        count: document.querySelectorAll('.companion-card').length,
+                        names: [...document.querySelectorAll('.companion-name')].map(x => x.textContent.trim()),
+                        clicks: [...document.querySelectorAll('.companion-card')].map(card => {
+                          const row = [...card.querySelectorAll('.detail-row')].find(x => x.textContent.includes('点击频率'));
+                          return row ? row.textContent.replace(/\s+/g, ' ').trim() : '';
+                        })
+                      }))()");
+                    var batchState = JsonNode.Parse(JsonSerializer.Deserialize<string>(batchUi)!)!.AsObject();
+                    var batchNames = batchState["names"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+                    var batchClicks = batchState["clicks"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
+                    var expectedBatchNames = new HashSet<string> { "测试角色A", "测试角色B", "测试角色C", "测试角色D" };
+                    if (batchState["count"]!.GetValue<int>() != 3
+                        || batchNames.FirstOrDefault() != "菲比"
+                        || batchNames.Skip(1).Any(x => !expectedBatchNames.Contains(x))
+                        || !batchClicks.Skip(1).All(x => x.Contains("每 7 秒", StringComparison.Ordinal)))
+                        throw new InvalidOperationException("Random batch add did not use character names or click frequency range: " + batchUi);
+
+                    // 多选删除：先只选 1 个删除，再全选删除剩余伙伴。
+                    await core.ExecuteScriptAsync("document.getElementById('companionBatchDelete')?.click()");
+                    await Task.Delay(300);
+                    await core.ExecuteScriptAsync(@"
+                      (() => {
+                        const box = document.querySelector('[data-companion-select=""0""]');
+                        box.checked = true;
+                        box.dispatchEvent(new Event('change', { bubbles: true }));
+                        document.getElementById('companionDeleteSelected').click();
+                      })()");
+                    await Task.Delay(300);
+                    await core.ExecuteScriptAsync("document.getElementById('roomActionContinue')?.click()");
+                    await Task.Delay(700);
+                    string oneDeletedUi = await core.ExecuteScriptAsync("String(document.querySelectorAll('.companion-card').length)");
+                    if (JsonSerializer.Deserialize<string>(oneDeletedUi) != "2")
+                        throw new InvalidOperationException("Selected companion deletion did not remove exactly one card.");
+
+                    await core.ExecuteScriptAsync("document.getElementById('companionBatchDelete')?.click()");
+                    await Task.Delay(300);
+                    await core.ExecuteScriptAsync(@"
+                      (() => {
+                        const all = document.getElementById('companionSelectAll');
+                        all.checked = true;
+                        all.dispatchEvent(new Event('change', { bubbles: true }));
+                        document.getElementById('companionDeleteSelected').click();
+                      })()");
+                    await Task.Delay(300);
+                    await core.ExecuteScriptAsync("document.getElementById('roomActionContinue')?.click()");
+                    await Task.Delay(700);
+                    string batchDeletedUi = await core.ExecuteScriptAsync("String(document.querySelectorAll('.companion-card').length)");
+                    if (JsonSerializer.Deserialize<string>(batchDeletedUi) != "0")
+                        throw new InvalidOperationException("Select-all batch delete did not remove all companions.");
+
+                    await core.ExecuteScriptAsync("document.getElementById('companionAdd')?.click()");
+                    await Task.Delay(500);
+                    await core.ExecuteScriptAsync("document.getElementById('peSave')?.click()");
+                    await Task.Delay(900);
+                    string emptyNameUi = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        names: [...document.querySelectorAll('.companion-name')].map(x => x.textContent.trim())
+                      }))()");
+                    var emptyNameState = JsonNode.Parse(JsonSerializer.Deserialize<string>(emptyNameUi)!)!.AsObject();
+                    var emptyName = emptyNameState["names"]!.AsArray().FirstOrDefault()?.GetValue<string>() ?? "";
+                    if (!expectedBatchNames.Contains(emptyName))
+                        throw new InvalidOperationException("Empty companion name must fall back to the character name: " + emptyNameUi);
+
+                    Console.WriteLine("PASS: WebView2 custom companion page supports add/delete, count/range random batch tool with character names, multi-select delete, and empty-name fallback.");
 
                     // 外观轮换：背包顶部子页、角色/配件分区、开关/间隔、卡片按钮和未拥有图鉴条目。
                     var rotationLoaded = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1215,6 +1310,44 @@ internal static class Program
                 }
                 return (list ?? new JsonArray()).DeepClone();
             }
+            case "companions.bulkSave":
+            {
+                var list = boot["companions"] as JsonArray;
+                if (list == null) { list = new JsonArray(); boot["companions"] = list; }
+                foreach (var input in (data["items"] as JsonArray ?? new JsonArray()).OfType<JsonObject>())
+                {
+                    string name = (input["name"]?.GetValue<string>() ?? "").Trim();
+                    if (name.Length == 0) name = "伙伴";
+                    int dot = name.IndexOfAny(new[] { '·', '・' });
+                    var item = new JsonObject
+                    {
+                        ["id"] = "preview-companion-" + (list.Count + 1),
+                        ["syntheticId"] = -1000 - list.Count,
+                        ["name"] = name,
+                        ["displayName"] = dot > 0 ? name[..dot].Trim() : name,
+                        ["characterAssetId"] = input["characterAssetId"]?.GetValue<long>() ?? 0,
+                        ["accessoryAssetId"] = input["accessoryAssetId"]?.GetValue<long>() ?? 0,
+                        ["clickIntervalSeconds"] = Math.Clamp(input["clickIntervalSeconds"]?.GetValue<int>() ?? 0, 0, 3600),
+                        ["randomClick"] = input["randomClick"]?.GetValue<bool>() ?? false,
+                        ["showBar"] = input["showBar"]?.GetValue<bool>() ?? true,
+                    };
+                    list.Add(item);
+                }
+                return list.DeepClone();
+            }
+            case "companions.bulkDelete":
+            {
+                var list = boot["companions"] as JsonArray;
+                if (list != null)
+                {
+                    var ids = new HashSet<string>((data["ids"] as JsonArray ?? new JsonArray())
+                        .Select(x => x?.GetValue<string>() ?? ""), StringComparer.Ordinal);
+                    foreach (var item in list.OfType<JsonObject>()
+                        .Where(x => ids.Contains(x["id"]?.GetValue<string>() ?? "")).ToList())
+                        list.Remove(item);
+                }
+                return (list ?? new JsonArray()).DeepClone();
+            }
             case "bag.list":
                 return new JsonObject
                 {
@@ -1407,10 +1540,10 @@ internal static class Program
         var list = new JsonArray();
         if (type == "character_skin")
         {
-            list.Add(CatalogItem(3060, "测试角色A", "角色系列", "epic"));
-            list.Add(CatalogItem(3061, "测试角色B", "角色系列", "rare"));
-            list.Add(CatalogItem(3062, "测试角色C", "角色系列", "common"));
-            list.Add(CatalogItem(3063, "测试角色D", "角色系列", "rare"));
+            list.Add(CatalogItem(3060, "测试角色A・皮肤", "角色系列", "epic"));
+            list.Add(CatalogItem(3061, "测试角色B・皮肤", "角色系列", "rare"));
+            list.Add(CatalogItem(3062, "测试角色C・皮肤", "角色系列", "common"));
+            list.Add(CatalogItem(3063, "测试角色D・皮肤", "角色系列", "rare"));
         }
         else if (type == "accessory")
         {

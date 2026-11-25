@@ -1966,12 +1966,12 @@ public sealed class PanelWindow : Form
             case "companions.save":
             {
                 string id = ApiClient.ReadString(data["id"]).Trim();
-                string name = ApiClient.ReadString(data["name"]).Trim();
-                if (string.IsNullOrEmpty(name)) name = "伙伴";
-                if (name.Length > 64) name = name[..64];
                 long character = ApiClient.ReadLong(data["characterAssetId"]);
-                long accessory = ApiClient.ReadLong(data["accessoryAssetId"]);
                 if (character <= 0) character = cfg.CharacterAssetId;
+                string name = ApiClient.ReadString(data["name"]).Trim();
+                if (string.IsNullOrEmpty(name)) name = DefaultCompanionName(character);
+                if (name.Length > 64) name = name[..64];
+                long accessory = ApiClient.ReadLong(data["accessoryAssetId"]);
                 int clickSeconds = Math.Clamp((int)ApiClient.ReadLong(data["clickIntervalSeconds"]), 0, 3600);
                 bool randomClick = ApiClient.ReadBool(data["randomClick"]);
                 bool showBar = !data.ContainsKey("showBar") || ApiClient.ReadBool(data["showBar"]);
@@ -1994,6 +1994,42 @@ public sealed class PanelWindow : Form
                 CompanionPets.Normalize(cfg);
                 ConfigStore.Save(cfg);
                 _app.Pet.BeginInvoke(new Action(_app.Pet.RefreshCompanions));
+                return MapCompanions(cfg.Companions);
+            }
+
+            case "companions.bulkSave":
+            {
+                int added = 0;
+                cfg.Companions ??= new List<CompanionPet>();
+                if (data["items"] is JsonArray items)
+                {
+                    foreach (var node in items)
+                    {
+                        if (node is not JsonObject item) continue;
+                        long character = ApiClient.ReadLong(item["characterAssetId"]);
+                        if (character <= 0) continue;
+                        string name = ApiClient.ReadString(item["name"]).Trim();
+                        if (string.IsNullOrEmpty(name)) name = DefaultCompanionName(character);
+                        if (name.Length > 64) name = name[..64];
+                        cfg.Companions.Add(new CompanionPet
+                        {
+                            Id = Guid.NewGuid().ToString("N"),
+                            Name = name,
+                            CharacterAssetId = character,
+                            AccessoryAssetId = ApiClient.ReadLong(item["accessoryAssetId"]),
+                            ClickIntervalSeconds = Math.Clamp((int)ApiClient.ReadLong(item["clickIntervalSeconds"]), 0, 3600),
+                            RandomClick = ApiClient.ReadBool(item["randomClick"]),
+                            ShowBar = !item.ContainsKey("showBar") || ApiClient.ReadBool(item["showBar"]),
+                        });
+                        added++;
+                    }
+                }
+                if (added > 0)
+                {
+                    CompanionPets.Normalize(cfg);
+                    ConfigStore.Save(cfg);
+                    _app.Pet.BeginInvoke(new Action(_app.Pet.RefreshCompanions));
+                }
                 return MapCompanions(cfg.Companions);
             }
 
@@ -2023,6 +2059,38 @@ public sealed class PanelWindow : Form
                 cfg.Companions.RemoveAll(c => c == null || string.Equals(c.Id, id, StringComparison.Ordinal));
                 ConfigStore.Save(cfg);
                 _app.Pet.BeginInvoke(new Action(_app.Pet.RefreshCompanions));
+                return MapCompanions(cfg.Companions);
+            }
+
+            case "companions.bulkDelete":
+            {
+                var ids = new HashSet<string>(StringComparer.Ordinal);
+                if (data["ids"] is JsonArray idsArray)
+                {
+                    foreach (var node in idsArray)
+                    {
+                        string id = ApiClient.ReadString(node).Trim();
+                        if (id.Length > 0) ids.Add(id);
+                    }
+                }
+                cfg.Companions ??= new List<CompanionPet>();
+                cfg.CompanionPositions ??= new Dictionary<string, int[]>();
+                var removed = cfg.Companions
+                    .Where(c => c != null && ids.Contains(c.Id ?? ""))
+                    .ToList();
+                if (removed.Count > 0)
+                {
+                    foreach (var companion in removed)
+                    {
+                        cfg.CompanionPositions.Remove("companion:" + companion.Id);
+                        cfg.MemberMirrored?.Remove(companion.SyntheticId.ToString());
+                    }
+                    var removeIds = new HashSet<string>(removed.Select(c => c.Id ?? ""), StringComparer.Ordinal);
+                    cfg.Companions.RemoveAll(c => c == null || removeIds.Contains(c.Id ?? ""));
+                    CompanionPets.Normalize(cfg);
+                    ConfigStore.Save(cfg);
+                    _app.Pet.BeginInvoke(new Action(_app.Pet.RefreshCompanions));
+                }
                 return MapCompanions(cfg.Companions);
             }
 
@@ -2442,6 +2510,18 @@ public sealed class PanelWindow : Form
             accessoryAssetId = p.AccessoryAssetId,
             emoteAssetIds = NormalizeEmoteSlots(p.EmoteAssetIds),
         }).ToArray();
+    }
+
+    /// <summary>伙伴留空时使用图鉴中的角色名；去掉“角色名·皮肤系列”里的皮肤后缀。</summary>
+    string DefaultCompanionName(long characterAssetId)
+    {
+        if (characterAssetId > 0
+            && _app.Catalog.Names.TryGetValue(characterAssetId, out var catalogName))
+        {
+            string display = CompanionPets.DisplayName(catalogName);
+            if (!string.IsNullOrWhiteSpace(display)) return display;
+        }
+        return "伙伴";
     }
 
     /// <summary>自定义伙伴前端 DTO：displayName 统一按中点规则截断，页面列表和桌宠底栏共用同一规则。</summary>

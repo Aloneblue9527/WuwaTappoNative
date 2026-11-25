@@ -356,10 +356,37 @@
             savePreviewCompanions();
             reply(previewCompanions);
           }
+          else if (msg.cmd === 'companions.bulkSave') {
+            if (!previewCompanions) buildPreviewBoot();
+            const items = Array.isArray(msg.data?.items) ? msg.data.items : [];
+            for (const data of items) {
+              const item = {
+                id: 'preview-companion-' + (previewCompanions.length + 1),
+                syntheticId: -1000 - previewCompanions.length,
+                name: String(data?.name || '伙伴').trim(),
+                characterAssetId: Number(data?.characterAssetId) || 0,
+                accessoryAssetId: Number(data?.accessoryAssetId) || 0,
+                clickIntervalSeconds: Math.max(0, Math.min(3600, Number(data?.clickIntervalSeconds) || 0)),
+                randomClick: !!data?.randomClick,
+                showBar: data?.showBar !== false,
+              };
+              item.displayName = displayCompanionName(item.name);
+              previewCompanions.push(item);
+            }
+            savePreviewCompanions();
+            reply(previewCompanions);
+          }
           else if (msg.cmd === 'companions.delete') {
             if (!previewCompanions) buildPreviewBoot();
             const id = String(msg.data?.id || '');
             previewCompanions = previewCompanions.filter(x => x.id !== id);
+            savePreviewCompanions();
+            reply(previewCompanions);
+          }
+          else if (msg.cmd === 'companions.bulkDelete') {
+            if (!previewCompanions) buildPreviewBoot();
+            const ids = new Set((Array.isArray(msg.data?.ids) ? msg.data.ids : []).map(String));
+            previewCompanions = previewCompanions.filter(x => !ids.has(String(x.id)));
             savePreviewCompanions();
             reply(previewCompanions);
           }
