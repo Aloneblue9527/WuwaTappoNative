@@ -11,7 +11,7 @@ using WuwatappoNative.Core;
 namespace WuwatappoNative.Pet;
 
 /// <summary>
-/// 主程序侧的 WinMM 子进程客户端。子进程只负责 joyGetPosEx 轮询；
+/// 主程序侧的手柄扩展子进程客户端。
 /// 即使驱动在热插拔时让子进程崩溃，主程序也只会短暂失去手柄状态并自动重启子进程。
 /// </summary>
 internal sealed class ControllerBridgeClient : IDisposable
@@ -23,9 +23,9 @@ internal sealed class ControllerBridgeClient : IDisposable
     bool _wanted;
     bool _disposed;
     bool _connected;
-    WinMmPadBridge.PadState _state;
+    ControllerPadState _state;
 
-    public bool TryRead(out WinMmPadBridge.PadState state)
+    public bool TryRead(out ControllerPadState state)
     {
         lock (_stateGate)
         {
@@ -141,15 +141,13 @@ internal sealed class ControllerBridgeClient : IDisposable
             using var reader = new BinaryReader(client);
             while (true)
             {
-                bool connected = reader.ReadByte() != 0;
-                ushort buttons = reader.ReadUInt16();
-                byte left = reader.ReadByte();
-                byte right = reader.ReadByte();
+                bool connected = reader.ReadBoolean();
+                var state = ControllerPadState.ReadFrom(reader);
                 lock (_stateGate)
                 {
                     if (generation != _generation) return;
                     _connected = connected;
-                    _state = new WinMmPadBridge.PadState(buttons, left, right);
+                    _state = state;
                 }
             }
         }

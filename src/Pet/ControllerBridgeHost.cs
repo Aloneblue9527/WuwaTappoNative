@@ -2,13 +2,13 @@ using System;
 using System.IO;
 using System.IO.Pipes;
 using System.Text;
-using System.Threading;
+using System.Windows.Forms;
 
 namespace WuwatappoNative.Pet;
 
 /// <summary>
-/// 独立进程里的 WinMM 手柄轮询器。WinMM 在部分驱动热插拔时可能直接让进程崩溃，
-/// 因此把 joyGetPosEx 放到子进程；主程序只读取命名管道，驱动崩溃不会带走主程序。
+/// 手柄扩展在子进程内接收 USB DualSense 报告并轮询其他 WinMM 手柄。
+/// 主程序通过命名管道读取快照，避免 WinMM 驱动热插拔异常波及界面。
 /// </summary>
 internal static class ControllerBridgeHost
 {
@@ -24,16 +24,30 @@ internal static class ControllerBridgeHost
                 PipeOptions.None);
             server.WaitForConnection();
             using var writer = new BinaryWriter(server, Encoding.UTF8, leaveOpen: false);
-            while (true)
+            using var dualSense = new DualSenseRawInput();
+            using var pollTimer = new System.Windows.Forms.Timer { Interval = 16 };
+            pollTimer.Tick += (_, _) =>
             {
-                bool connected = WinMmPadBridge.TryRead(out var state);
-                writer.Write((byte)(connected ? 1 : 0));
-                writer.Write(state.Buttons);
-                writer.Write(state.LeftTrigger);
-                writer.Write(state.RightTrigger);
-                writer.Flush();
-                Thread.Sleep(16);
-            }
+                try
+                {
+                    bool connected = WinMmPadBridge.TryRead(dualSense, out var state);
+                    if (dualSense.ReadState() is { } usbState)
+                    {
+                        state = state.Merge(usbState);
+                        connected = true;
+                    }
+                    writer.Write(connected);
+                    state.WriteTo(writer);
+                    writer.Flush();
+                }
+                catch (IOException)
+                {
+                    // 主程序退出或断开，停止接收 Raw Input。
+                    Application.ExitThread();
+                }
+            };
+            pollTimer.Start();
+            Application.Run();
         }
         catch (IOException)
         {
