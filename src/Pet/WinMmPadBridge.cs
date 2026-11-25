@@ -17,7 +17,7 @@ internal static class WinMmPadBridge
     const long FullScanIntervalMs = 2000;
     static readonly uint JoyInfoSize = (uint)Marshal.SizeOf<JoyInfoEx>();
     static readonly object Gate = new();
-    static readonly List<(uint Index, ushort SonyProduct)> ConnectedSlots = new();
+    static readonly List<(uint Index, ushort SonyProduct, bool CapsRead)> ConnectedSlots = new();
     static long _nextFullScan;
     const ushort DPadUp = 0x0001;
     const ushort DPadDown = 0x0002;
@@ -69,9 +69,10 @@ internal static class WinMmPadBridge
                     for (uint slot = 0; slot < SlotCount; slot++)
                     {
                         if (!TryReadSlot(slot, out JoyInfoEx info)) continue;
-                        ushort sonyProduct = GetSonyProduct(slot);
-                        ConnectedSlots.Add((slot, sonyProduct));
-                        if (dualSense.HasUsbState(sonyProduct)) continue;
+                        var (sonyProduct, capsRead) = GetSonyProduct(slot);
+                        ConnectedSlots.Add((slot, sonyProduct, capsRead));
+                        if (ShouldSkipWinMm(capsRead, sonyProduct, dualSense.HasUsbState(sonyProduct), dualSense.HasAnyUsbState()))
+                            continue;
                         merged = merged.Merge(Convert(info));
                         any = true;
                     }
@@ -81,13 +82,14 @@ internal static class WinMmPadBridge
                 {
                     for (int i = ConnectedSlots.Count - 1; i >= 0; i--)
                     {
-                        var (slot, sonyProduct) = ConnectedSlots[i];
+                        var (slot, sonyProduct, capsRead) = ConnectedSlots[i];
                         if (!TryReadSlot(slot, out JoyInfoEx info))
                         {
                             ConnectedSlots.RemoveAt(i);
                             continue;
                         }
-                        if (dualSense.HasUsbState(sonyProduct)) continue;
+                        if (ShouldSkipWinMm(capsRead, sonyProduct, dualSense.HasUsbState(sonyProduct), dualSense.HasAnyUsbState()))
+                            continue;
                         merged = merged.Merge(Convert(info));
                         any = true;
                     }
@@ -147,9 +149,22 @@ internal static class WinMmPadBridge
 
     static bool HasButton(uint buttons, int index) => (buttons & (1u << index)) != 0;
 
-    static ushort GetSonyProduct(uint slot) =>
-        joyGetDevCapsW((UIntPtr)slot, out var caps, (uint)Marshal.SizeOf<JoyCaps>()) == 0
-            ? DualSenseRawInput.GetProductId(caps.VendorId, caps.ProductId) : (ushort)0;
+    /// <summary>
+    /// 单手柄场景的产品识别回退：caps 读取失败时，只要 Raw Input 已有状态，就保守跳过 WinMM，
+    /// 避免无法确认型号的 WinMM 数字扳机覆盖 USB DualSense 的模拟值。
+    /// </summary>
+    internal static bool ShouldSkipWinMm(bool capsRead, ushort sonyProduct, bool hasUsbForProduct, bool hasAnyUsbState)
+    {
+        if (capsRead) return sonyProduct != 0 && hasUsbForProduct;
+        return hasAnyUsbState;
+    }
+
+    static (ushort Product, bool CapsRead) GetSonyProduct(uint slot)
+    {
+        if (joyGetDevCapsW((UIntPtr)slot, out var caps, (uint)Marshal.SizeOf<JoyCaps>()) != 0)
+            return (0, false);
+        return (DualSenseRawInput.GetProductId(caps.VendorId, caps.ProductId), true);
+    }
 
     // JOYCAPSW 的完整缓冲区大小，本函数只需要开头的厂商和产品字段。
     [StructLayout(LayoutKind.Explicit, Size = 728)]

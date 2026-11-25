@@ -20,10 +20,11 @@ internal sealed class DualSenseRawInput : NativeWindow, IDisposable
     const uint InputData = 0x10000003;
     const uint DeviceInfo = 0x2000000B;
     const uint HidType = 2;
+    const long ProductProbeRetryMs = 2000;
 
     static readonly int HeaderSize = Marshal.SizeOf<RawInputHeader>();
     readonly byte[] _buffer = new byte[4096];
-    readonly Dictionary<IntPtr, (ushort ProductId, ControllerPadState? State)> _devices = new();
+    readonly Dictionary<IntPtr, (ushort ProductId, long NextProductProbeMs, ControllerPadState? State)> _devices = new();
 
     public DualSenseRawInput()
     {
@@ -54,6 +55,17 @@ internal sealed class DualSenseRawInput : NativeWindow, IDisposable
         return false;
     }
 
+    /// <summary>产品识别失败时用于单手柄场景的保守回退：只要 Raw Input 有状态，就避免 WinMM 数字扳机覆盖。</summary>
+    public bool HasAnyUsbState()
+    {
+        foreach (var device in _devices.Values)
+            if (device.State.HasValue) return true;
+        return false;
+    }
+
+    internal static bool ShouldProbeProduct(ushort productId, long nowMs, long nextProbeMs) =>
+        productId == 0 && nowMs >= nextProbeMs;
+
     public static ushort GetProductId(uint vendorId, uint productId) =>
         vendorId == SonyVendorId && productId is DualSenseProductId or DualSenseEdgeProductId
             ? (ushort)productId : (ushort)0;
@@ -83,16 +95,27 @@ internal sealed class DualSenseRawInput : NativeWindow, IDisposable
         if (size != UsbReportSize || count == 0 || count > (bytes - reportOffset) / size) return;
 
         if (!_devices.TryGetValue(header.Device, out var device))
+            device = (0, 0, null);
+
+        long now = Environment.TickCount64;
+        if (ShouldProbeProduct(device.ProductId, now, device.NextProductProbeMs))
         {
-            device = (ReadProductId(header.Device), null);
-            _devices.Add(header.Device, device);
+            ushort productId = ReadProductId(header.Device);
+            device.ProductId = productId;
+            device.NextProductProbeMs = productId == 0 ? now + ProductProbeRetryMs : 0;
         }
-        if (device.ProductId == 0) return;
+        if (device.ProductId == 0)
+        {
+            // 产品信息读取失败或设备不受支持；保留探测时间，后续报告继续重试。
+            _devices[header.Device] = device;
+            return;
+        }
 
         // 管道传递状态快照，取该批次最后一份输入报告。
         int offset = reportOffset + (int)(count - 1) * UsbReportSize;
         if (TryDecodeUsbReport(_buffer.AsSpan(offset, UsbReportSize), out var state))
-            _devices[header.Device] = (device.ProductId, state);
+            device.State = state;
+        _devices[header.Device] = device;
     }
 
     static ushort ReadProductId(IntPtr handle)

@@ -29,6 +29,7 @@ internal static class Program
             CheckWinMmPadBridge();
             CheckDualSenseUsbReport();
             CheckControllerBridgeFrame();
+            CheckProductProbeAndWinMmFallback();
             Console.WriteLine($"PASS: {_checks} assertions.");
             return 0;
         }
@@ -343,6 +344,21 @@ internal static class Program
         Assert(!reader.ReadBoolean() && ControllerPadState.ReadFrom(reader) == default &&
                stream.Position == stream.Length,
             "A disconnect must clear the state and preserve the next frame's alignment.");
+    }
+
+    static void CheckProductProbeAndWinMmFallback()
+    {
+        Assert(!DualSenseRawInput.ShouldProbeProduct(0, 1000, 2000) &&
+               DualSenseRawInput.ShouldProbeProduct(0, 2000, 2000) &&
+               !DualSenseRawInput.ShouldProbeProduct(0x0CE6, 3000, 0),
+            "A failed product probe must retry after its delay, but a known product must not re-probe.");
+
+        Assert(WinMmPadBridge.ShouldSkipWinMm(true, 0x0CE6, true, true) &&
+               !WinMmPadBridge.ShouldSkipWinMm(true, 0, true, true) &&
+               !WinMmPadBridge.ShouldSkipWinMm(true, 0x0CE6, false, true) &&
+               WinMmPadBridge.ShouldSkipWinMm(false, 0, false, true) &&
+               !WinMmPadBridge.ShouldSkipWinMm(false, 0, false, false),
+            "Unknown WinMM product info must defer to USB state in the single-controller case; known non-Sony devices must not be skipped.");
     }
 
     sealed class Harness
