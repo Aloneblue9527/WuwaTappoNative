@@ -35,9 +35,9 @@ public sealed class PetWindow : Form
     readonly Dictionary<long, RemoteCatWindow> _companionCats = new();
     readonly Dictionary<long, long> _companionClickSide = new();
     readonly Dictionary<long, long> _companionNextClickMs = new();
-    readonly Dictionary<long, (int seconds, bool random)> _companionClickConfig = new();
+    readonly Dictionary<long, (double rate, bool random)> _companionClickConfig = new();
     readonly Random _companionRandom = new();
-    const long SelfSelectionId = -1;
+    const long SelfSelectionId = CompanionPets.ReservedSelfId;
     readonly HashSet<long> _selectedCatIds = new();
     bool _selfSelected;
     bool _groupDragging;
@@ -102,6 +102,7 @@ public sealed class PetWindow : Form
     NotifyIcon _tray;
     ToolStripMenuItem _topmostItem, _passthroughItem, _passthroughOffItem, _hoverItem, _scaleMenuItem, _opacityMenuItem, _mirrorItem;
     ToolStripMenuItem _hideOtherPetsItem;
+    ToolStripMenuItem _alignGridItem;
     ToolStripMenuItem _layoutHorizontalItem, _layoutVerticalItem;
     ToolStripMenuItem _keyboardMenuItem;
     Icon _icon;
@@ -678,8 +679,15 @@ public sealed class PetWindow : Form
     bool IsSelected(long id)
         => id == SelfSelectionId ? _selfSelected : _selectedCatIds.Contains(id);
 
+    /// <summary>真实联机角色和本地自定义伙伴共用同一套选中/拖动逻辑。</summary>
+    bool TryGetPetWindow(long id, out RemoteCatWindow cat)
+    {
+        if (_cats.TryGetValue(id, out cat)) return true;
+        return _companionCats.TryGetValue(id, out cat);
+    }
+
     int SelectedCount()
-        => (_selfSelected ? 1 : 0) + _selectedCatIds.Count(id => _cats.ContainsKey(id));
+        => (_selfSelected ? 1 : 0) + _selectedCatIds.Count(id => TryGetPetWindow(id, out _));
 
     void SetSelected(long id, bool selected)
     {
@@ -690,7 +698,7 @@ public sealed class PetWindow : Form
             Compose();
             return;
         }
-        if (_cats.TryGetValue(id, out var cat))
+        if (TryGetPetWindow(id, out var cat))
         {
             if (selected) _selectedCatIds.Add(id);
             else _selectedCatIds.Remove(id);
@@ -704,17 +712,18 @@ public sealed class PetWindow : Form
         if (!_selfSelected && _selectedCatIds.Count == 0) return;
         _selfSelected = false;
         foreach (var id in _selectedCatIds.ToList())
-            if (_cats.TryGetValue(id, out var cat)) cat.SetSelected(false);
+            if (TryGetPetWindow(id, out var cat)) cat.SetSelected(false);
         _selectedCatIds.Clear();
         Compose();
     }
 
-    /// <summary>Ctrl+A：把所有可见联机成员加入选中；主角是否选中完全保持原样。</summary>
+    /// <summary>Ctrl+A：把所有可见联机成员和本地伙伴加入选中；主角是否选中完全保持原样。</summary>
     void SelectAllRemoteCats()
     {
         _multiSelectClickPending = false;
         CancelPendingGroupDrag();
-        var selection = PetSelectionLogic.BuildCtrlASelection(_selfSelected, _cats.Keys);
+        var ids = _cats.Keys.Concat(_companionCats.Keys);
+        var selection = PetSelectionLogic.BuildCtrlASelection(_selfSelected, ids);
         if (selection.SelfSelected != _selfSelected) SetSelected(SelfSelectionId, selection.SelfSelected);
         foreach (var id in selection.CatIds)
             SetSelected(id, true);
@@ -730,7 +739,7 @@ public sealed class PetWindow : Form
         _groupDragOrigins.Clear();
         if (_selfSelected) _groupDragOrigins[SelfSelectionId] = Location;
         foreach (var id in _selectedCatIds)
-            if (_cats.TryGetValue(id, out var cat) && cat.Visible)
+            if (TryGetPetWindow(id, out var cat) && cat.Visible)
                 _groupDragOrigins[id] = cat.Location;
     }
 
@@ -789,7 +798,7 @@ public sealed class PetWindow : Form
         {
             var target = new Point(pair.Value.X + dx, pair.Value.Y + dy);
             if (pair.Key == SelfSelectionId) Location = target;
-            else if (_cats.TryGetValue(pair.Key, out var cat)) cat.Location = target;
+            else if (TryGetPetWindow(pair.Key, out var cat)) cat.Location = target;
         }
         long tick = Environment.TickCount64;
         if (tick - _lastGeometryMs >= 16)
@@ -807,20 +816,19 @@ public sealed class PetWindow : Form
         {
             // 只有真正移动过才贴边；整组共用一个偏移，避免各吸各的拆散队形。
             SnapGroupToWorkingArea(Cursor.Position);
+            // 网格模式下再按各自最近格子吸附；主角色不参与整组，故不会被移动。
+            SnapSelectedPetsToGrid();
             if (_selfSelected)
             {
                 _cfg.PetX = Left;
                 _cfg.PetY = Top;
             }
             foreach (var id in _selectedCatIds)
-                if (_cats.TryGetValue(id, out var cat))
-                {
-                    _cfg.MemberPositions[CatKey(id)] = new[] { cat.Left, cat.Top };
-                    _cfg.MemberCustomPositions[CatKey(id)] = true;
-                }
+                if (TryGetPetWindow(id, out var cat))
+                    SavePetPosition(id, cat, custom: true);
             Save();
             GeometryChanged?.Invoke();
-            if (!_cfg.AllowOverlap) ResolveOverlaps();
+            if (!_cfg.AlignPetsToGrid && !_cfg.AllowOverlap) ResolveOverlaps();
         }
         CompleteMultiSelectClick(moved);
         _groupDragOrigins.Clear();
@@ -839,7 +847,7 @@ public sealed class PetWindow : Form
 
         if (_selfSelected) Location = new Point(Left + delta.X, Top + delta.Y);
         foreach (var id in _selectedCatIds)
-            if (_cats.TryGetValue(id, out var cat) && cat.Visible)
+            if (TryGetPetWindow(id, out var cat) && cat.Visible)
                 cat.Location = new Point(cat.Left + delta.X, cat.Top + delta.Y);
     }
 
@@ -861,7 +869,7 @@ public sealed class PetWindow : Form
         }
         foreach (var id in _selectedCatIds)
         {
-            if (!_cats.TryGetValue(id, out var cat) || !cat.Visible) continue;
+            if (!TryGetPetWindow(id, out var cat) || !cat.Visible) continue;
             var rect = CatVisibleRect(cat);
             bounds = any ? Rectangle.Union(bounds, rect) : rect;
             any = true;
@@ -884,11 +892,15 @@ public sealed class PetWindow : Form
         _draggingCat = cat;
         _multiSelectClickPending = false;
         bool ctrl = (Control.ModifierKeys & Keys.Control) != 0;
-        // 按住 Ctrl 时先由主窗口接管，哪怕点中的是选中框而不是猫体，也不能让
-        // RemoteCatWindow 在死区内自己先挪动；非 Ctrl 才保留窗口自身拖动。
+        // 透明气泡区域不参与选择/整组拖动；Ctrl 点在昵称条等非猫体区域时
+        // 不要留下 ExternalDrag=true 的死手势，仍允许窗口自身拖动。
+        if (!cat.ContainsCatScreenPoint(Cursor.Position))
+        {
+            cat.ExternalDrag = false;
+            return;
+        }
+        // 按住 Ctrl 时先由主窗口接管，不能让 RemoteCatWindow 在死区内自己先挪动。
         cat.ExternalDrag = ctrl;
-        // 透明气泡区域不参与选择/拖动。
-        if (!cat.ContainsCatScreenPoint(Cursor.Position)) return;
         long id = cat.MemberId;
         if (!ctrl)
         {
@@ -947,6 +959,47 @@ public sealed class PetWindow : Form
         {
             FlushPendingZOrderRestack();
         }
+    }
+
+    /// <summary>
+    /// 真实成员和本地伙伴的位置分开持久化；custom=true 表示用户手动拖过，
+    /// 用于 F8 的“仅移动默认位置成员”策略。
+    /// </summary>
+    void SavePetPosition(long id, RemoteCatWindow cat, bool custom)
+    {
+        if (cat == null) return;
+        if (_cats.ContainsKey(id))
+        {
+            string key = CatKey(id);
+            _cfg.MemberPositions[key] = new[] { cat.Left, cat.Top };
+            if (custom)
+            {
+                _cfg.MemberCustomPositions ??= new Dictionary<string, bool>();
+                _cfg.MemberCustomPositions[key] = true;
+            }
+            return;
+        }
+
+        var companion = CompanionBySynthetic(id);
+        if (companion == null) return;
+        string companionKey = CompanionKey(companion.Id);
+        _cfg.CompanionPositions ??= new Dictionary<string, int[]>();
+        _cfg.CompanionPositions[companionKey] = new[] { cat.Left, cat.Top };
+        if (custom)
+        {
+            _cfg.CompanionCustomPositions ??= new Dictionary<string, bool>();
+            _cfg.CompanionCustomPositions[companionKey] = true;
+        }
+    }
+
+    /// <summary>单个桌宠拖动结束：保存位置，并在关闭重叠时优先让被拖动的角色让位。</summary>
+    void OnPetMoved(long id, Point _)
+    {
+        if (!TryGetPetWindow(id, out var cat)) return;
+        if (_cfg.AlignPetsToGrid) SnapPetToGrid(cat);
+        SavePetPosition(id, cat, custom: true);
+        Save();
+        if (!_cfg.AlignPetsToGrid && !_cfg.AllowOverlap) ResolveOverlaps(id);
     }
 
     void StartHoverFade(bool on)
@@ -1413,7 +1466,7 @@ public sealed class PetWindow : Form
                 _cfg.PetY = Top;
                 ConfigStore.Save(_cfg);
                 GeometryChanged?.Invoke();
-                if (!_cfg.AllowOverlap) ResolveOverlaps();
+                if (!_cfg.AlignPetsToGrid && !_cfg.AllowOverlap) ResolveOverlaps();
             }
             CompleteMultiSelectClick(dragged);
             FlushPendingZOrderRestack();
@@ -1503,11 +1556,15 @@ public sealed class PetWindow : Form
         ApplyThemeToCats();
         UpdateCatScales();
         UpdateCompanionScales();
-        foreach (var cat in AllPetWindows()) cat.SetMirrored(IsMemberMirrored(cat.MemberId));
+        foreach (var cat in AllPetWindows())
+        {
+            cat.SetMirrored(IsMemberMirrored(cat.MemberId));
+            cat.SetGridAlignment(_cfg.AlignPetsToGrid);
+        }
         ApplyCaptureMode();
-        if (!_cfg.AllowOverlap) ResolveOverlaps();
         // 全局“隐藏其他角色桌宠”同样作用于本地自定义伙伴；统一在这里对齐窗口集合。
-        RefreshCompanions();
+        RefreshCompanions(applyPlacement: false);
+        ApplyPlacementRules();
         RefreshMenu();
     }
 
@@ -2039,6 +2096,14 @@ public sealed class PetWindow : Form
                 AddPet("Remote(" + pair.Key + ")", cat.Handle,
                     visible ? CatVisibleRect(cat) : Rectangle.Empty, visible);
             }
+            foreach (var pair in _companionCats.OrderBy(x => x.Key))
+            {
+                var cat = pair.Value;
+                if (cat == null || cat.IsDisposed || !cat.IsHandleCreated) continue;
+                bool visible = cat.Visible && IsWindowVisible(cat.Handle);
+                AddPet("Companion(" + pair.Key + ")", cat.Handle,
+                    visible ? CatVisibleRect(cat) : Rectangle.Empty, visible);
+            }
             var keyboard = KeyboardUI;
             if (keyboard != null && !keyboard.IsDisposed && keyboard.IsHandleCreated)
             {
@@ -2461,6 +2526,7 @@ public sealed class PetWindow : Form
                 MoveDefaultCatsToScreen(source, target);
         }
 
+        ApplyPlacementRules();
         Save();
         // 先通知设置面板，再做键盘布局刷新；任何后续布局异常都不应阻断设置同步。
         NotifySettingsChanged();
@@ -2472,23 +2538,31 @@ public sealed class PetWindow : Form
     bool IsCustomCatPosition(long id)
         => _cfg.MemberCustomPositions.TryGetValue(CatKey(id), out bool custom) && custom;
 
+    bool IsCustomPetPosition(long id)
+    {
+        if (_cats.ContainsKey(id)) return IsCustomCatPosition(id);
+        var companion = CompanionBySynthetic(id);
+        return companion != null
+            && _cfg.CompanionCustomPositions != null
+            && _cfg.CompanionCustomPositions.TryGetValue(CompanionKey(companion.Id), out bool custom)
+            && custom;
+    }
+
     void MoveDefaultCatsToScreen(Screen source, Screen target)
     {
-        foreach (var pair in _cats)
+        foreach (var cat in AllPetWindows())
         {
-            var cat = pair.Value;
-            if (!cat.Visible || IsCustomCatPosition(pair.Key)) continue;
+            if (!cat.Visible || IsCustomPetPosition(cat.MemberId)) continue;
             var catScreen = Screen.FromRectangle(CatVisibleRect(cat));
             if (!string.Equals(catScreen.DeviceName, source.DeviceName, StringComparison.OrdinalIgnoreCase)) continue;
-            MoveCatToScreen(pair.Key, cat, catScreen.WorkingArea, target.WorkingArea);
+            MoveCatToScreen(cat.MemberId, cat, catScreen.WorkingArea, target.WorkingArea);
         }
     }
 
     void MoveAllCatsBetweenScreens(Screen source, Screen target)
     {
-        foreach (var pair in _cats)
+        foreach (var cat in AllPetWindows())
         {
-            var cat = pair.Value;
             if (!cat.Visible) continue;
             var catScreen = Screen.FromRectangle(CatVisibleRect(cat));
             Screen dest;
@@ -2498,7 +2572,7 @@ public sealed class PetWindow : Form
                 dest = source;
             else
                 continue;
-            MoveCatToScreen(pair.Key, cat, catScreen.WorkingArea, dest.WorkingArea);
+            MoveCatToScreen(cat.MemberId, cat, catScreen.WorkingArea, dest.WorkingArea);
         }
     }
 
@@ -2514,7 +2588,7 @@ public sealed class PetWindow : Form
         left = Math.Clamp(left, to.Left, Math.Max(to.Left, to.Right - visible.Width));
         top = Math.Clamp(top, to.Top, Math.Max(to.Top, to.Bottom - visible.Height));
         cat.Location = new Point(left, top - head);
-        _cfg.MemberPositions[CatKey(id)] = new[] { cat.Left, cat.Top };
+        SavePetPosition(id, cat, custom: false);
     }
 
     bool PetsOnMultipleScreens()
@@ -2575,6 +2649,7 @@ public sealed class PetWindow : Form
             if (!_hiddenByHotkey)
             {
                 Compose();
+                ApplyPlacementRules();
                 QueueRestackPetWindows();
             }
             PetVisibilityChanged?.Invoke(!_hiddenByHotkey);
@@ -2822,6 +2897,13 @@ public sealed class PetWindow : Form
         layout.DropDownItems.Add(_layoutVerticalItem);
         _menu.Items.Add(layout);
 
+        _alignGridItem = new ToolStripMenuItem(Localization.T("tray.alignGrid", "将桌宠与网格对齐"))
+        {
+            Checked = _cfg.AlignPetsToGrid,
+        };
+        _alignGridItem.Click += (s, e) => ToggleGridAlignment();
+        _menu.Items.Add(_alignGridItem);
+
         _keyboardMenuItem = new ToolStripMenuItem(Localization.T("tray.keyboard", "桌面键盘"));
         foreach (var (key, label) in new[]
                  {
@@ -2896,6 +2978,7 @@ public sealed class PetWindow : Form
         bool verticalLayout = string.Equals(_cfg.CatLayout, "vertical", StringComparison.OrdinalIgnoreCase);
         if (_layoutHorizontalItem != null) _layoutHorizontalItem.Checked = !verticalLayout;
         if (_layoutVerticalItem != null) _layoutVerticalItem.Checked = verticalLayout;
+        if (_alignGridItem != null) _alignGridItem.Checked = _cfg.AlignPetsToGrid;
         if (_keyboardMenuItem != null)
         {
             foreach (ToolStripItem sub in _keyboardMenuItem.DropDownItems)
@@ -3015,6 +3098,7 @@ public sealed class PetWindow : Form
                 bool topmostChanged = existing.SetWindowOptions(EffectiveRemoteOpacity, _cfg.HoverFade, _cfg.ClickThrough, _cfg.Topmost, _cfg.HoverFadeOpacity);
                 existing.SetRemoteStyle(EffectiveRemoteScale, EffectiveRemoteOpacity, _cfg.RemoteNameScale);
                 existing.SetBarVisible(!_cfg.HideRemoteBars);
+                existing.SetGridAlignment(_cfg.AlignPetsToGrid);
                 var theme = ThemeBarColors();
                 existing.SetTheme(theme.bar, theme.text);
                 existing.RefreshMember();
@@ -3035,18 +3119,19 @@ public sealed class PetWindow : Form
                 cat.RemoteOpacityRequested += ApplyRemoteOpacity;
                 cat.HideRequested += OnCatHideRequested;
                 cat.MirrorRequested += (id, mirrored) => SetMemberMirrored(id, mirrored);
+                cat.GridAlignmentRequested += ToggleGridAlignment;
+                cat.SetGridAlignment(_cfg.AlignPetsToGrid);
                 cat.Location = PlaceNewCat(id);
                 cat.DragStarted += OnCatDragStarted;
                 cat.DragMoved += OnCatDragMoved;
                 cat.DragEnded += OnCatDragEnded;
-                cat.Moved += p =>
-                {
-                    _cfg.MemberPositions[CatKey(id)] = new[] { p.X, p.Y };
-                    _cfg.MemberCustomPositions[CatKey(id)] = true;
-                    Save();
-                    if (!_cfg.AllowOverlap) ResolveOverlaps(id);
-                };
+                cat.Moved += p => OnPetMoved(id, p);
                 _cats[id] = cat;
+                if (_cfg.AlignPetsToGrid)
+                {
+                    SnapPetToGrid(cat);
+                    SavePetPosition(id, cat, custom: false);
+                }
                 // 主桌宠被 F9 隐藏时，新上线/新创建的远程成员也不能直接冒出来；
                 // 取消隐藏时由 ApplyMainPetVisibility 的统一循环恢复显示。
                 if (!_hiddenByHotkey)
@@ -3092,7 +3177,9 @@ public sealed class PetWindow : Form
     /// 让桌面伙伴与配置列表对齐：新增、修改、删除和全局隐藏都在这里收口。
     /// 自定义伙伴只创建 RemoteCatWindow，不写入 RoomManager.Members。
     /// </summary>
-    public void RefreshCompanions()
+    public void RefreshCompanions() => RefreshCompanions(applyPlacement: true);
+
+    public void RefreshCompanions(bool applyPlacement)
     {
         if (IsDisposed) return;
         _cfg.Companions ??= new List<CompanionPet>();
@@ -3109,12 +3196,17 @@ public sealed class PetWindow : Form
             if (!wanted.Contains(id)) RemoveCompanionCat(id);
 
         // 配置中已删除的伙伴不再保留位置记录；避免 state.json 无限积累。
-        var validKeys = new HashSet<string>(desired.Where(c => c != null).Select(c => CompanionKey(c.Id)));        var staleKeys = _cfg.CompanionPositions.Keys
+        var validKeys = new HashSet<string>(desired.Where(c => c != null).Select(c => CompanionKey(c.Id)));
+        var staleKeys = _cfg.CompanionPositions.Keys
             .Where(k => k.StartsWith("companion:", StringComparison.Ordinal) && !validKeys.Contains(k))
             .ToList();
-        if (staleKeys.Count > 0)
+        var staleCustomKeys = (_cfg.CompanionCustomPositions ?? new Dictionary<string, bool>()).Keys
+            .Where(k => k.StartsWith("companion:", StringComparison.Ordinal) && !validKeys.Contains(k))
+            .ToList();
+        if (staleKeys.Count > 0 || staleCustomKeys.Count > 0)
         {
             foreach (string key in staleKeys) _cfg.CompanionPositions.Remove(key);
+            foreach (string key in staleCustomKeys) _cfg.CompanionCustomPositions.Remove(key);
             Save();
         }
 
@@ -3124,6 +3216,7 @@ public sealed class PetWindow : Form
             if (companion == null || companion.SyntheticId >= 0 || companion.Hidden) continue;
             UpdateCompanionCat(companion);
         }
+        if (applyPlacement) ApplyPlacementRules();
         QueueRestackPetWindows();
     }
 
@@ -3138,6 +3231,7 @@ public sealed class PetWindow : Form
             bool topmostChanged = existing.SetWindowOptions(EffectiveRemoteOpacity, _cfg.HoverFade, _cfg.ClickThrough, _cfg.Topmost, _cfg.HoverFadeOpacity);
             existing.SetRemoteStyle(EffectiveRemoteScale, EffectiveRemoteOpacity, _cfg.RemoteNameScale);
             existing.SetBarVisible(CompanionBarVisible(companion));
+            existing.SetGridAlignment(_cfg.AlignPetsToGrid);
             var theme = ThemeBarColors();
             existing.SetTheme(theme.bar, theme.text);
             if (topmostChanged) QueueRestackPetWindows();
@@ -3165,15 +3259,19 @@ public sealed class PetWindow : Form
             cat.RemoteOpacityRequested += ApplyRemoteOpacity;
             cat.MirrorRequested += (memberId, mirrored) => SetMemberMirrored(memberId, mirrored);
             cat.LocalHideRequested += OnCompanionHideRequested;
+            cat.GridAlignmentRequested += ToggleGridAlignment;
+            cat.SetGridAlignment(_cfg.AlignPetsToGrid);
             cat.Location = PlaceNewCompanion(companion);
-            cat.DragStarted += OnCompanionDragStarted;
-            cat.DragEnded += OnCompanionDragEnded;
-            cat.Moved += p =>
-            {
-                _cfg.CompanionPositions[CompanionKey(companion.Id)] = new[] { p.X, p.Y };
-                Save();
-            };
+            cat.DragStarted += OnCatDragStarted;
+            cat.DragMoved += OnCatDragMoved;
+            cat.DragEnded += OnCatDragEnded;
+            cat.Moved += p => OnPetMoved(id, p);
             _companionCats[id] = cat;
+            if (_cfg.AlignPetsToGrid)
+            {
+                SnapPetToGrid(cat);
+                SavePetPosition(id, cat, custom: false);
+            }
             if (!_hiddenByHotkey)
             {
                 cat.Show();
@@ -3183,18 +3281,38 @@ public sealed class PetWindow : Form
             }
         }
 
-        var config = (companion.ClickIntervalSeconds, companion.RandomClick);
+        var config = (companion.ClickRatePerSecond, companion.RandomClick);
         if (!_companionClickConfig.TryGetValue(id, out var previous) || previous != config)
         {
             _companionClickConfig[id] = config;
-            ResetCompanionClickSchedule(id, companion.ClickIntervalSeconds);
+            ResetCompanionClickSchedule(id, companion.ClickRatePerSecond);
+        }
+    }
+
+    /// <summary>移除桌宠时清理多选/整组拖动状态，避免 owner 消失后 _groupDragging 永久为 true。</summary>
+    void ClearPetDragState(long id, RemoteCatWindow cat)
+    {
+        if (ReferenceEquals(_draggingCat, cat)) _draggingCat = null;
+        _selectedCatIds.Remove(id);
+        _groupDragOrigins.Remove(id);
+        if (_groupDragPendingOwner == id) CancelPendingGroupDrag();
+        if (_groupDragging && _groupDragOwner == id)
+        {
+            _groupDragging = false;
+            _groupDragOrigins.Clear();
+        }
+        if (_multiSelectClickId == id)
+        {
+            _multiSelectClickPending = false;
+            _multiSelectClickId = SelfSelectionId;
+            _multiSelectClickWasSelected = false;
         }
     }
 
     void RemoveCompanionCat(long syntheticId)
     {
         if (!_companionCats.TryGetValue(syntheticId, out var cat)) return;
-        if (ReferenceEquals(_draggingCat, cat)) _draggingCat = null;
+        ClearPetDragState(syntheticId, cat);
         _companionCats.Remove(syntheticId);
         _companionClickSide.Remove(syntheticId);
         _companionNextClickMs.Remove(syntheticId);
@@ -3206,28 +3324,44 @@ public sealed class PetWindow : Form
 
     Point PlaceNewCompanion(CompanionPet companion)
     {
+        bool wasCustom = IsCustomPetPosition(companion.SyntheticId);
         var stored = StoredPoint(CompanionKey(companion.Id));
+        // 与联机成员一致：没手动拖过的伙伴如果保存位置在别的屏幕，按当前“显示屏幕”重新落位。
+        if (stored.HasValue && !IsCustomPetPosition(companion.SyntheticId))
+        {
+            var screen = Screen.FromPoint(new Point(
+                stored.Value.X + RemoteCatWindow.W / 2,
+                stored.Value.Y + RemoteCatWindow.Headroom + RemoteCatWindow.CatH / 2));
+            if (!string.Equals(screen.DeviceName, ConfiguredScreen().DeviceName, StringComparison.OrdinalIgnoreCase))
+                stored = null;
+        }
         if (stored.HasValue && !HasSignificantOverlap(CatVisibleRectAt(stored.Value), VisibleCatRects()))
             return stored.Value;
         var point = DefaultCatPoint();
-        _cfg.CompanionPositions[CompanionKey(companion.Id)] = new[] { point.X, point.Y };
+        string key = CompanionKey(companion.Id);
+        _cfg.CompanionPositions[key] = new[] { point.X, point.Y };
+        // 手动摆过的伙伴即使因碰撞重新落位，也保留 custom 标记，避免 F8 default 再次搬走。
+        if (!wasCustom) _cfg.CompanionCustomPositions?.Remove(key);
         Save();
         return point;
     }
 
-    void ResetCompanionClickSchedule(long syntheticId, int seconds)
+    static long CompanionClickBaseMs(double rate)
+        => Math.Max(50L, (long)Math.Round(1000.0 / Math.Max(0.001, rate)));
+
+    void ResetCompanionClickSchedule(long syntheticId, double rate)
     {
-        if (seconds <= 0)
+        if (rate <= 0)
         {
             _companionNextClickMs[syntheticId] = 0;
             return;
         }
-        _companionNextClickMs[syntheticId] = Environment.TickCount64 + Math.Max(1000L, seconds * 1000L);
+        _companionNextClickMs[syntheticId] = Environment.TickCount64 + CompanionClickBaseMs(rate);
     }
 
     /// <summary>
-    /// 自动点击只是本地装饰动画：随机/固定间隔切换左右手帧，绝不调用 RoomManager.AddClicks，
-    /// 也不发送 cr 点击包。0 秒 = 关闭该伙伴的自动点击。
+    /// 自动点击只是本地装饰动画：按“次/秒”切换左右手帧，绝不调用 RoomManager.AddClicks，
+    /// 也不发送 cr 点击包。0 次/秒 = 关闭该伙伴的自动点击。
     /// </summary>
     void TickCompanionClicks()
     {
@@ -3235,11 +3369,11 @@ public sealed class PetWindow : Form
         long now = Environment.TickCount64;
         foreach (var companion in _cfg.Companions ?? new List<CompanionPet>())
         {
-            if (companion == null || companion.SyntheticId >= 0 || companion.ClickIntervalSeconds <= 0) continue;
+            if (companion == null || companion.SyntheticId >= 0 || companion.ClickRatePerSecond <= 0) continue;
             if (!_companionCats.TryGetValue(companion.SyntheticId, out var cat) || !cat.Visible) continue;
             if (!_companionNextClickMs.TryGetValue(companion.SyntheticId, out long next) || next <= 0)
             {
-                ResetCompanionClickSchedule(companion.SyntheticId, companion.ClickIntervalSeconds);
+                ResetCompanionClickSchedule(companion.SyntheticId, companion.ClickRatePerSecond);
                 continue;
             }
             if (now < next) continue;
@@ -3249,11 +3383,11 @@ public sealed class PetWindow : Form
             _companionClickSide[companion.SyntheticId] = side;
             cat.ApplyLocalClickAction(side == 0 ? "left" : "right");
 
-            long baseMs = Math.Max(1000L, companion.ClickIntervalSeconds * 1000L);
+            long baseMs = CompanionClickBaseMs(companion.ClickRatePerSecond);
             long delay = companion.RandomClick
                 ? (long)(baseMs * (0.5 + _companionRandom.NextDouble()))
                 : baseMs;
-            _companionNextClickMs[companion.SyntheticId] = now + Math.Max(500L, delay);
+            _companionNextClickMs[companion.SyntheticId] = now + Math.Max(50L, delay);
         }
     }
 
@@ -3263,22 +3397,12 @@ public sealed class PetWindow : Form
         if (companion == null) return;
         companion.Hidden = true;
         Save();
-        RefreshCompanions();
-    }
-
-    void OnCompanionDragStarted(RemoteCatWindow cat)
-    {
-        _draggingCat = cat;
-        _multiSelectClickPending = false;
-        // 自定义伙伴可以单独拖动，但不参与真实成员的多选/整组拖动。
-        cat.ExternalDrag = false;
-    }
-
-    void OnCompanionDragEnded(RemoteCatWindow cat, bool moved)
-    {
-        if (ReferenceEquals(_draggingCat, cat)) _draggingCat = null;
-        cat.ExternalDrag = false;
-        FlushPendingZOrderRestack();
+        // 与真实成员一致：等右键菜单关闭后再销毁伙伴窗口，避免在菜单 Click 回调里 Dispose 菜单。
+        Safe(() =>
+        {
+            RefreshCompanions();
+            NotifySettingsChanged();
+        });
     }
 
     void UpdateCompanionScales()
@@ -3500,6 +3624,7 @@ public sealed class PetWindow : Form
     public void ResetCatOrder(Screen targetScreen)
     {
         _cfg.MemberCustomPositions.Clear();
+        _cfg.CompanionCustomPositions?.Clear();
         _cfg.CompanionPositions ??= new Dictionary<string, int[]>();
         var wa = (targetScreen ?? ConfiguredScreen()).WorkingArea;
         float s = RemoteScaleFactor;
@@ -3663,44 +3788,42 @@ public sealed class PetWindow : Form
 
         Save();
         GeometryChanged?.Invoke();
-        if (!_cfg.AllowOverlap) ResolveOverlaps();
+        ApplyPlacementRules();
     }
 
     /// <summary>
-    /// 关闭“允许重叠”后，把与主角/其他成员相交的联机桌宠向附近空位挪动。
-    /// 本地主角位置保持不动，作为固定障碍物；刚被拖动的成员优先让位。
+    /// 关闭“允许重叠”后，把与主角/其他桌宠相交的联机角色和本地伙伴向附近空位挪动。
+    /// 本地主角位置保持不动，作为固定障碍物；刚被拖动的桌宠优先让位。
     /// </summary>
     public void ResolveOverlaps(long? priorityId = null)
     {
         if (_cfg.AllowOverlap) return;
-        var cats = _cats.Where(kv => kv.Value.Visible).OrderBy(kv => kv.Key).ToList();
+        var pets = AllPetWindows()
+            .Where(cat => cat != null && !cat.IsDisposed && cat.Visible)
+            .Select(cat => (Id: cat.MemberId, Cat: cat))
+            .OrderBy(pet => pet.Id)
+            .ToList();
         if (priorityId.HasValue)
-            cats = cats.OrderBy(kv => kv.Key == priorityId.Value ? 0 : 1).ThenBy(kv => kv.Key).ToList();
-        // 自定义伙伴保留自己的独立位置，只作为障碍物，不参与真实成员的自动挪位。
-        var companionRects = new List<Rectangle>();
-        foreach (var companionCat in _companionCats.Values)
-            if (companionCat.Visible) companionRects.Add(CatVisibleRect(companionCat));
+            pets = pets.OrderBy(pet => pet.Id == priorityId.Value ? 0 : 1).ThenBy(pet => pet.Id).ToList();
 
         bool changed = false;
         for (int pass = 0; pass < 8; pass++)
         {
             bool movedThisPass = false;
-            foreach (var pair in cats)
+            foreach (var pet in pets)
             {
-                var cat = pair.Value;
-                var rect = CatVisibleRect(cat);
+                var rect = CatVisibleRect(pet.Cat);
                 var obstacles = new List<Rectangle>();
                 var local = LocalVisibleRect();
                 if (!local.IsEmpty) obstacles.Add(local);
-                obstacles.AddRange(companionRects);
-                foreach (var other in cats)
-                    if (other.Key != pair.Key) obstacles.Add(CatVisibleRect(other.Value));
+                foreach (var other in pets)
+                    if (other.Id != pet.Id) obstacles.Add(CatVisibleRect(other.Cat));
                 if (!HasSignificantOverlap(rect, obstacles)) continue;
 
-                var target = FindFreeCatPoint(cat, obstacles);
+                var target = FindFreeCatPoint(pet.Cat, obstacles);
                 if (!target.HasValue) continue;
-                cat.Location = target.Value;
-                _cfg.MemberPositions[CatKey(pair.Key)] = new[] { target.Value.X, target.Value.Y };
+                pet.Cat.Location = target.Value;
+                SavePetPosition(pet.Id, pet.Cat, custom: false);
                 movedThisPass = true;
                 changed = true;
             }
@@ -3767,6 +3890,76 @@ public sealed class PetWindow : Form
         return DefaultCatPoint();
     }
 
+    /// <summary>把单个联机角色/自定义伙伴吸附到最近网格；主角色不调用。</summary>
+    void SnapPetToGrid(RemoteCatWindow cat)
+    {
+        if (!_cfg.AlignPetsToGrid || cat == null || cat.IsDisposed || !cat.Visible) return;
+        var visible = CatVisibleRect(cat);
+        var wa = Screen.FromRectangle(visible).WorkingArea;
+        float s = RemoteScaleFactor;
+        int gap = Math.Max(4, (int)Math.Round(8 * s));
+        int head = (int)Math.Round(RemoteCatWindow.Headroom * s);
+        var cell = PetGridLogic.CellSize(new Size(cat.Width, visible.Height), gap);
+        var obstacles = new List<Rectangle>();
+        var local = LocalVisibleRect();
+        if (!local.IsEmpty) obstacles.Add(local);
+        foreach (var other in AllPetWindows())
+            if (!ReferenceEquals(other, cat) && other.Visible && !other.IsDisposed)
+                obstacles.Add(CatVisibleRect(other));
+        var target = PetGridLogic.SnapVisibleRect(visible, wa, cell, head, obstacles, _cfg.GridAlignRight);
+        if (cat.Location != target) cat.Location = target;
+    }
+
+    /// <summary>把全部非主角桌宠吸附到网格；save=false 时由调用方统一落盘。</summary>
+    public void SnapPetsToGrid(bool save = true)
+    {
+        if (!_cfg.AlignPetsToGrid) return;
+        bool changed = false;
+        foreach (var cat in AllPetWindows())
+        {
+            if (cat == null || cat.IsDisposed || !cat.Visible) continue;
+            var before = cat.Location;
+            SnapPetToGrid(cat);
+            if (cat.Location == before) continue;
+            SavePetPosition(cat.MemberId, cat, custom: false);
+            changed = true;
+        }
+        if (changed && save) Save();
+    }
+
+    /// <summary>整组拖动结束前只吸附本次选中的桌宠，保持未选中桌宠不动。</summary>
+    void SnapSelectedPetsToGrid()
+    {
+        if (!_cfg.AlignPetsToGrid) return;
+        foreach (var id in _selectedCatIds)
+            if (TryGetPetWindow(id, out var cat)) SnapPetToGrid(cat);
+    }
+
+    /// <summary>
+    /// 托盘/右键菜单和设置页共用：切换网格对齐，启用时立即整理现有桌宠。
+    /// 主角色不在 AllPetWindows 中，因此不会被移动。
+    /// </summary>
+    public void SetPetsGridAlignment(bool enabled, bool snapExisting)
+    {
+        bool changed = _cfg.AlignPetsToGrid != enabled;
+        _cfg.AlignPetsToGrid = enabled;
+        if (changed) Save();
+        if (_alignGridItem != null) _alignGridItem.Checked = enabled;
+        foreach (var cat in AllPetWindows()) cat.SetGridAlignment(enabled);
+        if (enabled && snapExisting) SnapPetsToGrid();
+        NotifySettingsChanged();
+    }
+
+    void ToggleGridAlignment()
+        => SetPetsGridAlignment(!_cfg.AlignPetsToGrid, snapExisting: true);
+
+    /// <summary>网格对齐优先于自动避让；关闭网格后才执行重叠挪位。</summary>
+    void ApplyPlacementRules()
+    {
+        if (_cfg.AlignPetsToGrid) SnapPetsToGrid();
+        else if (!_cfg.AllowOverlap) ResolveOverlaps();
+    }
+
     void UpdateCatScales()
     {
         float s = RemoteScaleFactor;
@@ -3807,7 +4000,7 @@ public sealed class PetWindow : Form
         Save();
         UpdateCatScales();
         UpdateCompanionScales();
-        if (!_cfg.AllowOverlap) ResolveOverlaps();
+        ApplyPlacementRules();
         NotifySettingsChanged();
     }
 
@@ -3837,10 +4030,8 @@ public sealed class PetWindow : Form
     {
         if (_cats.TryGetValue(id, out var cat))
         {
-            if (ReferenceEquals(_draggingCat, cat)) _draggingCat = null;
+            ClearPetDragState(id, cat);
             _cats.Remove(id);
-            _selectedCatIds.Remove(id);
-            _groupDragOrigins.Remove(id);
             cat.Close();
             cat.Dispose();
             // 删除窗口不会在剩余桌宠之间留下 z-order 空洞，不需要重排。
@@ -3869,7 +4060,7 @@ public sealed class PetWindow : Form
         foreach (var id in _cats.Keys.ToList())
             if (!_room.Members.ContainsKey(id)) RemoveCat(id);
         foreach (var id in _room.Members.Keys.ToList()) UpdateCat(id);
-        if (!_cfg.AllowOverlap) ResolveOverlaps();
+        ApplyPlacementRules();
     }
 
     Point DefaultLocation()
@@ -3896,7 +4087,7 @@ public sealed class PetWindow : Form
         Compose();
         UpdateCatScales();
         UpdateCompanionScales();
-        if (!_cfg.AllowOverlap) ResolveOverlaps();
+        ApplyPlacementRules();
         GeometryChanged?.Invoke();
     }
 

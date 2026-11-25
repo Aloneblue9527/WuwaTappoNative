@@ -1011,6 +1011,8 @@ body.panel-maximized #maxBtn .icon-restore { display: block; }
   display: grid; grid-template-columns: 84px minmax(0, 1fr); grid-template-areas: "preview info" "actions actions";
   align-items: start; gap: 8px 10px;
 }
+.companion-page.select-mode .companion-card { cursor: pointer; }
+.companion-page.select-mode .companion-card:has([data-companion-select]:checked) { border-color: var(--theme-accent-strong); }
 .companion-preview { grid-area: preview; }
 .companion-preview .preset-preview { margin: 0; width: 84px; }
 .companion-info { grid-area: info; display: flex; flex-direction: column; gap: 2px; min-width: 0; }

@@ -3974,8 +3974,8 @@
       ${companionMode ? `<div class="companion-editor-options">
         <label class="setting-title">${tr('companion.clickFrequency', '点击频率')}</label>
         <div class="companion-option-row">
-          <input class="input" id="peClickSeconds" type="number" min="0" max="3600" step="1" value="${Number(p.clickIntervalSeconds || 0)}" style="width:92px">
-          <span class="muted">${tr('companion.secondsUnit', '秒/次；0 表示不自动点击')}</span>
+          <input class="input" id="peClickRate" type="number" min="0" max="20" step="0.1" value="${Number(p.clickRatePerSecond ?? (Number(p.clickIntervalSeconds || 0) > 0 ? 1 / Number(p.clickIntervalSeconds) : 0)).toFixed(2).replace(/\.?0+$/, '')}" style="width:92px">
+          <span class="muted">${tr('companion.rateUnit', '次/秒；0 表示不自动点击')}</span>
         </div>
         <label class="companion-check"><input type="checkbox" id="peRandomClick" ${p.randomClick ? 'checked' : ''}> ${tr('companion.randomClickHint', '随机化点击间隔与左右手动作')}</label>
         <label class="companion-check"><input type="checkbox" id="peShowBar" ${p.showBar !== false ? 'checked' : ''}> ${tr('companion.showBarHint', '显示该伙伴的昵称底栏（全局隐藏联机底栏时仍会隐藏）')}</label>
@@ -4156,7 +4156,7 @@
               name: typedName || companionCharacterName(temp.characterAssetId) || tr('companion.defaultName', '伙伴'),
               characterAssetId: temp.characterAssetId,
               accessoryAssetId: temp.accessoryAssetId,
-              clickIntervalSeconds: Math.max(0, Math.min(3600, Number(h.querySelector('#peClickSeconds')?.value) || 0)),
+              clickRatePerSecond: Math.max(0, Math.min(20, Number(h.querySelector('#peClickRate')?.value) || 0)),
               randomClick: !!h.querySelector('#peRandomClick')?.checked,
               showBar: h.querySelector('#peShowBar')?.checked !== false,
             });
@@ -4325,23 +4325,23 @@
   const COMPANION_BATCH_MAX = 50;
 
   /** 从给定角色/配件池随机组合，一次命令批量创建；名称使用角色名（去掉皮肤系列后缀）。 */
-  async function addRandomCompanions(count, characters, accessories, clickMin, clickMax, randomClick) {
+  async function addRandomCompanions(count, characters, accessories, rateMin, rateMax, randomClick) {
     if (!characters.length) throw new Error(tr('companion.batchNoCharacters', '图鉴里没有可用角色'));
-    const minSeconds = Math.max(0, Math.min(3600, Math.floor(Number(clickMin) || 0)));
-    const maxSeconds = Math.max(minSeconds, Math.min(3600, Math.floor(Number(clickMax) || 0)));
+    const minRate = Math.max(0, Math.min(20, Number(rateMin) || 0));
+    const maxRate = Math.max(minRate, Math.min(20, Number(rateMax) || 0));
     const items = [];
     for (let i = 0; i < count; i++) {
       const character = characters[Math.floor(Math.random() * characters.length)];
       const accessory = accessories.length ? accessories[Math.floor(Math.random() * accessories.length)] : null;
-      const clickSeconds = maxSeconds > 0
-        ? minSeconds + Math.floor(Math.random() * (maxSeconds - minSeconds + 1))
+      const clickRate = maxRate > 0
+        ? Math.max(0.1, Math.round((minRate + Math.random() * (maxRate - minRate)) * 10) / 10)
         : 0;
       items.push({
         name: companionCharacterName(Number(character.id)),
         characterAssetId: Number(character.id),
         accessoryAssetId: accessory ? Number(accessory.id) : 0,
-        clickIntervalSeconds: clickSeconds,
-        randomClick: clickSeconds > 0 && !!randomClick,
+        clickRatePerSecond: clickRate,
+        randomClick: clickRate > 0 && !!randomClick,
         showBar: true,
       });
     }
@@ -4379,10 +4379,10 @@
       </select>
       <label class="setting-title">${tr('companion.batchClickRange', '点击频率范围')}</label>
       <div class="batch-add-range">
-        <input class="input" id="batchClickMin" type="number" min="0" max="3600" step="1" value="0" inputmode="numeric">
+        <input class="input" id="batchClickMin" type="number" min="0" max="20" step="0.1" value="0" inputmode="decimal">
         <span>–</span>
-        <input class="input" id="batchClickMax" type="number" min="0" max="3600" step="1" value="0" inputmode="numeric">
-        <span class="muted">${tr('companion.batchClickHint', '秒/次；0–0 表示不自动点击')}</span>
+        <input class="input" id="batchClickMax" type="number" min="0" max="20" step="0.1" value="0" inputmode="decimal">
+        <span class="muted">${tr('companion.batchClickHint', '次/秒；0–0 表示不自动点击')}</span>
       </div>
       <label class="companion-check"><input type="checkbox" id="batchRandomClick"> ${tr('companion.batchRandomClick', '每次点击再随机浮动')}</label>
       <div class="batch-add-summary" id="batchAddSummary"></div>
@@ -4405,8 +4405,8 @@
       });
       const currentCount = () => Math.max(1, Math.min(COMPANION_BATCH_MAX, Math.floor(Number(countInput.value)) || 1));
       const currentClickRange = () => {
-        const a = Math.max(0, Math.min(3600, Math.floor(Number(clickMinInput.value) || 0)));
-        const b = Math.max(0, Math.min(3600, Math.floor(Number(clickMaxInput.value) || 0)));
+        const a = Math.max(0, Math.min(20, Number(clickMinInput.value) || 0));
+        const b = Math.max(0, Math.min(20, Number(clickMaxInput.value) || 0));
         return { min: Math.min(a, b), max: Math.max(a, b) };
       };
       const update = () => {
@@ -4415,7 +4415,7 @@
         const click = currentClickRange();
         const clickText = click.max <= 0
           ? tr('companion.batchClickOff', '不自动点击')
-          : tr('companion.batchClickSummary', '点击频率 {min}–{max} 秒', { min: click.min, max: click.max });
+          : tr('companion.batchClickSummary', '点击频率 {min}–{max} 次/秒', { min: click.min, max: click.max });
         summary.textContent = !pools.characters.length
           ? tr('companion.batchNoCharacters', '图鉴里没有可用角色')
           : noOwnedAccessory
@@ -4464,6 +4464,8 @@
     const charName = catalogName('character_skin', charId);
     const accName = catalogName('accessory', accId);
     const seconds = Number(p.clickIntervalSeconds || 0);
+    const clickRate = Number(p.clickRatePerSecond ?? (seconds > 0 ? 1 / seconds : 0));
+    const clickRateText = Number(clickRate.toFixed(2));
     return `<div class="companion-card" data-companion-index="${index}">
       <div class="companion-preview">${presetStageHtml(charId, accId, false, 84)}</div>
       <div class="companion-info">
@@ -4475,7 +4477,7 @@
         </div>
         <div class="detail-row"><span>${tr('companion.character', '角色')}</span><span title="${esc(charName)}">${esc(charName)}</span></div>
         <div class="detail-row"><span>${tr('companion.accessory', '配件')}</span><span title="${esc(accName)}">${esc(accName)}</span></div>
-        <div class="detail-row"><span>${tr('companion.clickFrequency', '点击频率')}</span><span>${seconds > 0 ? tr('companion.everySeconds', '每 {n} 秒', { n: seconds }) : tr('companion.clickOff', '不自动点击')}</span></div>
+        <div class="detail-row"><span>${tr('companion.clickFrequency', '点击频率')}</span><span>${clickRateText > 0 ? tr('companion.timesPerSecond', '每秒 {n} 次', { n: clickRateText }) : tr('companion.clickOff', '不自动点击')}</span></div>
         <div class="detail-row"><span>${tr('companion.randomClick', '随机点击')}</span><span>${p.randomClick ? tr('common.on', '开') : tr('common.off', '关')}</span></div>
         <div class="detail-row"><span>${tr('companion.showBar', '显示底栏')}</span><span>${p.showBar ? tr('common.on', '开') : tr('common.off', '关')}</span></div>
         <div class="detail-row"><span>${tr('companion.visibility', '桌面显示')}</span><span>${p.hidden ? tr('companion.hidden', '已隐藏') : tr('companion.visible', '显示中')}</span></div>
@@ -4556,6 +4558,17 @@
       if (!p?.id) return;
       if (el.checked) selectedIds.add(p.id); else selectedIds.delete(p.id);
       updateSelection();
+    });
+    // 多选状态下整张卡片空白区域都可点选；操作按钮/复选框/标签仍走各自逻辑。
+    document.querySelectorAll('[data-companion-index]').forEach(card => card.onclick = e => {
+      if (!selectMode) return;
+      if (e.target.closest('button, input, label, a, select')) return;
+      const index = Number(card.dataset.companionIndex);
+      const box = card.querySelector('[data-companion-select]');
+      const p = list[index];
+      if (!box || !p?.id) return;
+      box.checked = !box.checked;
+      box.dispatchEvent(new Event('change', { bubbles: true }));
     });
     selectAllBox.onchange = () => {
       document.querySelectorAll('[data-companion-select]').forEach(x => { x.checked = selectAllBox.checked; });
@@ -6155,7 +6168,18 @@
             </div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">${tr('settings.window.allowOverlap.title', '允许角色重叠')}</div><div class="setting-sub">${tr('settings.window.allowOverlap.sub', '默认开启；关闭后检测到重叠的联机桌宠会自动挪到旁边')}</div></div>
+            <div><div class="setting-title">${tr('settings.window.alignGrid.title', '将桌宠与网格对齐')}</div><div class="setting-sub">${tr('settings.window.alignGrid.sub', '开启后，联机角色和自定义伙伴移动后会吸附到虚拟网格；主角色不受影响')}</div></div>
+            <div class="switch ${s.alignPetsToGrid ? 'on' : ''}" data-switch="alignPetsToGrid"></div>
+          </div>
+          <div class="setting-item">
+            <div><div class="setting-title">${tr('settings.window.gridAlignSide.title', '网格对齐点')}</div><div class="setting-sub">${tr('settings.window.gridAlignSide.sub', '虚拟网格从屏幕左侧还是右侧开始；默认右侧')}</div></div>
+            <div class="layout-switch" id="setGridAlignSide">
+              <button type="button" class="layout-choice ${s.gridAlignRight === false ? 'active' : ''}" data-grid-side="left">${tr('settings.window.gridAlignSide.left', '左侧')}</button>
+              <button type="button" class="layout-choice ${s.gridAlignRight !== false ? 'active' : ''}" data-grid-side="right">${tr('settings.window.gridAlignSide.right', '右侧')}</button>
+            </div>
+          </div>
+          <div class="setting-item">
+            <div><div class="setting-title">${tr('settings.window.allowOverlap.title', '允许角色重叠')}</div><div class="setting-sub">${tr('settings.window.allowOverlap.sub', '默认开启；关闭后检测到重叠的联机桌宠和自定义伙伴会自动挪到旁边')}</div></div>
             <div class="switch ${s.allowOverlap !== false ? 'on' : ''}" data-switch="allowOverlap"></div>
           </div>
           <div class="setting-item">
@@ -7964,6 +7988,16 @@
         } catch { }
       };
     });
+    document.querySelectorAll('#setGridAlignSide [data-grid-side]').forEach(btn => {
+      btn.onclick = async () => {
+        const right = btn.dataset.gridSide === 'right';
+        try {
+          await tryCall('settings.set', { gridAlignRight: right });
+          if (state.boot?.settings) state.boot.settings.gridAlignRight = right;
+          renderSettings();
+        } catch { }
+      };
+    });
     document.getElementById('setSend')?.addEventListener('click', async () => {
       const uid = val('setUid');
       if (!uid) return toast(tr('login.toastUidRequired', '请输入游戏 UID'), 'err');
@@ -8078,6 +8112,8 @@
         hideRemoteBars: false,
         separateBarHotkeys: false,
         allowOverlap: true,
+        alignPetsToGrid: false,
+        gridAlignRight: true,
         catLayout: 'vertical',
         captureMode: false,
         captureColor: '#00FF00',

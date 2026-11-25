@@ -14,6 +14,7 @@
   "tray.layout": "Layout",
   "tray.layoutHorizontal": "Horizontal",
   "tray.layoutVertical": "Vertical",
+  "tray.alignGrid": "Align pets to grid",
   "tray.keyboard": "Desktop keyboard",
   "tray.keyboardHidden": "Hidden",
   "tray.keyboardLetters": "26-key",
@@ -69,6 +70,10 @@
   "remote.scalePct": "Remote character size ({0}%)",
   "remote.opacity": "Remote character opacity",
   "remote.opacityPct": "Remote character opacity ({0}%)",
+  "remote.companionScale": "Companion size",
+  "remote.companionScalePct": "Companion size ({0}%)",
+  "remote.companionOpacity": "Companion opacity",
+  "remote.companionOpacityPct": "Companion opacity ({0}%)",
   "remote.defaultNickname": "Rover",
 
   "capture.resetTopLeft": "Reset to top-left",

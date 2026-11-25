@@ -20,11 +20,11 @@ internal static class PetSelectionLogic
         => vk == VK_A && ctrl && !alt && !shift && selectedCount > 0;
 
     /// <summary>
-    /// Ctrl+A 的结果：加入全部可见联机成员，但不主动改变主角。
+    /// Ctrl+A 的结果：加入全部可见桌宠（联机成员和本地伙伴），但不主动改变主角。
     /// 主角原本被选中说明是用户特意选的，继续保留；原本没选也不趁机加进来。
     /// </summary>
-    public static (bool SelfSelected, long[] CatIds) BuildCtrlASelection(bool selfSelectedBefore, IEnumerable<long> remoteIds)
-        => (selfSelectedBefore, remoteIds?.Distinct().ToArray() ?? Array.Empty<long>());
+    public static (bool SelfSelected, long[] CatIds) BuildCtrlASelection(bool selfSelectedBefore, IEnumerable<long> petIds)
+        => (selfSelectedBefore, petIds?.Distinct().ToArray() ?? Array.Empty<long>());
 
     /// <summary>
     /// 按系统 DragSize 的宽、高分别判断是否越过起拖死区。

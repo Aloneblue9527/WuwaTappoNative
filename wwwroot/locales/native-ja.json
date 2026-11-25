@@ -14,6 +14,7 @@
   "tray.layout": "並び方向",
   "tray.layoutHorizontal": "横並び",
   "tray.layoutVertical": "縦並び",
+  "tray.alignGrid": "ペットをグリッドに整列",
   "tray.keyboard": "デスクトップキーボード",
   "tray.keyboardHidden": "非表示",
   "tray.keyboardLetters": "26キー",
@@ -69,6 +70,10 @@
   "remote.scalePct": "リモートキャラクターのサイズ（{0}%）",
   "remote.opacity": "リモートキャラクターの不透明度",
   "remote.opacityPct": "リモートキャラクターの不透明度（{0}%）",
+  "remote.companionScale": "コンパニオンのサイズ",
+  "remote.companionScalePct": "コンパニオンのサイズ（{0}%）",
+  "remote.companionOpacity": "コンパニオンの不透明度",
+  "remote.companionOpacityPct": "コンパニオンの不透明度（{0}%）",
   "remote.defaultNickname": "漂泊者",
 
   "capture.resetTopLeft": "左上に戻す",

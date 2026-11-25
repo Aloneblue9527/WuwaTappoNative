@@ -695,6 +695,8 @@ public sealed class PanelWindow : Form
             rhythmKeyCount = _app.Cfg.RhythmKeyCount,
             rhythmKeys = _app.Cfg.RhythmKeys,
             allowOverlap = _app.Cfg.AllowOverlap,
+            alignPetsToGrid = _app.Cfg.AlignPetsToGrid,
+            gridAlignRight = _app.Cfg.GridAlignRight,
             catLayout = _app.Cfg.CatLayout,
             petScreen = _app.Cfg.PetScreen,
             screenSwitchMode = _app.Cfg.ScreenSwitchMode,
@@ -1588,6 +1590,8 @@ public sealed class PanelWindow : Form
                             barHotkeyModeChanged = true;
                             break;
                         case "allowOverlap": cfg.AllowOverlap = ApiClient.ReadBool(kv.Value); break;
+                        case "alignPetsToGrid": cfg.AlignPetsToGrid = ApiClient.ReadBool(kv.Value); break;
+                        case "gridAlignRight": cfg.GridAlignRight = ApiClient.ReadBool(kv.Value); break;
                         case "remoteFollowMain": cfg.RemoteFollowMainScale = ApiClient.ReadBool(kv.Value); break;
                         case "remoteScale":
                             cfg.RemoteScale = Math.Clamp(ReadDouble(kv.Value), 0.25, 2.0);
@@ -1843,7 +1847,7 @@ public sealed class PanelWindow : Form
                     // 单/双底栏快捷键模式变化后立即换用对应的注册集合。
                     if (barHotkeyModeChanged) _app.Pet.RebindHotkeys();
                     if (data.ContainsKey("petScreen")) _app.Pet.MoveToScreen(cfg.PetScreen);
-                    if (!cfg.AllowOverlap) _app.Pet.ResolveOverlaps();
+                    if (!cfg.AlignPetsToGrid && !cfg.AllowOverlap) _app.Pet.ResolveOverlaps();
                     // “隐藏其他成员”开关必须立刻重建/移除联机桌宠，不能等下一次房间事件。
                     // 同一开关也覆盖本地自定义伙伴（见 PetWindow.RefreshCompanions 的规则注释）。
                     if (hideOthersChanged)
@@ -1973,6 +1977,9 @@ public sealed class PanelWindow : Form
                 if (name.Length > 64) name = name[..64];
                 long accessory = ApiClient.ReadLong(data["accessoryAssetId"]);
                 int clickSeconds = Math.Clamp((int)ApiClient.ReadLong(data["clickIntervalSeconds"]), 0, 3600);
+                double clickRate = data.ContainsKey("clickRatePerSecond")
+                    ? Math.Clamp(ReadDouble(data["clickRatePerSecond"]), 0, 20)
+                    : (clickSeconds > 0 ? 1.0 / clickSeconds : 0);
                 bool randomClick = ApiClient.ReadBool(data["randomClick"]);
                 bool showBar = !data.ContainsKey("showBar") || ApiClient.ReadBool(data["showBar"]);
                 cfg.Companions ??= new List<CompanionPet>();
@@ -1987,7 +1994,10 @@ public sealed class PanelWindow : Form
                 companion.Name = name;
                 companion.CharacterAssetId = character;
                 companion.AccessoryAssetId = accessory;
-                companion.ClickIntervalSeconds = clickSeconds;
+                companion.ClickRatePerSecond = clickRate;
+                companion.ClickIntervalSeconds = clickRate > 0
+                    ? Math.Max(1, (int)Math.Round(1.0 / clickRate))
+                    : 0;
                 companion.RandomClick = randomClick;
                 companion.ShowBar = showBar;
                 // Normalize 会为新伙伴分配唯一负数合成 id；它只用于本机窗口，不进入房间。
@@ -2011,13 +2021,20 @@ public sealed class PanelWindow : Form
                         string name = ApiClient.ReadString(item["name"]).Trim();
                         if (string.IsNullOrEmpty(name)) name = DefaultCompanionName(character);
                         if (name.Length > 64) name = name[..64];
+                        int clickSeconds = Math.Clamp((int)ApiClient.ReadLong(item["clickIntervalSeconds"]), 0, 3600);
+                        double clickRate = item.ContainsKey("clickRatePerSecond")
+                            ? Math.Clamp(ReadDouble(item["clickRatePerSecond"]), 0, 20)
+                            : (clickSeconds > 0 ? 1.0 / clickSeconds : 0);
                         cfg.Companions.Add(new CompanionPet
                         {
                             Id = Guid.NewGuid().ToString("N"),
                             Name = name,
                             CharacterAssetId = character,
                             AccessoryAssetId = ApiClient.ReadLong(item["accessoryAssetId"]),
-                            ClickIntervalSeconds = Math.Clamp((int)ApiClient.ReadLong(item["clickIntervalSeconds"]), 0, 3600),
+                            ClickRatePerSecond = clickRate,
+                            ClickIntervalSeconds = clickRate > 0
+                                ? Math.Max(1, (int)Math.Round(1.0 / clickRate))
+                                : 0,
                             RandomClick = ApiClient.ReadBool(item["randomClick"]),
                             ShowBar = !item.ContainsKey("showBar") || ApiClient.ReadBool(item["showBar"]),
                         });
@@ -2050,10 +2067,12 @@ public sealed class PanelWindow : Form
                 string id = ApiClient.ReadString(data["id"]).Trim();
                 cfg.Companions ??= new List<CompanionPet>();
                 cfg.CompanionPositions ??= new Dictionary<string, int[]>();
+                cfg.CompanionCustomPositions ??= new Dictionary<string, bool>();
                 var companion = cfg.Companions.FirstOrDefault(c => c != null && string.Equals(c.Id, id, StringComparison.Ordinal));
                 if (companion != null)
                 {
                     cfg.CompanionPositions.Remove("companion:" + companion.Id);
+                    cfg.CompanionCustomPositions.Remove("companion:" + companion.Id);
                     cfg.MemberMirrored?.Remove(companion.SyntheticId.ToString());
                 }
                 cfg.Companions.RemoveAll(c => c == null || string.Equals(c.Id, id, StringComparison.Ordinal));
@@ -2075,6 +2094,7 @@ public sealed class PanelWindow : Form
                 }
                 cfg.Companions ??= new List<CompanionPet>();
                 cfg.CompanionPositions ??= new Dictionary<string, int[]>();
+                cfg.CompanionCustomPositions ??= new Dictionary<string, bool>();
                 var removed = cfg.Companions
                     .Where(c => c != null && ids.Contains(c.Id ?? ""))
                     .ToList();
@@ -2083,6 +2103,7 @@ public sealed class PanelWindow : Form
                     foreach (var companion in removed)
                     {
                         cfg.CompanionPositions.Remove("companion:" + companion.Id);
+                        cfg.CompanionCustomPositions.Remove("companion:" + companion.Id);
                         cfg.MemberMirrored?.Remove(companion.SyntheticId.ToString());
                     }
                     var removeIds = new HashSet<string>(removed.Select(c => c.Id ?? ""), StringComparer.Ordinal);
@@ -2538,6 +2559,7 @@ public sealed class PanelWindow : Form
                 characterAssetId = c.CharacterAssetId,
                 accessoryAssetId = c.AccessoryAssetId,
                 clickIntervalSeconds = c.ClickIntervalSeconds,
+                clickRatePerSecond = c.ClickRatePerSecond,
                 randomClick = c.RandomClick,
                 showBar = c.ShowBar,
                 hidden = c.Hidden,

@@ -32,7 +32,7 @@ Wuwatappo Native is the Windows-native implementation of WuwaTappo 1.0.2, writte
 - ✅ Supports hiding the bottom bars of the main desktop pet and remote characters separately, toggled with single-key or two-key shortcuts
 - ✅ Supports panel maximization and eight-direction edge resizing, and remembers the panel size and maximized state
 - ✅ Supports F8 multi-screen switching: three strategies — default-position members, main character only, and all members — with proportional mapping across resolutions
-- ✅ Supports Ctrl multi-select of multiplayer pets, Ctrl+A select all, group dragging with edge snapping, and clicking empty space to exit the selection
+- ✅ Supports Ctrl multi-select of multiplayer pets and custom companions, Ctrl+A select all, group dragging with edge snapping, and clicking empty space to exit the selection
 - ✅ Supports viewing all announcements currently issued by the server on the settings page (including read status)
 - ✅ Supports refreshing the Key count (+10000 with one click), and automatically topping up when it is below 1000
 - ✅ Supports automatic rank-up synthesis and one-click bulk rank-up
@@ -45,7 +45,7 @@ Wuwatappo Native is the Windows-native implementation of WuwaTappo 1.0.2, writte
 - ✅ Rhythm game mode supports 4K / 5K / 6K, with key bindings saved separately for each mode; Space and punctuation keys such as ; ' , . / can be configured
 - ✅ Supports one-click inheritance of the official login state
 - ✅ Supports streamer mode OBS capture window (custom background color / transparent background)
-- ✅ Supports automatic avoidance for multiplayer characters, horizontal/vertical arrangement, and order reset
+- ✅ Supports automatic avoidance and virtual-grid snapping (main character excluded; left/right anchor, right by default) for multiplayer characters and custom companions, plus horizontal/vertical arrangement and order reset
 - ✅ Supports showing/hiding multiplayer members individually, with settings saved per member
 - More optimized features waiting for you to discover......
 
@@ -173,7 +173,7 @@ Hotkeys can be recorded, cleared, or reset to defaults in `Settings → Desktop 
 | Settings location | Contents |
 |---|---|
 | `Settings → Account` | Server region, login, inherit official login, import token, log out, refresh account info, cumulative click top-up |
-| `Settings → Pet & window` | Pet size, remote pet size/follow main pet, pet opacity, remote pet opacity/follow main pet, remote player name size, animation frame rate, always on top, mouse pass-through, hover hide, overlap handling, OBS capture window size/background color/transparent background/compatibility mode/stop rendering the desktop pet |
+| `Settings → Pet & window` | Pet size, remote pet size/follow main pet, pet opacity, remote pet opacity/follow main pet, remote player name size, animation frame rate, always on top, mouse pass-through, hover hide, grid alignment (left/right), overlap handling, OBS capture window size/background color/transparent background/compatibility mode/stop rendering the desktop pet |
 | `Settings → Desktop keyboard` | 26-key, Wuthering Waves, Rhythm mode, Controller, controller protocol extension, key mapping, and hotkeys |
 | `Settings → Multiplayer & chests` | Remote pet layout, hide other members, automatic rank-up synthesis, manually open treasure chests, treasure chest display, automatic treasure chest claiming |
 | `Multiplayer` page | Create/join/switch rooms, room history, member display, quick emotes |

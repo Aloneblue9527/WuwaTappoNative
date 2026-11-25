@@ -64,6 +64,7 @@ public static class StateStore
                     ["companionPositions"] = ToPositions(cfg.CompanionPositions),
                     ["memberVisibility"] = ToVisibility(cfg.MemberVisibility),
                     ["memberCustomPositions"] = ToTrueFlags(cfg.MemberCustomPositions),
+                    ["companionCustomPositions"] = ToTrueFlags(cfg.CompanionCustomPositions),
                     ["readAnnouncementIds"] = ToArray(cfg.ReadAnnouncementIds),
                 };
                 string tmp = Paths.StateFile + ".tmp";
@@ -99,6 +100,19 @@ public static class StateStore
         cfg.CompanionPositions = ReadPositions(root["companionPositions"]);
         cfg.MemberVisibility = ReadVisibility(root["memberVisibility"]);
         cfg.MemberCustomPositions = ReadTrueFlags(root["memberCustomPositions"]);
+        // 旧版 state.json 没有 companionCustomPositions：把已有伙伴位置视为手动位置，
+        // 避免升级后 F8 的 default 策略把用户已经摆好的伙伴搬走。
+        if (root["companionCustomPositions"] == null)
+        {
+            cfg.CompanionCustomPositions = new Dictionary<string, bool>();
+            foreach (string key in cfg.CompanionPositions.Keys)
+                if (key.StartsWith("companion:", StringComparison.Ordinal))
+                    cfg.CompanionCustomPositions[key] = true;
+        }
+        else
+        {
+            cfg.CompanionCustomPositions = ReadTrueFlags(root["companionCustomPositions"]);
+        }
         cfg.ReadAnnouncementIds = ReadStringArray(root["readAnnouncementIds"]).ToList();
     }
 

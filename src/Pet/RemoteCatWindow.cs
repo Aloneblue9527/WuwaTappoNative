@@ -30,7 +30,7 @@ public sealed class RemoteCatWindow : Form
     PetFrames _frames;
     readonly EmoteBubbleLayer _bubbles = new(6);
     ContextMenuStrip _menu;
-    ToolStripMenuItem _hideItem, _scaleMenu, _opacityMenu, _mirrorItem;
+    ToolStripMenuItem _hideItem, _scaleMenu, _opacityMenu, _mirrorItem, _gridItem;
     double _remoteScale = 1.0, _remoteOpacity = 1.0, _remoteNameScale = 1.0;
     public event Action<double> RemoteScaleRequested;
     public event Action<double> RemoteOpacityRequested;
@@ -51,6 +51,7 @@ public sealed class RemoteCatWindow : Form
     long _lastDragMoveMs;
     bool _selected;
     bool _mirrored;
+    bool _gridAligned;
     bool _barVisible = true;
     Color _pillColor = PetComposer.Cream;
     Color _pillTextColor = PetComposer.InkStrong;
@@ -65,6 +66,8 @@ public sealed class RemoteCatWindow : Form
     public event Action<long> LocalHideRequested;
     /// <summary>右键菜单请求切换该成员镜像。</summary>
     public event Action<long, bool> MirrorRequested;
+    /// <summary>右键菜单请求切换全局“桌宠与网格对齐”。</summary>
+    public event Action GridAlignmentRequested;
 
     /// <summary>由主窗口接管本次拖动（多选批量移动）时，远程窗口自身不再移动。</summary>
     public bool ExternalDrag { get; set; }
@@ -172,9 +175,17 @@ public sealed class RemoteCatWindow : Form
         _mirrorItem = new ToolStripMenuItem(Localization.T("remote.mirror", "镜像角色")) { Checked = _mirrored };
         _mirrorItem.Click += (s, e) => MirrorRequested?.Invoke(MemberId, !_mirrored);
         _menu.Items.Add(_mirrorItem);
+        _gridItem = new ToolStripMenuItem(Localization.T("tray.alignGrid", "将桌宠与网格对齐"))
+        {
+            Checked = _gridAligned,
+        };
+        _gridItem.Click += (s, e) => GridAlignmentRequested?.Invoke();
+        _menu.Items.Add(_gridItem);
         _menu.Items.Add(new ToolStripSeparator());
 
-        _scaleMenu = new ToolStripMenuItem(Localization.T("remote.scale", "联机角色大小"));
+        _scaleMenu = new ToolStripMenuItem(_localCompanion
+            ? Localization.T("remote.companionScale", "伙伴大小")
+            : Localization.T("remote.scale", "联机角色大小"));
         foreach (var v in new[] { 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0 })
         {
             var item = new ToolStripMenuItem((int)(v * 100) + "%") { Tag = v };
@@ -184,7 +195,9 @@ public sealed class RemoteCatWindow : Form
         }
         _menu.Items.Add(_scaleMenu);
 
-        _opacityMenu = new ToolStripMenuItem(Localization.T("remote.opacity", "联机角色透明度"));
+        _opacityMenu = new ToolStripMenuItem(_localCompanion
+            ? Localization.T("remote.companionOpacity", "伙伴透明度")
+            : Localization.T("remote.opacity", "联机角色透明度"));
         foreach (var v in new[] { 1.0, 0.9, 0.75, 0.5 })
         {
             var item = new ToolStripMenuItem((int)(v * 100) + "%") { Tag = v };
@@ -194,6 +207,13 @@ public sealed class RemoteCatWindow : Form
         }
         _menu.Items.Add(_opacityMenu);
         _menu.Opening += (s, e) => RefreshRemoteMenu();
+    }
+
+    /// <summary>同步全局网格对齐开关的勾选状态；实际吸附由 PetWindow 统一处理。</summary>
+    public void SetGridAlignment(bool enabled)
+    {
+        _gridAligned = enabled;
+        if (_gridItem != null) _gridItem.Checked = enabled;
     }
 
     public void SetRemoteStyle(double scale, double opacity, double nameScale = 1.0)
@@ -221,8 +241,19 @@ public sealed class RemoteCatWindow : Form
                 ? Localization.T("remote.unmirror", "取消镜像")
                 : Localization.T("remote.mirror", "镜像角色");
         }
-        _scaleMenu.Text = Localization.F("remote.scalePct", "联机角色大小（{0}%）", (int)Math.Round(_remoteScale * 100));
-        _opacityMenu.Text = Localization.F("remote.opacityPct", "联机角色透明度（{0}%）", (int)Math.Round(_remoteOpacity * 100));
+        if (_gridItem != null)
+        {
+            _gridItem.Checked = _gridAligned;
+            _gridItem.Text = Localization.T("tray.alignGrid", "将桌宠与网格对齐");
+        }
+        int scalePct = (int)Math.Round(_remoteScale * 100);
+        int opacityPct = (int)Math.Round(_remoteOpacity * 100);
+        _scaleMenu.Text = _localCompanion
+            ? Localization.F("remote.companionScalePct", "伙伴大小（{0}%）", scalePct)
+            : Localization.F("remote.scalePct", "联机角色大小（{0}%）", scalePct);
+        _opacityMenu.Text = _localCompanion
+            ? Localization.F("remote.companionOpacityPct", "伙伴透明度（{0}%）", opacityPct)
+            : Localization.F("remote.opacityPct", "联机角色透明度（{0}%）", opacityPct);
         foreach (ToolStripItem sub in _scaleMenu.DropDownItems)
         {
             if (sub is ToolStripMenuItem item && item.Tag is double preset)

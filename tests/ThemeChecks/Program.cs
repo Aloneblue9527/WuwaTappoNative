@@ -62,6 +62,7 @@ internal static class Program
             CheckPetZOrderGuard();
             CheckCatOrderScreenSelection();
             CheckPetMultiSelectBehavior();
+            CheckPetGridLogic();
             CheckPetBarClickDragRegression();
             CheckRoomProtocol105();
             CheckFullscreenGameMode();
@@ -2564,13 +2565,16 @@ internal static class Program
         Assert(!PetSelectionLogic.ShouldSelectAllOnCtrlA(0x42, true, false, false, 2),
             "Only the A key may select all pets.");
 
-        // Ctrl+A 只加远程成员，主角原来选中就保留、原来没选就不主动加。
+        // Ctrl+A 加所有桌宠（真实成员 + 自定义伙伴），主角原来选中就保留、原来没选就不主动加。
         var keepMain = PetSelectionLogic.BuildCtrlASelection(true, new long[] { 2, 3, 2 });
         Assert(keepMain.SelfSelected && keepMain.CatIds.SequenceEqual(new long[] { 2, 3 }),
             "Ctrl+A must preserve a self-selected main pet and select all remotes.");
         var noMain = PetSelectionLogic.BuildCtrlASelection(false, new long[] { 2, 3 });
         Assert(!noMain.SelfSelected && noMain.CatIds.SequenceEqual(new long[] { 2, 3 }),
             "Ctrl+A must not add the main pet when it was not selected.");
+        var withCompanions = PetSelectionLogic.BuildCtrlASelection(false, new long[] { 2, -1000, 3, -1000, -1001 });
+        Assert(!withCompanions.SelfSelected && withCompanions.CatIds.SequenceEqual(new long[] { 2, -1000, 3, -1001 }),
+            "Ctrl+A must include negative synthetic companion ids and keep them distinct.");
         var onlyMain = PetSelectionLogic.BuildCtrlASelection(true, Array.Empty<long>());
         Assert(onlyMain.SelfSelected && onlyMain.CatIds.Length == 0,
             "Ctrl+A triggered while only the main pet is selected must keep it selected.");
@@ -2624,10 +2628,88 @@ internal static class Program
             "Outside-click selection clearing must be wired through ClearSelectionOnOutsideClick().");
         string selectAllBody = Regex.Match(pet, @"void\s+SelectAllRemoteCats\(\)[\s\S]*?\n    \}").Value;
         Assert(selectAllBody.Contains("BuildCtrlASelection", StringComparison.Ordinal) &&
+               selectAllBody.Contains("_companionCats.Keys", StringComparison.Ordinal) &&
                !selectAllBody.Contains("ClearSelection", StringComparison.Ordinal),
-            "SelectAllRemoteCats must use BuildCtrlASelection and never clear the main pet's selection.");
+            "SelectAllRemoteCats must select real members and companions without clearing the main pet.");
+
+        Assert(pet.Contains("bool TryGetPetWindow(long id, out RemoteCatWindow cat)", StringComparison.Ordinal) &&
+               pet.Contains("_selectedCatIds.Count(id => TryGetPetWindow(id, out _))", StringComparison.Ordinal),
+            "Selection helpers must resolve both real members and custom companions.");
+        Assert(pet.Contains("cat.DragMoved += OnCatDragMoved;", StringComparison.Ordinal) &&
+               pet.Contains("cat.DragStarted += OnCatDragStarted;", StringComparison.Ordinal) &&
+               pet.Contains("cat.DragEnded += OnCatDragEnded;", StringComparison.Ordinal),
+            "Custom companions must use the same drag event pipeline as real members.");
+        Assert(pet.Contains("SavePetPosition(pet.Id, pet.Cat, custom: false)", StringComparison.Ordinal) &&
+               pet.Contains("SavePetPosition(id, cat, custom: true)", StringComparison.Ordinal) &&
+               pet.Contains("CompanionCustomPositions", StringComparison.Ordinal),
+            "Group/overlap moves must persist companion positions without writing synthetic ids into member state.");
+        Assert(pet.Contains("AllPetWindows()", StringComparison.Ordinal) &&
+               pet.Contains("_companionCats.Keys", StringComparison.Ordinal),
+            "PetWindow must iterate companions in cross-pet operations.");
 
         Console.WriteLine("PASS: Ctrl multi-select (Ctrl+A preserves main selection, drag dead zone, group snapping, outside-click clear).");
+    }
+
+    static void CheckPetGridLogic()
+    {
+        var cell = PetGridLogic.CellSize(new Size(200, 211), 8);
+        Assert(cell.Width == 208 && cell.Height == 219,
+            "Grid cells must grow with the pet's visible size plus the configured gap.");
+
+        var wa = new Rectangle(0, 0, 1000, 800);
+        var topLeft = PetGridLogic.SnapVisibleRect(new Rectangle(0, 0, 200, 211), wa, cell, 130);
+        Assert(topLeft == new Point(0, -130),
+            "The first grid cell must start at the top-left of the working area and subtract the bubble headroom.");
+
+        var secondColumn = PetGridLogic.SnapVisibleRect(new Rectangle(210, 10, 200, 211), wa, cell, 130);
+        Assert(secondColumn == new Point(208, -130),
+            "A pet just past the first cell width must snap to the second column.");
+
+        var bottomRight = PetGridLogic.SnapVisibleRect(new Rectangle(790, 590, 200, 211), wa, cell, 130);
+        Assert(bottomRight == new Point(624, 308),
+            "Grid snapping must clamp to the last fully visible column and row.");
+
+        var leftScreen = new Rectangle(-1920, 0, 1920, 1080);
+        var negative = PetGridLogic.SnapVisibleRect(new Rectangle(-1920, 0, 200, 211), leftScreen, cell, 130);
+        Assert(negative == new Point(-1920, -130),
+            "Multi-monitor work areas with negative origins must keep the grid anchored on that screen.");
+
+        var blocked = PetGridLogic.SnapVisibleRect(
+            new Rectangle(0, 0, 200, 211), wa, cell, 130,
+            new[] { new Rectangle(0, 0, 200, 211) });
+        Assert(blocked == new Point(208, -130),
+            "An occupied grid cell must fall through to the nearest free cell.");
+
+        var rightAligned = PetGridLogic.SnapVisibleRect(
+            new Rectangle(800, 0, 200, 211), wa, cell, 130, null, alignRight: true);
+        Assert(rightAligned == new Point(800, -130),
+            "Right-aligned grids must anchor the first column at the right edge.");
+        var rightNearLeft = PetGridLogic.SnapVisibleRect(
+            new Rectangle(0, 0, 200, 211), wa, cell, 130, null, alignRight: true);
+        Assert(rightNearLeft == new Point(176, -130),
+            "Right-aligned grids must still clamp to the last fully visible column on the left.");
+
+        string pet = ReadRepoSource("src", "Pet", "PetWindow.cs");
+        string config = ReadRepoSource("src", "Core", "Config.cs");
+        string panel = ReadRepoSource("src", "Ui", "PanelWindow.cs");
+        string web = ReadRepoSource("wwwroot", "app.js");
+        string i18n = ReadRepoSource("wwwroot", "i18n.js");
+        Assert(config.Contains("AlignPetsToGrid", StringComparison.Ordinal) &&
+               config.Contains("GridAlignRight", StringComparison.Ordinal) &&
+               pet.Contains("SnapPetsToGrid", StringComparison.Ordinal) &&
+               pet.Contains("AlignPetsToGrid", StringComparison.Ordinal) &&
+               pet.Contains("GridAlignRight", StringComparison.Ordinal) &&
+               pet.Contains("SetGridAlignment", StringComparison.Ordinal),
+            "Grid alignment and its left/right anchor must be persisted and applied by PetWindow.");
+        Assert(panel.Contains("alignPetsToGrid", StringComparison.Ordinal) &&
+               web.Contains("data-switch=\"alignPetsToGrid\"", StringComparison.Ordinal) &&
+               i18n.Contains("settings.window.alignGrid.title", StringComparison.Ordinal),
+            "The settings page must expose the grid-alignment switch.");
+        Assert(pet.Contains("tray.alignGrid", StringComparison.Ordinal) &&
+               pet.Contains("_alignGridItem", StringComparison.Ordinal),
+            "The pet/tray context menu must expose the grid-alignment toggle.");
+
+        Console.WriteLine("PASS: non-main pets snap to a top-left anchored, size-aware virtual grid.");
     }
 
     /// <summary>
@@ -2969,12 +3051,32 @@ internal static class Program
             "Companion synthetic ids must be unique.");
         Assert(CompanionPets.NextSyntheticId(cfg) < cfg.Companions.Min(c => c.SyntheticId),
             "Next synthetic id must not collide with existing companions.");
+        Assert(Math.Abs(cfg.Companions[0].ClickRatePerSecond - 1.0 / 12) < 0.0001,
+            "Legacy seconds-per-click must migrate to a per-second click rate.");
+        var rateCfg = new Settings();
+        rateCfg.Companions.Add(new CompanionPet { Id = "rate", Name = "rate", ClickRatePerSecond = 5 });
+        CompanionPets.Normalize(rateCfg);
+        Assert(Math.Abs(rateCfg.Companions[0].ClickRatePerSecond - 5) < 0.0001 &&
+               rateCfg.Companions[0].ClickIntervalSeconds == 1,
+            "New per-second click rates must be preserved and mirrored to the legacy interval field.");
+
+        // -1 是主角多选哨兵；损坏配置里的 -1/-999 也必须被重新分配到 -1000 以下。
+        var sentinelCfg = new Settings();
+        sentinelCfg.Companions.Add(new CompanionPet { Id = "self", Name = "self", SyntheticId = CompanionPets.ReservedSelfId });
+        sentinelCfg.Companions.Add(new CompanionPet { Id = "near", Name = "near", SyntheticId = -999 });
+        sentinelCfg.Companions.Add(new CompanionPet { Id = "valid", Name = "valid", SyntheticId = CompanionPets.FirstSyntheticId });
+        CompanionPets.Normalize(sentinelCfg);
+        Assert(sentinelCfg.Companions.All(c => c.SyntheticId <= CompanionPets.FirstSyntheticId),
+            "Companion synthetic ids must never collide with the self-selection sentinel or positive member ids.");
+        Assert(sentinelCfg.Companions.Select(c => c.SyntheticId).Distinct().Count() == 3,
+            "Sentinel/near-miss companion ids must be reassigned uniquely.");
 
         string json = JsonSerializer.Serialize(cfg);
         var roundTrip = JsonSerializer.Deserialize<Settings>(json);
         Assert(roundTrip?.Companions.Count == 2
                 && roundTrip.Companions[0].Name == "菲比·Miratsu"
                 && roundTrip.Companions[0].ClickIntervalSeconds == 12
+                && Math.Abs(roundTrip.Companions[0].ClickRatePerSecond - 1.0 / 12) < 0.0001
                 && roundTrip.Companions[0].RandomClick
                 && roundTrip.Companions[0].ShowBar
                 && roundTrip.Companions[1].Hidden,
@@ -2989,8 +3091,10 @@ internal static class Program
         string i18n = ReadRepoSource("wwwroot", "i18n.js");
         Assert(config.Contains("Companions", StringComparison.Ordinal)
                 && config.Contains("CompanionPositions", StringComparison.Ordinal)
-                && state.Contains("companionPositions", StringComparison.Ordinal),
-            "Companion settings and independent position storage must be persisted.");
+                && config.Contains("CompanionCustomPositions", StringComparison.Ordinal)
+                && state.Contains("companionPositions", StringComparison.Ordinal)
+                && state.Contains("companionCustomPositions", StringComparison.Ordinal),
+            "Companion settings, independent positions and custom-position flags must be persisted.");
         Assert(pet.Contains("_companionCats", StringComparison.Ordinal)
                 && pet.Contains("RefreshCompanions", StringComparison.Ordinal)
                 && pet.Contains("TickCompanionClicks", StringComparison.Ordinal)
@@ -3033,13 +3137,80 @@ internal static class Program
                 && !refreshBody.Contains("EmitAsync", StringComparison.Ordinal),
             "Custom companions must never mutate RoomManager members or upload clicks.");
         int clickStart = pet.IndexOf("void TickCompanionClicks()", StringComparison.Ordinal);
-        int clickEnd = pet.IndexOf("void OnCompanionDragStarted", clickStart, StringComparison.Ordinal);
+        int clickEnd = pet.IndexOf("void OnCompanionHideRequested", clickStart, StringComparison.Ordinal);
         Assert(clickStart >= 0 && clickEnd > clickStart, "TickCompanionClicks body must be locatable.");
         string clickBody = pet.Substring(clickStart, clickEnd - clickStart);
         Assert(!clickBody.Contains("AddClicks", StringComparison.Ordinal)
                 && !clickBody.Contains("NotifyLocalAction", StringComparison.Ordinal)
                 && !clickBody.Contains("EmitAsync", StringComparison.Ordinal),
             "Companion auto-click animation must stay local and never touch the click ledger/server.");
+        Assert(clickBody.Contains("ClickRatePerSecond", StringComparison.Ordinal) &&
+               clickBody.Contains("CompanionClickBaseMs", StringComparison.Ordinal) &&
+               !clickBody.Contains("ClickIntervalSeconds", StringComparison.Ordinal),
+            "Companion auto-click scheduling must use the per-second rate, not the legacy interval field.");
+
+        int companionStart = pet.IndexOf("void UpdateCompanionCat", StringComparison.Ordinal);
+        int companionEnd = pet.IndexOf("void RemoveCompanionCat", companionStart, StringComparison.Ordinal);
+        Assert(companionStart >= 0 && companionEnd > companionStart, "UpdateCompanionCat body must be locatable.");
+        string companionBody = pet.Substring(companionStart, companionEnd - companionStart);
+        Assert(companionBody.Contains("DragStarted += OnCatDragStarted", StringComparison.Ordinal) &&
+               companionBody.Contains("DragMoved += OnCatDragMoved", StringComparison.Ordinal) &&
+               companionBody.Contains("DragEnded += OnCatDragEnded", StringComparison.Ordinal) &&
+               companionBody.Contains("Moved += p => OnPetMoved(id, p)", StringComparison.Ordinal),
+            "Companion windows must use the shared selection/group-drag handlers and overlap-aware move handler.");
+
+        int removeCompanionStart = pet.IndexOf("void RemoveCompanionCat", StringComparison.Ordinal);
+        int removeCompanionEnd = pet.IndexOf("Point PlaceNewCompanion", removeCompanionStart, StringComparison.Ordinal);
+        Assert(removeCompanionStart >= 0 && removeCompanionEnd > removeCompanionStart,
+            "RemoveCompanionCat body must be locatable.");
+        int clearDragStart = pet.IndexOf("void ClearPetDragState", StringComparison.Ordinal);
+        int clearDragEnd = pet.IndexOf("void RemoveCompanionCat", clearDragStart, StringComparison.Ordinal);
+        Assert(clearDragStart >= 0 && clearDragEnd > clearDragStart,
+            "ClearPetDragState body must be locatable.");
+        string clearDragBody = pet.Substring(clearDragStart, clearDragEnd - clearDragStart);
+        string removeCompanionBody = pet.Substring(removeCompanionStart, removeCompanionEnd - removeCompanionStart);
+        Assert(removeCompanionBody.Contains("ClearPetDragState(syntheticId, cat)", StringComparison.Ordinal) &&
+               clearDragBody.Contains("_selectedCatIds.Remove(id)", StringComparison.Ordinal) &&
+               clearDragBody.Contains("_groupDragOrigins.Remove(id)", StringComparison.Ordinal) &&
+               clearDragBody.Contains("CancelPendingGroupDrag", StringComparison.Ordinal),
+            "Removing/hiding any pet must clear its selection and pending group-drag state.");
+
+        int overlapStart = pet.IndexOf("public void ResolveOverlaps", StringComparison.Ordinal);
+        int overlapEnd = pet.IndexOf("Rectangle CatVisibleRect", overlapStart, StringComparison.Ordinal);
+        Assert(overlapStart >= 0 && overlapEnd > overlapStart, "ResolveOverlaps body must be locatable.");
+        string overlapBody = pet.Substring(overlapStart, overlapEnd - overlapStart);
+        Assert(overlapBody.Contains("AllPetWindows()", StringComparison.Ordinal) &&
+               overlapBody.Contains("SavePetPosition(pet.Id, pet.Cat, custom: false)", StringComparison.Ordinal) &&
+               !overlapBody.Contains("companionRects", StringComparison.Ordinal),
+            "Overlap resolution must move both real members and companions, not treat companions as fixed obstacles.");
+
+        int screenDefaultStart = pet.IndexOf("void MoveDefaultCatsToScreen", StringComparison.Ordinal);
+        int screenDefaultEnd = pet.IndexOf("void MoveAllCatsBetweenScreens", screenDefaultStart, StringComparison.Ordinal);
+        int screenAllEnd = pet.IndexOf("void MoveCatToScreen", screenDefaultEnd, StringComparison.Ordinal);
+        Assert(screenDefaultStart >= 0 && screenDefaultEnd > screenDefaultStart && screenAllEnd > screenDefaultEnd,
+            "F8 screen-move methods must be locatable.");
+        string screenDefaultBody = pet.Substring(screenDefaultStart, screenDefaultEnd - screenDefaultStart);
+        string screenAllBody = pet.Substring(screenDefaultEnd, screenAllEnd - screenDefaultEnd);
+        Assert(screenDefaultBody.Contains("AllPetWindows()", StringComparison.Ordinal) &&
+               screenDefaultBody.Contains("IsCustomPetPosition", StringComparison.Ordinal) &&
+               screenAllBody.Contains("AllPetWindows()", StringComparison.Ordinal),
+            "F8 default/all screen moves must include custom companions and respect their manual positions.");
+
+        Assert(web.Contains("peClickRate", StringComparison.Ordinal) &&
+               web.Contains("clickRatePerSecond", StringComparison.Ordinal) &&
+               !web.Contains("peClickSeconds", StringComparison.Ordinal) &&
+               i18n.Contains("companion.timesPerSecond", StringComparison.Ordinal),
+            "Companion editor and cards must use a per-second click rate.");
+        Assert(web.Contains("querySelectorAll('[data-companion-index]')", StringComparison.Ordinal) &&
+               web.Contains("card.onclick", StringComparison.Ordinal) &&
+               web.Contains("closest('button, input, label, a, select')", StringComparison.Ordinal),
+            "Multi-select mode must let the card body toggle the companion checkbox.");
+        Assert(config.Contains("GridAlignRight", StringComparison.Ordinal) &&
+               panel.Contains("gridAlignRight", StringComparison.Ordinal) &&
+               web.Contains("setGridAlignSide", StringComparison.Ordinal) &&
+               i18n.Contains("settings.window.gridAlignSide.title", StringComparison.Ordinal),
+            "Grid anchor side must be configurable from the pet settings page.");
+
         Console.WriteLine("PASS: custom companion name rule, persistence, independent positions and UI wiring.");
     }
 

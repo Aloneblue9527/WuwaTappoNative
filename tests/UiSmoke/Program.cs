@@ -903,7 +903,7 @@ internal static class Program
                       (() => JSON.stringify({
                         title: document.querySelector('.preset-edit .preset-title')?.textContent || '',
                         hasName: !!document.getElementById('peName'),
-                        hasClick: !!document.getElementById('peClickSeconds'),
+                        hasClick: !!document.getElementById('peClickRate'),
                         hasRandom: !!document.getElementById('peRandomClick'),
                         hasBar: !!document.getElementById('peShowBar'),
                         hasEmoteTab: !!document.querySelector('[data-pe-tab=""emote""]'),
@@ -929,7 +929,7 @@ internal static class Program
                     await core.ExecuteScriptAsync(@"
                       (() => {
                         document.getElementById('peName').value = '嘉贝莉娜·团团团团转';
-                        document.getElementById('peClickSeconds').value = '7';
+                        document.getElementById('peClickRate').value = '2';
                         document.getElementById('peRandomClick').checked = true;
                         document.getElementById('peShowBar').checked = true;
                         document.getElementById('peSave').click();
@@ -977,8 +977,8 @@ internal static class Program
                     await core.ExecuteScriptAsync(@"
                       (() => {
                         document.getElementById('batchAddCount').value = '2';
-                        document.getElementById('batchClickMin').value = '7';
-                        document.getElementById('batchClickMax').value = '7';
+                        document.getElementById('batchClickMin').value = '2';
+                        document.getElementById('batchClickMax').value = '2';
                         document.getElementById('batchAddConfirm').click();
                       })()");
                     await Task.Delay(900);
@@ -998,7 +998,7 @@ internal static class Program
                     if (batchState["count"]!.GetValue<int>() != 3
                         || batchNames.FirstOrDefault() != "菲比"
                         || batchNames.Skip(1).Any(x => !expectedBatchNames.Contains(x))
-                        || !batchClicks.Skip(1).All(x => x.Contains("每 7 秒", StringComparison.Ordinal)))
+                        || !batchClicks.Skip(1).All(x => x.Contains("每秒 2 次", StringComparison.Ordinal)))
                         throw new InvalidOperationException("Random batch add did not use character names or click frequency range: " + batchUi);
 
                     // 多选删除：先只选 1 个删除，再全选删除剩余伙伴。
@@ -1006,9 +1006,8 @@ internal static class Program
                     await Task.Delay(300);
                     await core.ExecuteScriptAsync(@"
                       (() => {
-                        const box = document.querySelector('[data-companion-select=""0""]');
-                        box.checked = true;
-                        box.dispatchEvent(new Event('change', { bubbles: true }));
+                        // 多选状态下点击卡片空白/名称区域即可选中，不必精确点复选框。
+                        document.querySelector('[data-companion-index=""0""] .companion-name').click();
                         document.getElementById('companionDeleteSelected').click();
                       })()");
                     await Task.Delay(300);
@@ -1294,7 +1293,12 @@ internal static class Program
                 item["displayName"] = dot > 0 ? name[..dot].Trim() : name;
                 item["characterAssetId"] = data["characterAssetId"]?.GetValue<long>() ?? 0;
                 item["accessoryAssetId"] = data["accessoryAssetId"]?.GetValue<long>() ?? 0;
-                item["clickIntervalSeconds"] = Math.Clamp(data["clickIntervalSeconds"]?.GetValue<int>() ?? 0, 0, 3600);
+                int legacySeconds = Math.Clamp(data["clickIntervalSeconds"]?.GetValue<int>() ?? 0, 0, 3600);
+                double rate = data["clickRatePerSecond"] is JsonNode rateNode
+                    ? Math.Clamp(rateNode.GetValue<double>(), 0, 20)
+                    : (legacySeconds > 0 ? 1.0 / legacySeconds : 0);
+                item["clickRatePerSecond"] = rate;
+                item["clickIntervalSeconds"] = rate > 0 ? Math.Max(1, (int)Math.Round(1.0 / rate)) : 0;
                 item["randomClick"] = data["randomClick"]?.GetValue<bool>() ?? false;
                 item["showBar"] = data["showBar"]?.GetValue<bool>() ?? true;
                 return list.DeepClone();
@@ -1319,6 +1323,10 @@ internal static class Program
                     string name = (input["name"]?.GetValue<string>() ?? "").Trim();
                     if (name.Length == 0) name = "伙伴";
                     int dot = name.IndexOfAny(new[] { '·', '・' });
+                    int legacySeconds = Math.Clamp(input["clickIntervalSeconds"]?.GetValue<int>() ?? 0, 0, 3600);
+                    double rate = input["clickRatePerSecond"] is JsonNode rateNode
+                        ? Math.Clamp(rateNode.GetValue<double>(), 0, 20)
+                        : (legacySeconds > 0 ? 1.0 / legacySeconds : 0);
                     var item = new JsonObject
                     {
                         ["id"] = "preview-companion-" + (list.Count + 1),
@@ -1327,7 +1335,8 @@ internal static class Program
                         ["displayName"] = dot > 0 ? name[..dot].Trim() : name,
                         ["characterAssetId"] = input["characterAssetId"]?.GetValue<long>() ?? 0,
                         ["accessoryAssetId"] = input["accessoryAssetId"]?.GetValue<long>() ?? 0,
-                        ["clickIntervalSeconds"] = Math.Clamp(input["clickIntervalSeconds"]?.GetValue<int>() ?? 0, 0, 3600),
+                        ["clickRatePerSecond"] = rate,
+                        ["clickIntervalSeconds"] = rate > 0 ? Math.Max(1, (int)Math.Round(1.0 / rate)) : 0,
                         ["randomClick"] = input["randomClick"]?.GetValue<bool>() ?? false,
                         ["showBar"] = input["showBar"]?.GetValue<bool>() ?? true,
                     };

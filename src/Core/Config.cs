@@ -126,6 +126,10 @@ public sealed class Settings
     }
     /// <summary>允许角色桌宠互相重叠；关闭后重叠的联机桌宠会自动挪到旁边。</summary>
     public bool AllowOverlap { get; set; } = true;
+    /// <summary>联机角色和自定义伙伴拖动后吸附到虚拟网格；主角色不受影响。</summary>
+    public bool AlignPetsToGrid { get; set; }
+    /// <summary>网格横向对齐点：true = 从屏幕右侧开始，false = 从左侧开始。</summary>
+    public bool GridAlignRight { get; set; } = true;
     /// <summary>联机桌宠排列方向：horizontal = 底部横向，vertical = 右侧纵向。</summary>
     public string CatLayout { get; set; } = "horizontal";
     /// <summary>默认显示屏幕：启动/重置位置/区服切换时使用；F8 本身从桌宠当前实际屏幕开始。</summary>
@@ -230,6 +234,11 @@ public sealed class Settings
     [JsonIgnore] public Dictionary<string, bool> MemberVisibility { get; set; } = new();
     /// <summary>手动拖动过的联机成员；key = 成员 id，true 表示离开默认排序位置。</summary>
     [JsonIgnore] public Dictionary<string, bool> MemberCustomPositions { get; set; } = new();
+    /// <summary>
+    /// 手动拖动过的自定义伙伴；key = "companion:{guid}"，用于 F8 的默认位置换屏策略。
+    /// 与联机成员分开，避免负合成 id 和真实成员 id 混用。
+    /// </summary>
+    [JsonIgnore] public Dictionary<string, bool> CompanionCustomPositions { get; set; } = new();
     /// <summary>本地已读公告 id；由 StateStore 持久化，不写入 config.json，也不回传服务器。</summary>
     [JsonIgnore] public List<string> ReadAnnouncementIds { get; set; } = new();
     /// <summary>服务器区服：cn（国服） | global（国际服），默认 cn。</summary>
@@ -287,8 +296,10 @@ public sealed class CompanionPet
     public string Name { get; set; } = "";
     public long CharacterAssetId { get; set; }
     public long AccessoryAssetId { get; set; }
-    /// <summary>自动点击间隔秒数；0 表示不自动点击。</summary>
+    /// <summary>旧版自动点击间隔秒数；仅为兼容旧配置保留，新配置使用 ClickRatePerSecond。</summary>
     public int ClickIntervalSeconds { get; set; }
+    /// <summary>自动点击频率（次/秒）；0 表示不自动点击。</summary>
+    public double ClickRatePerSecond { get; set; }
     /// <summary>随机化点击间隔和左右手动作；关闭时固定间隔并左右交替。</summary>
     public bool RandomClick { get; set; }
     /// <summary>该伙伴自己的底栏开关；全局“隐藏联机角色底栏”始终优先。</summary>
