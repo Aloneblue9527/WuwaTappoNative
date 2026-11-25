@@ -48,6 +48,7 @@ static class Program
                 return;
             }
         }
+        CleanupObsoleteUpdatePackages();
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
@@ -74,6 +75,26 @@ static class Program
         finally
         {
             SingleInstance.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// 启动时清掉 updates 里全部早于当前版本的安装包；失败只记日志，不影响启动。
+    /// </summary>
+    static void CleanupObsoleteUpdatePackages()
+    {
+        try
+        {
+            var assembly = typeof(Program).Assembly;
+            string current = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            if (string.IsNullOrWhiteSpace(current))
+                current = assembly.GetName().Version?.ToString() ?? "";
+            int deleted = UpdateCacheCleaner.CleanupObsoleteInstallers(Paths.UpdatesDir, current);
+            if (deleted > 0) Log.Write($"已清理 {deleted} 个旧版安装包");
+        }
+        catch (Exception ex)
+        {
+            Log.Write("清理旧版安装包失败：" + ex.Message);
         }
     }
 

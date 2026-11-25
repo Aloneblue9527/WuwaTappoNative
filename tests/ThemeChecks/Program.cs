@@ -43,6 +43,7 @@ internal static class Program
             CheckOfficialBaseline();
             CheckCompatibilityGate();
             CheckUpdateVersionOrdering();
+            CheckUpdateCacheCleanup();
             CheckReleaseNotesLocalization();
             CheckControllerProtocolExtensionWiring();
             CheckAuthStateBasics();
@@ -1696,6 +1697,92 @@ internal static class Program
                !UpdateChecker.IsBetaVersion("0.3.1+abc"),
             "Update channel must distinguish beta and stable display versions.");
         Console.WriteLine("PASS: beta/stable update version ordering and channel detection.");
+    }
+
+    static void CheckUpdateCacheCleanup()
+    {
+        string dir = CreateUpdateCacheCase("old",
+            "WuwatappoNative-0.3.5-Setup.exe",
+            "WuwatappoNative-0.3.6-Setup.exe",
+            "notes.txt",
+            "other.exe");
+        Assert(UpdateCacheCleaner.CleanupObsoleteInstallers(dir, "0.3.7") == 2,
+            "All older Setup packages must be deleted.");
+        Assert(!File.Exists(Path.Combine(dir, "WuwatappoNative-0.3.5-Setup.exe")) &&
+               !File.Exists(Path.Combine(dir, "WuwatappoNative-0.3.6-Setup.exe")),
+            "Older Setup packages must be gone.");
+        Assert(File.Exists(Path.Combine(dir, "notes.txt")) && File.Exists(Path.Combine(dir, "other.exe")),
+            "Unrelated files must be preserved.");
+
+        dir = CreateUpdateCacheCase("mixed",
+            "WuwatappoNative-0.3.6-Setup.exe",
+            "WuwatappoNative-0.3.7-Setup.exe");
+        Assert(UpdateCacheCleaner.CleanupObsoleteInstallers(dir, "0.3.7") == 1 &&
+               !File.Exists(Path.Combine(dir, "WuwatappoNative-0.3.6-Setup.exe")) &&
+               File.Exists(Path.Combine(dir, "WuwatappoNative-0.3.7-Setup.exe")),
+            "An older Setup must still be deleted when the current-version Setup is present.");
+
+        dir = CreateUpdateCacheCase("newer",
+            "WuwatappoNative-0.3.6-Setup.exe",
+            "WuwatappoNative-0.3.8-Setup.exe");
+        Assert(UpdateCacheCleaner.CleanupObsoleteInstallers(dir, "0.3.7") == 1 &&
+               !File.Exists(Path.Combine(dir, "WuwatappoNative-0.3.6-Setup.exe")) &&
+               File.Exists(Path.Combine(dir, "WuwatappoNative-0.3.8-Setup.exe")),
+            "An older Setup must be deleted while a newer Setup is preserved.");
+
+        dir = CreateUpdateCacheCase("beta-old", "WuwatappoNative-0.3.7-beta.9-Setup.exe");
+        Assert(UpdateCacheCleaner.CleanupObsoleteInstallers(dir, "0.3.7-beta.10") == 1 &&
+               !File.Exists(Path.Combine(dir, "WuwatappoNative-0.3.7-beta.9-Setup.exe")),
+            "An older beta Setup must be deleted for a newer beta.");
+
+        dir = CreateUpdateCacheCase("beta-mixed",
+            "WuwatappoNative-0.3.7-beta.9-Setup.exe",
+            "WuwatappoNative-0.3.7-beta.10-Setup.exe");
+        Assert(UpdateCacheCleaner.CleanupObsoleteInstallers(dir, "0.3.7-beta.10") == 1 &&
+               !File.Exists(Path.Combine(dir, "WuwatappoNative-0.3.7-beta.9-Setup.exe")) &&
+               File.Exists(Path.Combine(dir, "WuwatappoNative-0.3.7-beta.10-Setup.exe")),
+            "An older beta Setup must be deleted while the current beta Setup is preserved.");
+
+        dir = CreateUpdateCacheCase("stable-over-beta", "WuwatappoNative-0.3.7-beta.99-Setup.exe");
+        Assert(UpdateCacheCleaner.CleanupObsoleteInstallers(dir, "0.3.7") == 1,
+            "A beta Setup must be deleted after the stable release of the same base version.");
+
+        dir = CreateUpdateCacheCase("unknown-version",
+            "WuwatappoNative-0.3.6-Setup.exe",
+            "WuwatappoNative-latest-Setup.exe");
+        Assert(UpdateCacheCleaner.CleanupObsoleteInstallers(dir, "0.3.7") == 1 &&
+               !File.Exists(Path.Combine(dir, "WuwatappoNative-0.3.6-Setup.exe")) &&
+               File.Exists(Path.Combine(dir, "WuwatappoNative-latest-Setup.exe")),
+            "An unparseable Setup filename must be preserved without blocking older cleanup.");
+
+        dir = CreateUpdateCacheCase("other-files",
+            "other.exe",
+            "WuwatappoNative-0.3.6-portable.zip");
+        Assert(UpdateCacheCleaner.CleanupObsoleteInstallers(dir, "0.3.7") == 0 &&
+               File.Exists(Path.Combine(dir, "other.exe")) &&
+               File.Exists(Path.Combine(dir, "WuwatappoNative-0.3.6-portable.zip")),
+            "Non-Setup files must not be treated as installer packages.");
+
+        dir = CreateUpdateCacheCase("invalid-current", "WuwatappoNative-0.3.6-Setup.exe");
+        Assert(UpdateCacheCleaner.CleanupObsoleteInstallers(dir, "unknown") == 0 &&
+               File.Exists(Path.Combine(dir, "WuwatappoNative-0.3.6-Setup.exe")),
+            "An unparseable current version must leave the cache untouched.");
+
+        string program = ReadRepoSource("src", "Program.cs");
+        Assert(program.Contains("CleanupObsoleteUpdatePackages();", StringComparison.Ordinal) &&
+               program.Contains("UpdateCacheCleaner.CleanupObsoleteInstallers(Paths.UpdatesDir, current)", StringComparison.Ordinal),
+            "Startup must invoke the update-cache cleanup after the single-instance gate.");
+
+        Console.WriteLine("PASS: obsolete update installers are removed while current, newer and unknown packages are kept.");
+    }
+
+    static string CreateUpdateCacheCase(string name, params string[] files)
+    {
+        string dir = Path.Combine(_root, "update-cache-" + name);
+        Directory.CreateDirectory(dir);
+        foreach (string file in files)
+            File.WriteAllText(Path.Combine(dir, file), "test");
+        return dir;
     }
 
     static void CheckReleaseNotesLocalization()
