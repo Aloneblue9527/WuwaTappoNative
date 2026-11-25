@@ -22,6 +22,10 @@ Wuwatappo Native is the Windows-native implementation of WuwaTappo 1.0.2, writte
 - ✅ Supports customizing all skins (in other players' rooms only the skins you actually own are shown, but any skin can be set locally)
 - ✅ Supports sending any emote (regardless of ownership status or character restrictions, visible to others)
 - ✅ Supports headwear position, free scaling, and rotation fine-tuning, saved independently per headwear item
+- ✅ Supports custom companions: local decorative pets, random batch creation, multi-select deletion, independent positions, and temporary hiding
+- ✅ Supports character and accessory appearance rotation at a configurable interval
+- ✅ Supports chest notification filters by rarity and category
+- ✅ Supports quickly hiding other players' pets from the tray menu
 - ✅ Supports automatically generating a full color scheme from a theme color, a smooth color picker, and automatic color extraction from images
 - ✅ Supports control panel background image upload, opacity/blur adjustment, and theme preset saving with automatic rotation
 - ✅ Supports independent bottom bar color schemes for the main desktop pet and remote characters; keyboard, rhythm game, Wuthering Waves, and gamepad views all follow consistently
@@ -36,7 +40,7 @@ Wuwatappo Native is the Windows-native implementation of WuwaTappo 1.0.2, writte
 - ✅ Supports automatic treasure chest claiming
 - ✅ Supports auto emote, auto click, and game mode rules
 - ✅ Supports hotkeys and settings search
-- ✅ Supports a controller protocol extension for PS / Switch and other DirectInput controllers, active only when no XInput controller is detected
+- ✅ Supports a controller protocol extension for PS / Switch and other DirectInput controllers when no XInput controller is detected, including wired DualSense sticks and analog triggers (single controller)
 - ✅ Supports displaying the current keyboard/gamepad key bindings, following the theme colors
 - ✅ Rhythm game mode supports 4K / 5K / 6K, with key bindings saved separately for each mode; Space and punctuation keys such as ; ' , . / can be configured
 - ✅ Supports one-click inheritance of the official login state
@@ -253,14 +257,14 @@ The check scripts use only an in-memory database and do not read any real cookie
 Requires PowerShell 7 and Inno Setup 6.7 or later.
 
 ```powershell
-pwsh -File .\installer\build.ps1 -Version 0.3.6
+pwsh -File .\installer\build.ps1 -Version 0.3.7
 ```
 
 Output:
 
 ```text
-dist/WuwatappoNative-0.3.6-Setup.exe
-dist/WuwatappoNative-0.3.6-portable.zip
+dist/WuwatappoNative-0.3.7-Setup.exe
+dist/WuwatappoNative-0.3.7-portable.zip
 dist/WuwatappoTokenExtractor-1.1.2-x64.zip
 ```
 

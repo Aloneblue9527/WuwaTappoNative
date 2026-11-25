@@ -1,13 +1,13 @@
 {
   "schema": 1,
   "messageLocked": true,
-  "updatedAt": "2026-11-23T14:30:30Z",
+  "updatedAt": "2026-11-25T11:09:33Z",
   "status": "safe",
-  "message": "官方客户端 1.0.5 为强制更新；Wuwatappo Native 0.3.5 及以上已适配 1.0.5 联机协议，建议使用 0.3.6。",
-  "messageEn": "Official client 1.0.5 is a forced update; Wuwatappo Native 0.3.5 and later support the 1.0.5 multiplayer protocol. Version 0.3.6 is recommended.",
-  "messageJa": "公式クライアント 1.0.5 は強制アップデートです。Wuwatappo Native 0.3.5 以降は 1.0.5 のマルチプレイプロトコルに対応しています。0.3.6 を推奨します。",
+  "message": "官方客户端 1.0.5 为强制更新；Wuwatappo Native 0.3.5 及以上已适配 1.0.5 联机协议，建议使用 0.3.7。",
+  "messageEn": "Official client 1.0.5 is a forced update; Wuwatappo Native 0.3.5 and later support the 1.0.5 multiplayer protocol. Version 0.3.7 is recommended.",
+  "messageJa": "公式クライアント 1.0.5 は強制アップデートです。Wuwatappo Native 0.3.5 以降は 1.0.5 のマルチプレイプロトコルに対応しています。0.3.7 を推奨します。",
   "native": {
-    "latest": "0.3.6",
+    "latest": "0.3.7",
     "minSafe": "0.3.5"
   },
   "official": {

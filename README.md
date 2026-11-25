@@ -20,6 +20,10 @@ Wuwatappo Native 是 WuwaTappo 1.0.2 的 Windows 原生实现，使用 C# / .NET
 - ✅ 支持自定义所有皮肤（他人房间中仅显示你实际拥有的皮肤，但本地可设置为任意皮肤）
 - ✅ 支持发送任意表情（无视拥有状态、无视角色限制，他人可见）
 - ✅ 支持头饰位置、自由缩放和旋转微调，按头饰独立保存
+- ✅ 支持自定义伙伴：本地装饰伙伴、随机批量添加、多选删除、独立位置和临时隐藏
+- ✅ 支持角色与配件外观轮换，可按间隔自动切换
+- ✅ 支持宝箱通知按稀有度和类别筛选
+- ✅ 支持从托盘菜单快速隐藏其他角色桌宠
 - ✅ 支持主题色自动生成整套配色、平滑取色器和图片自动取色
 - ✅ 支持操作台背景图上传、透明度/模糊调节、主题预设保存与自动轮换
 - ✅ 支持主桌宠/远程角色独立底栏配色；键盘、音游、鸣潮和手柄统一跟随
@@ -34,7 +38,7 @@ Wuwatappo Native 是 WuwaTappo 1.0.2 的 Windows 原生实现，使用 C# / .NET
 - ✅ 支持自动领取宝箱
 - ✅ 支持自动表情、自动敲击和游戏模式规则
 - ✅ 支持快捷键和设置项搜索
-- ✅ 支持手柄协议扩展，仅在未检测到 XInput 手柄时兼容 PS / Switch 等 DirectInput 手柄
+- ✅ 支持手柄协议扩展，仅在未检测到 XInput 手柄时兼容 PS / Switch 等 DirectInput 手柄，并支持有线 DualSense 摇杆和线性扳机（单手柄）
 - ✅ 支持显示当前键盘/手柄键位，并跟随主题配色
 - ✅ 音游模式支持 4K / 5K / 6K，每个模式分别保存键位；可设置空格和 ; ' , . / 等标点键
 - ✅ 支持一键继承官方登录状态
@@ -249,14 +253,14 @@ dotnet run --project tests/SqliteChecks/SqliteChecks.csproj -c Release
 需要 PowerShell 7 和 Inno Setup 6.7 或更高版本。
 
 ```powershell
-pwsh -File .\installer\build.ps1 -Version 0.3.6
+pwsh -File .\installer\build.ps1 -Version 0.3.7
 ```
 
 输出：
 
 ```text
-dist/WuwatappoNative-0.3.6-Setup.exe
-dist/WuwatappoNative-0.3.6-portable.zip
+dist/WuwatappoNative-0.3.7-Setup.exe
+dist/WuwatappoNative-0.3.7-portable.zip
 dist/WuwatappoTokenExtractor-1.1.2-x64.zip
 ```
 
