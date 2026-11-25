@@ -637,7 +637,10 @@ public sealed class KeyboardWindow : Form
         {
             g.Clear(Color.Transparent);
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            // 手柄模式没有底板，透明背景上使用灰度抗锯齿，避免 ClearType 产生彩色/黑边字体。
+            g.TextRenderingHint = _mode == Mode.Controller
+                ? TextRenderingHint.AntiAliasGridFit
+                : TextRenderingHint.ClearTypeGridFit;
             float s = Width / (float)W;
             DrawToolbar(g, s, theme);
             // 手柄模式只显示手柄本体，不再画占面积很大的奶油底板。
@@ -665,7 +668,9 @@ public sealed class KeyboardWindow : Form
             g.TranslateTransform(dest.X, dest.Y);
             float s = dest.Width / (float)W;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            g.TextRenderingHint = _mode == Mode.Controller
+                ? TextRenderingHint.AntiAliasGridFit
+                : TextRenderingHint.ClearTypeGridFit;
             DrawToolbar(g, s, theme);
             if (_mode != Mode.Controller) DrawPlate(g, s, LogicalHeight, theme);
             if (_mode == Mode.Controller) DrawPad(g, s, theme);
@@ -807,10 +812,23 @@ public sealed class KeyboardWindow : Form
         var board = new RectangleF(4 * s, top, 192 * s, 146 * s);
         if (!_padConnected)
         {
-            using var font = new Font("Microsoft YaHei UI", 11f * s, FontStyle.Bold, GraphicsUnit.Pixel);
+            using var font = new Font("Microsoft YaHei UI", 9.5f * s, FontStyle.Bold, GraphicsUnit.Pixel);
             using var brush = new SolidBrush(theme.PadText);
             using var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-            g.DrawString(Localization.T("keyboard.noController", "未连接手柄（XInput）"), font, brush, board, fmt);
+            // 透明背景不使用 ClearType 子像素渲染，避免无底板时出现彩色/黑边字体。
+            var messageBoard = new RectangleF(1 * s, top, 198 * s, 146 * s);
+            var oldHint = g.TextRenderingHint;
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            try
+            {
+                g.DrawString(
+                    Localization.T("keyboard.noController", "未检测到手柄\n如果非Xbox请尝试设置-输入启用协议扩展"),
+                    font, brush, messageBoard, fmt);
+            }
+            finally
+            {
+                g.TextRenderingHint = oldHint;
+            }
             return;
         }
 

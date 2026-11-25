@@ -78,7 +78,7 @@
   "keyboard.modeWuwa": "鳴潮",
   "keyboard.modeRhythm": "リズム",
   "keyboard.modeController": "パッド",
-  "keyboard.noController": "コントローラー未接続（XInput）",
+  "keyboard.noController": "コントローラーが見つかりません\nXbox 以外の場合は「設定 - 入力」でプロトコル拡張を有効にしてください",
   "keyboard.mouseLeft": "左",
   "keyboard.mouseRight": "右",
   "keyboard.space": "スペース",

@@ -78,7 +78,7 @@
   "keyboard.modeWuwa": "Wuwa",
   "keyboard.modeRhythm": "Rhythm",
   "keyboard.modeController": "Pad",
-  "keyboard.noController": "No controller connected (XInput)",
+  "keyboard.noController": "No controller detected\nIf this is not an Xbox controller, try Settings - Input - Enable controller protocol extension",
   "keyboard.mouseLeft": "LMB",
   "keyboard.mouseRight": "RMB",
   "keyboard.space": "Space",
