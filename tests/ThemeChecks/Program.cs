@@ -2440,6 +2440,15 @@ internal static class Program
             "ResetCatOrder(Screen) must fall back to ConfiguredScreen(), not the current screen.");
         Assert(Regex.IsMatch(pet, @"public\s+void\s+SetCatLayout\([^)]*\)\s*\{[^{}]*ResetCatOrder\(\);", RegexOptions.Singleline),
             "SetCatLayout must reorder through the parameterless ResetCatOrder().");
+        Assert(Regex.IsMatch(pet, @"layoutItems[\s\S]*?_companionCats\.TryGetValue\(item\.Id[\s\S]*?CompanionPositions\[item\.Key\]"),
+            "ResetCatOrder must lay out custom companions together with real remote members.");
+        Assert(pet.Contains("mainLargerThanRemote", StringComparison.Ordinal)
+                && pet.Contains("blockTop - gap", StringComparison.Ordinal)
+                && pet.Contains("blockLeft - gap", StringComparison.Ordinal),
+            "A large main pet must be kept outside the other pets' rows/columns.");
+        Assert(pet.Contains("!companion.Hidden", StringComparison.Ordinal)
+                && pet.Contains("HideOtherPets", StringComparison.Ordinal),
+            "ResetCatOrder must skip hidden companions and respect the global hide-other-pets switch.");
 
         string panel = ReadRepoSource("src", "Ui", "PanelWindow.cs");
         Assert(Regex.IsMatch(panel, @"case\s+""room\.resetOrder"":\s*_app\.Pet\.BeginInvoke\(new Action\(_app\.Pet\.ResetCatOrder\)\);"),

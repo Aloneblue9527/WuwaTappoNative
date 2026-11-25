@@ -3500,6 +3500,7 @@ public sealed class PetWindow : Form
     public void ResetCatOrder(Screen targetScreen)
     {
         _cfg.MemberCustomPositions.Clear();
+        _cfg.CompanionPositions ??= new Dictionary<string, int[]>();
         var wa = (targetScreen ?? ConfiguredScreen()).WorkingArea;
         float s = RemoteScaleFactor;
         float ms = Width / (float)PetComposer.WindowW;
@@ -3517,26 +3518,43 @@ public sealed class PetWindow : Form
         _cfg.PetY = localY;
 
         // 只排列当前房间仍在显示的人；离线/隐藏/已离开的成员即使还残留窗口也不占位。
-        var memberIds = _cats.Keys
+        // 自定义伙伴排在真实成员后面，使用同一套横向/纵向排版和间距。
+        var layoutItems = new List<(long Id, bool Companion, string Key)>();
+        foreach (long id in _cats.Keys
             .Where(id => _room.Members.TryGetValue(id, out var m) && m.Online && m.Visible)
-            .OrderBy(id => id)
-            .ToList();
-        if (memberIds.Count > 0)
+            .OrderBy(id => id))
+            layoutItems.Add((id, false, CatKey(id)));
+        if (!_cfg.HideOtherPets)
+        {
+            foreach (var companion in _cfg.Companions ?? new List<CompanionPet>())
+            {
+                if (companion == null || companion.SyntheticId >= 0 || companion.Hidden) continue;
+                layoutItems.Add((companion.SyntheticId, true, CompanionKey(companion.Id)));
+            }
+        }
+
+        if (layoutItems.Count > 0)
         {
             int rw = Math.Max(1, (int)Math.Round(RemoteCatWindow.W * s));
             int catH = Math.Max(1, (int)Math.Round(RemoteCatWindow.CatH * s));
             int head = (int)Math.Round(RemoteCatWindow.Headroom * s);
             int leftLimit = wa.Left;
+            int mainVisibleH = (int)Math.Round(PetComposer.CatSize * ms);
+            // 主角比联机角色大时，其他角色先贴屏幕边缘排好，主角单独放到整排/列的外侧。
+            bool mainLargerThanRemote = mainVisibleW > rw + gap || mainVisibleH > catH + gap;
 
             if (string.Equals(_cfg.CatLayout, "vertical", StringComparison.OrdinalIgnoreCase))
             {
-                // 第一列从主角上方往上排；排满后向左换列，从工作区顶部往下排。
+                // 第一列从底部往上排；排满后向左换列，从工作区顶部往下排。
                 int columnRight = wa.Right;
-                int cursorBottom = localY + (int)Math.Round(PetComposer.CatY * ms) - gap;
+                int cursorBottom = mainLargerThanRemote
+                    ? wa.Bottom
+                    : localY + (int)Math.Round(PetComposer.CatY * ms) - gap;
                 int topCursor = wa.Top;
+                int blockLeft = int.MaxValue;
                 bool firstColumn = true;
 
-                foreach (long id in memberIds)
+                foreach (var item in layoutItems)
                 {
                     int visibleTop;
                     if (firstColumn)
@@ -3569,24 +3587,46 @@ public sealed class PetWindow : Form
 
                     int x = Math.Max(leftLimit, columnRight - rw);
                     int y = visibleTop - head;
-                    if (_cats.TryGetValue(id, out var cat)) cat.Location = new Point(x, y);
-                    _cfg.MemberPositions[CatKey(id)] = new[] { x, y };
+                    if (item.Companion)
+                    {
+                        if (_companionCats.TryGetValue(item.Id, out var companionCat)) companionCat.Location = new Point(x, y);
+                        _cfg.CompanionPositions[item.Key] = new[] { x, y };
+                    }
+                    else
+                    {
+                        if (_cats.TryGetValue(item.Id, out var cat)) cat.Location = new Point(x, y);
+                        _cfg.MemberPositions[item.Key] = new[] { x, y };
+                    }
+                    if (mainLargerThanRemote) blockLeft = Math.Min(blockLeft, x);
+                }
+
+                if (mainLargerThanRemote && blockLeft != int.MaxValue)
+                {
+                    // 右侧列保持不动，主角整体移到这些角色的左侧。
+                    int mainVisibleRightTarget = blockLeft - gap;
+                    localX = mainVisibleRightTarget - mainVisibleOffsetX - mainVisibleW;
+                    Location = new Point(localX, localY);
+                    _cfg.PetX = localX;
                 }
             }
             else
             {
-                // 底部横排：主角贴右下，其他成员从右往左排；一行放不下时向上换行。
+                // 底部横排：其他成员和自定义伙伴先从右侧底部排；主角默认贴右下。
+                // 主角明显更大时，把其他角色完整排在底部，主角单独移到整排上方。
                 int rowStep = Math.Max(1, catH + gap);
-                int rightEdge = localX + mainVisibleOffsetX - gap;
+                int rightEdge = mainLargerThanRemote ? wa.Right : localX + mainVisibleOffsetX - gap;
                 // 按主角实际猫体底边定位，避免远程猫窗口的 11px 底部留白和缩放取整造成 1px 错位。
                 int mainCatBottom = localY + (int)Math.Round(PetComposer.CatY * ms) + (int)Math.Round(PetComposer.CatSize * ms);
                 int remoteHead = (int)Math.Round(RemoteCatWindow.Headroom * s);
                 int remoteCatSize = (int)Math.Round(RemoteCatWindow.CatSize * s);
-                int baseY = Math.Max(wa.Top, mainCatBottom - remoteHead - remoteCatSize);
+                int baseY = mainLargerThanRemote
+                    ? Math.Max(wa.Top, wa.Bottom - remoteHead - remoteCatSize)
+                    : Math.Max(wa.Top, mainCatBottom - remoteHead - remoteCatSize);
                 int cursorRight = rightEdge;
                 int row = 0;
+                int blockTop = int.MaxValue;
 
-                foreach (long id in memberIds)
+                foreach (var item in layoutItems)
                 {
                     int rawX = cursorRight - rw;
                     if (rawX < leftLimit && cursorRight != rightEdge)
@@ -3597,9 +3637,26 @@ public sealed class PetWindow : Form
                     }
                     int x = Math.Max(leftLimit, rawX);
                     int y = Math.Max(wa.Top, baseY - row * rowStep);
-                    if (_cats.TryGetValue(id, out var cat)) cat.Location = new Point(x, y);
-                    _cfg.MemberPositions[CatKey(id)] = new[] { x, y };
+                    if (item.Companion)
+                    {
+                        if (_companionCats.TryGetValue(item.Id, out var companionCat)) companionCat.Location = new Point(x, y);
+                        _cfg.CompanionPositions[item.Key] = new[] { x, y };
+                    }
+                    else
+                    {
+                        if (_cats.TryGetValue(item.Id, out var cat)) cat.Location = new Point(x, y);
+                        _cfg.MemberPositions[item.Key] = new[] { x, y };
+                    }
+                    if (mainLargerThanRemote) blockTop = Math.Min(blockTop, y + remoteHead);
                     cursorRight = x - gap;
+                }
+
+                if (mainLargerThanRemote && blockTop != int.MaxValue)
+                {
+                    // 底部两排保持不动，主角整体上移到这些角色的上方外侧。
+                    localY = blockTop - gap - (int)Math.Round((PetComposer.CatY + PetComposer.CatSize) * ms);
+                    Location = new Point(localX, localY);
+                    _cfg.PetY = localY;
                 }
             }
         }
