@@ -27,6 +27,9 @@ internal static class Program
             CheckMultiButton();
             CheckRapidPresses();
             CheckWinMmPadBridge();
+            CheckDualSenseUsbReport();
+            CheckControllerBridgeFrame();
+            CheckProductProbeAndWinMmFallback();
             Console.WriteLine($"PASS: {_checks} assertions.");
             return 0;
         }
@@ -276,6 +279,86 @@ internal static class Program
         Assert(WinMmPadBridge.Convert(joy).Buttons == 0x0009, "POV 4500 must map to D-pad up+right.");
         joy.dwPOV = WinMmPadBridge.PovCentered;
         Assert(WinMmPadBridge.Convert(joy).Buttons == 0, "Centered POV must not press a D-pad direction.");
+    }
+
+    static void CheckDualSenseUsbReport()
+    {
+        Assert(DualSenseRawInput.GetProductId(0x054C, 0x0CE6) == 0x0CE6 &&
+               DualSenseRawInput.GetProductId(0x054C, 0x0DF2) == 0x0DF2 &&
+               DualSenseRawInput.GetProductId(0x054C, 0x09CC) == 0 &&
+               DualSenseRawInput.GetProductId(0x045E, 0x0CE6) == 0,
+            "Only the Sony DualSense and DualSense Edge USB reports should use this decoder.");
+
+        var report = new byte[64];
+        report[0] = 0x01;
+        report[1] = 127;
+        report[2] = 128;
+        report[3] = 128;
+        report[4] = 127;
+        report[8] = 8;
+        Assert(DualSenseRawInput.TryDecodeUsbReport(report, out var state) && state == default,
+            "A centered USB report must have zero sticks, triggers and buttons.");
+
+        report[1] = 0;
+        report[2] = 0;
+        report[3] = 255;
+        report[4] = 255;
+        report[5] = 63;
+        report[6] = 192;
+        report[8] = 0x21; // Cross + up/right
+        report[9] = 0xCD; // L1 + digital L2/R2 + L3/R3
+        Assert(DualSenseRawInput.TryDecodeUsbReport(report, out state), "USB report 0x01 must decode.");
+        Assert(state.LeftX == short.MinValue && state.LeftY == short.MaxValue &&
+               state.RightX == short.MaxValue && state.RightY == short.MinValue,
+            "The four axes must stay independent, with up positive on both Y axes.");
+        Assert(state.LeftTrigger == 63 && state.RightTrigger == 192,
+            "Digital trigger bits must never replace the independent partial trigger values.");
+        Assert(state.Buttons == 0x11C9, "Cross, diagonal D-pad, shoulder and stick clicks must retain their mappings.");
+
+        report[5] = 255;
+        report[6] = 0;
+        Assert(DualSenseRawInput.TryDecodeUsbReport(report, out state) &&
+               state.LeftTrigger == 255 && state.RightTrigger == 0,
+            "Left trigger full travel must not affect the right trigger.");
+        Assert(!DualSenseRawInput.TryDecodeUsbReport(report.AsSpan(0, 10), out _) &&
+               !DualSenseRawInput.TryDecodeUsbReport(new byte[78], out _),
+            "Truncated and Bluetooth-length reports must be rejected by the USB decoder.");
+        report[0] = 0x31;
+        Assert(!DualSenseRawInput.TryDecodeUsbReport(report, out _), "Reject a non-USB report ID.");
+    }
+
+    static void CheckControllerBridgeFrame()
+    {
+        var state = new ControllerPadState(0x1000, 64, 192, -1234, 5678, short.MinValue, short.MaxValue);
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream);
+        writer.Write(true);
+        state.WriteTo(writer);
+        writer.Write(false);
+        default(ControllerPadState).WriteTo(writer);
+        writer.Flush();
+        stream.Position = 0;
+        using var reader = new BinaryReader(stream);
+        Assert(reader.ReadBoolean() && ControllerPadState.ReadFrom(reader) == state,
+            "The controller pipe must retain both signed sticks and both analog triggers.");
+        Assert(!reader.ReadBoolean() && ControllerPadState.ReadFrom(reader) == default &&
+               stream.Position == stream.Length,
+            "A disconnect must clear the state and preserve the next frame's alignment.");
+    }
+
+    static void CheckProductProbeAndWinMmFallback()
+    {
+        Assert(!DualSenseRawInput.ShouldProbeProduct(0, 1000, 2000) &&
+               DualSenseRawInput.ShouldProbeProduct(0, 2000, 2000) &&
+               !DualSenseRawInput.ShouldProbeProduct(0x0CE6, 3000, 0),
+            "A failed product probe must retry after its delay, but a known product must not re-probe.");
+
+        Assert(WinMmPadBridge.ShouldSkipWinMm(true, 0x0CE6, true, true) &&
+               !WinMmPadBridge.ShouldSkipWinMm(true, 0, true, true) &&
+               !WinMmPadBridge.ShouldSkipWinMm(true, 0x0CE6, false, true) &&
+               WinMmPadBridge.ShouldSkipWinMm(false, 0, false, true) &&
+               !WinMmPadBridge.ShouldSkipWinMm(false, 0, false, false),
+            "Unknown WinMM product info must defer to USB state in the single-controller case; known non-Sony devices must not be skipped.");
     }
 
     sealed class Harness

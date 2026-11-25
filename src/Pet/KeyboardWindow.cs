@@ -422,13 +422,18 @@ public sealed class KeyboardWindow : Form
             }
 
             // 协议扩展只在没有 XInput 手柄时接管；使用 Xbox/原生 XInput 时
-            // 绝不合并 WinMM，避免同一物理手柄被 WinMM 和 XInput 各识别一次。
-            if (!connected && _controllerProtocolExtension && _controllerBridge.TryRead(out var winmm))
+            // 绝不合并扩展输入，避免同一物理手柄被重复识别。
+            bool fromExtension = false;
+            if (!connected && _controllerProtocolExtension && _controllerBridge.TryRead(out var extension))
             {
-                state = new XINPUT_STATE();
-                state.Gamepad.wButtons = winmm.Buttons;
-                state.Gamepad.bLeftTrigger = winmm.LeftTrigger;
-                state.Gamepad.bRightTrigger = winmm.RightTrigger;
+                state.Gamepad.wButtons = extension.Buttons;
+                state.Gamepad.bLeftTrigger = extension.LeftTrigger;
+                state.Gamepad.bRightTrigger = extension.RightTrigger;
+                state.Gamepad.sThumbLX = extension.LeftX;
+                state.Gamepad.sThumbLY = extension.LeftY;
+                state.Gamepad.sThumbRX = extension.RightX;
+                state.Gamepad.sThumbRY = extension.RightY;
+                fromExtension = true;
                 connected = true;
             }
 
@@ -449,7 +454,9 @@ public sealed class KeyboardWindow : Form
             // 摇杆只用于显示，不参与计数：按“按键是否按下”做边沿检测，
             // 这样转摇杆不会被视为拍桌宠，也避免轴抖动引发高频重绘。
             bool buttonsChanged = g.wButtons != _padButtons;
-            bool triggersChanged = Math.Abs(g.bLeftTrigger - _lt) > 4 || Math.Abs(g.bRightTrigger - _rt) > 4;
+            int triggerChangeThreshold = fromExtension ? 0 : 4;
+            bool triggersChanged = Math.Abs(g.bLeftTrigger - _lt) > triggerChangeThreshold ||
+                Math.Abs(g.bRightTrigger - _rt) > triggerChangeThreshold;
             bool axesMoved = Math.Abs(g.sThumbLX - _lx) > 900 || Math.Abs(g.sThumbLY - _ly) > 900
                 || Math.Abs(g.sThumbRX - _rx) > 900 || Math.Abs(g.sThumbRY - _ry) > 900;
             if (!_padConnected || buttonsChanged || triggersChanged || axesMoved)

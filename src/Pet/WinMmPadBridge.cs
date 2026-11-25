@@ -17,7 +17,7 @@ internal static class WinMmPadBridge
     const long FullScanIntervalMs = 2000;
     static readonly uint JoyInfoSize = (uint)Marshal.SizeOf<JoyInfoEx>();
     static readonly object Gate = new();
-    static readonly List<uint> ConnectedSlots = new();
+    static readonly List<(uint Index, ushort SonyProduct, bool CapsRead)> ConnectedSlots = new();
     static long _nextFullScan;
     const ushort DPadUp = 0x0001;
     const ushort DPadDown = 0x0002;
@@ -52,10 +52,8 @@ internal static class WinMmPadBridge
         public uint dwReserved2;
     }
 
-    public readonly record struct PadState(ushort Buttons, byte LeftTrigger, byte RightTrigger);
-
     /// <summary>扫描 0..15 号 WinMM 设备并合并所有已连接手柄；没有任何设备时返回 false。</summary>
-    public static bool TryRead(out PadState merged)
+    public static bool TryRead(DualSenseRawInput dualSense, out ControllerPadState merged)
     {
         merged = default;
         bool any = false;
@@ -71,8 +69,11 @@ internal static class WinMmPadBridge
                     for (uint slot = 0; slot < SlotCount; slot++)
                     {
                         if (!TryReadSlot(slot, out JoyInfoEx info)) continue;
-                        ConnectedSlots.Add(slot);
-                        Merge(ref merged, Convert(info));
+                        var (sonyProduct, capsRead) = GetSonyProduct(slot);
+                        ConnectedSlots.Add((slot, sonyProduct, capsRead));
+                        if (ShouldSkipWinMm(capsRead, sonyProduct, dualSense.HasUsbState(sonyProduct), dualSense.HasAnyUsbState()))
+                            continue;
+                        merged = merged.Merge(Convert(info));
                         any = true;
                     }
                     _nextFullScan = now + FullScanIntervalMs;
@@ -81,13 +82,15 @@ internal static class WinMmPadBridge
                 {
                     for (int i = ConnectedSlots.Count - 1; i >= 0; i--)
                     {
-                        uint slot = ConnectedSlots[i];
+                        var (slot, sonyProduct, capsRead) = ConnectedSlots[i];
                         if (!TryReadSlot(slot, out JoyInfoEx info))
                         {
                             ConnectedSlots.RemoveAt(i);
                             continue;
                         }
-                        Merge(ref merged, Convert(info));
+                        if (ShouldSkipWinMm(capsRead, sonyProduct, dualSense.HasUsbState(sonyProduct), dualSense.HasAnyUsbState()))
+                            continue;
+                        merged = merged.Merge(Convert(info));
                         any = true;
                     }
                 }
@@ -104,14 +107,6 @@ internal static class WinMmPadBridge
         return any;
     }
 
-    static void Merge(ref PadState merged, PadState state)
-    {
-        merged = new PadState(
-            (ushort)(merged.Buttons | state.Buttons),
-            state.LeftTrigger > merged.LeftTrigger ? state.LeftTrigger : merged.LeftTrigger,
-            state.RightTrigger > merged.RightTrigger ? state.RightTrigger : merged.RightTrigger);
-    }
-
     static bool TryReadSlot(uint slot, out JoyInfoEx info)
     {
         info = new JoyInfoEx { dwSize = JoyInfoSize, dwFlags = JoyReturnAll };
@@ -119,38 +114,69 @@ internal static class WinMmPadBridge
     }
 
     /// <summary>把常见 DirectInput 手柄布局转换成 XInput 按钮位；摇杆不参与计数。</summary>
-    public static PadState Convert(JoyInfoEx joy)
+    public static ControllerPadState Convert(JoyInfoEx joy)
     {
-        ushort buttons = 0;
-        if (HasButton(joy, 0)) buttons |= X;
-        if (HasButton(joy, 1)) buttons |= A;
-        if (HasButton(joy, 2)) buttons |= B;
-        if (HasButton(joy, 3)) buttons |= Y;
-        if (HasButton(joy, 4)) buttons |= LeftShoulder;
-        if (HasButton(joy, 5)) buttons |= RightShoulder;
-        if (HasButton(joy, 8)) buttons |= Back;
-        if (HasButton(joy, 9)) buttons |= Start;
-        if (HasButton(joy, 10)) buttons |= LeftThumb;
-        if (HasButton(joy, 11)) buttons |= RightThumb;
-
-        // DirectInput 手柄通常把 L2/R2 放在按钮 6/7；XInput 用独立触发轴表示。
-        byte leftTrigger = HasButton(joy, 6) ? (byte)255 : (byte)0;
-        byte rightTrigger = HasButton(joy, 7) ? (byte)255 : (byte)0;
-
-        if (joy.dwPOV != PovCentered && joy.dwPOV < 36000)
-        {
-            uint angle = joy.dwPOV;
-            if (angle >= 31500 || angle <= 4500) buttons |= DPadUp;
-            if (angle >= 4500 && angle <= 13500) buttons |= DPadRight;
-            if (angle >= 13500 && angle <= 22500) buttons |= DPadDown;
-            if (angle >= 22500 && angle <= 31500) buttons |= DPadLeft;
-        }
-
-        return new PadState(buttons, leftTrigger, rightTrigger);
+        // 其他 WinMM 手柄继续用按钮 6/7 作为数字扳机。
+        byte leftTrigger = HasButton(joy.dwButtons, 6) ? (byte)255 : (byte)0;
+        byte rightTrigger = HasButton(joy.dwButtons, 7) ? (byte)255 : (byte)0;
+        return new ControllerPadState(ConvertButtons(joy.dwButtons, joy.dwPOV), leftTrigger, rightTrigger);
     }
 
-    static bool HasButton(JoyInfoEx joy, int index) => (joy.dwButtons & (1u << index)) != 0;
+    internal static ushort ConvertButtons(uint input, uint pov)
+    {
+        ushort buttons = 0;
+        if (HasButton(input, 0)) buttons |= X;
+        if (HasButton(input, 1)) buttons |= A;
+        if (HasButton(input, 2)) buttons |= B;
+        if (HasButton(input, 3)) buttons |= Y;
+        if (HasButton(input, 4)) buttons |= LeftShoulder;
+        if (HasButton(input, 5)) buttons |= RightShoulder;
+        if (HasButton(input, 8)) buttons |= Back;
+        if (HasButton(input, 9)) buttons |= Start;
+        if (HasButton(input, 10)) buttons |= LeftThumb;
+        if (HasButton(input, 11)) buttons |= RightThumb;
+
+        if (pov < 36000)
+        {
+            if (pov >= 31500 || pov <= 4500) buttons |= DPadUp;
+            if (pov >= 4500 && pov <= 13500) buttons |= DPadRight;
+            if (pov >= 13500 && pov <= 22500) buttons |= DPadDown;
+            if (pov >= 22500 && pov <= 31500) buttons |= DPadLeft;
+        }
+
+        return buttons;
+    }
+
+    static bool HasButton(uint buttons, int index) => (buttons & (1u << index)) != 0;
+
+    /// <summary>
+    /// 单手柄场景的产品识别回退：caps 读取失败时，只要 Raw Input 已有状态，就保守跳过 WinMM，
+    /// 避免无法确认型号的 WinMM 数字扳机覆盖 USB DualSense 的模拟值。
+    /// </summary>
+    internal static bool ShouldSkipWinMm(bool capsRead, ushort sonyProduct, bool hasUsbForProduct, bool hasAnyUsbState)
+    {
+        if (capsRead) return sonyProduct != 0 && hasUsbForProduct;
+        return hasAnyUsbState;
+    }
+
+    static (ushort Product, bool CapsRead) GetSonyProduct(uint slot)
+    {
+        if (joyGetDevCapsW((UIntPtr)slot, out var caps, (uint)Marshal.SizeOf<JoyCaps>()) != 0)
+            return (0, false);
+        return (DualSenseRawInput.GetProductId(caps.VendorId, caps.ProductId), true);
+    }
+
+    // JOYCAPSW 的完整缓冲区大小，本函数只需要开头的厂商和产品字段。
+    [StructLayout(LayoutKind.Explicit, Size = 728)]
+    struct JoyCaps
+    {
+        [FieldOffset(0)] public ushort VendorId;
+        [FieldOffset(2)] public ushort ProductId;
+    }
 
     [DllImport("winmm.dll")]
     static extern uint joyGetPosEx(uint uJoyID, ref JoyInfoEx pji);
+
+    [DllImport("winmm.dll", ExactSpelling = true)]
+    static extern uint joyGetDevCapsW(UIntPtr slot, out JoyCaps caps, uint size);
 }
