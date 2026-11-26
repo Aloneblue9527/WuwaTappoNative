@@ -74,6 +74,7 @@ internal static class Program
             CheckCompanionPets();
             CheckAppearanceRotation();
             CheckTrayHideOtherPets();
+            CheckContextMenuDismissBehavior();
             CheckChestNotificationFilters();
             CheckAdvancedSynthRemoved();
             if (args.Length > 0 && File.Exists(args[0])) CheckExternalPresetFile(args[0]);
@@ -3626,6 +3627,63 @@ internal static class Program
                 && web.Contains("synthCheckMode", StringComparison.Ordinal),
             "Normal synthesis UI and auto-synth must remain functional.");
         Console.WriteLine("PASS: advanced synthesis and locks removed; normal synthesis and Konami memorial remain.");
+    }
+
+    static void CheckContextMenuDismissBehavior()
+    {
+        string helper = ReadRepoSource("src", "Pet", "PetContextMenu.cs");
+        string pet = ReadRepoSource("src", "Pet", "PetWindow.cs");
+        string remote = ReadRepoSource("src", "Pet", "RemoteCatWindow.cs");
+
+        Assert(Regex.IsMatch(helper, @"internal\s+static\s+class\s+PetContextMenu"),
+            "A shared PetContextMenu helper must own context-menu display/dismissal.");
+        Assert(Regex.IsMatch(helper,
+                @"internal\s+static\s+void\s+Show\(\s*ContextMenuStrip\s+menu,\s*Control\s+owner,\s*Point\s+screenPoint,\s*Control\s+dispatcher\s*\)"),
+            "PetContextMenu.Show must accept menu/owner/screenPoint/dispatcher.");
+        Assert(!helper.Contains("SetForegroundWindow(", StringComparison.Ordinal)
+                && !helper.Contains("DllImport", StringComparison.Ordinal),
+            "PetContextMenu must not steal foreground from fullscreen games or other apps.");
+        Assert(helper.Contains("_openGeneration", StringComparison.Ordinal)
+                && helper.Contains("Cursor.Position", StringComparison.Ordinal),
+            "Menu dismissal must use the current display generation and only close clicks outside the menu.");
+        Assert(helper.Contains("ContainsPoint", StringComparison.Ordinal)
+                && helper.Contains("ToolStripMenuItem", StringComparison.Ordinal),
+            "Clicks inside submenus must not close the parent menu.");
+        Assert(helper.Contains("BeginInvoke", StringComparison.Ordinal),
+            "CloseOpen must marshal to the dispatcher UI thread when called from the raw-input thread.");
+
+        Assert(pet.Contains("PetContextMenu.Show(_menu, this, PointToScreen(e.Location), this);", StringComparison.Ordinal),
+            "PetWindow right-click must show its menu through PetContextMenu.");
+        Assert(!pet.Contains("_menu.Show(this, e.Location)", StringComparison.Ordinal),
+            "PetWindow must not bypass PetContextMenu for its right-click menu.");
+        Assert(pet.Contains("_hook.PointerDown += vk => PetContextMenu.NotifyPointerDown(vk);", StringComparison.Ordinal),
+            "Every mouse-down position, including the settings panel and other pets, must notify the menu helper.");
+        Assert(Regex.IsMatch(pet,
+                @"_tray\.MouseUp\s*\+=[\s\S]{0,300}?PetContextMenu\.Show\(_menu, null, Cursor\.Position, this\);"),
+            "The tray menu must also be shown through PetContextMenu.");
+        Assert(!pet.Contains("ContextMenuStrip = _menu", StringComparison.Ordinal),
+            "The tray must not let NotifyIcon show the shared menu outside PetContextMenu.");
+        Assert(Regex.IsMatch(pet,
+                @"protected\s+override\s+void\s+OnMouseDown\(MouseEventArgs\s+e\)[\s\S]{0,400}?PetContextMenu\.CloseOpen\(\);"),
+            "PetWindow.OnMouseDown must close any open context menu first.");
+        Assert(Regex.IsMatch(pet,
+                @"if\s*\(_cfg\.ClickThrough\)\s*\{[\s\S]{0,200}?PetContextMenu\.CloseOpen\(\);"),
+            "Enabling click-through must close the menu that triggered it.");
+
+        string hook = ReadRepoSource("src", "Pet", "GlobalInputHook.cs");
+        Assert(Regex.IsMatch(hook, @"public\s+event\s+Action<int>\s+PointerDown;") &&
+               Regex.IsMatch(hook, @"PointerDown\?\.Invoke\(vk\)"),
+            "GlobalInputHook must raise PointerDown for every mouse press, including own-process windows.");
+
+        Assert(remote.Contains("PetContextMenu.Show(_menu, null, Cursor.Position, this);", StringComparison.Ordinal),
+            "RemoteCatWindow right-click must show its menu through PetContextMenu.");
+        Assert(!remote.Contains("_menu?.Show(Cursor.Position)", StringComparison.Ordinal),
+            "RemoteCatWindow must not bypass PetContextMenu for its right-click menu.");
+        Assert(Regex.IsMatch(remote,
+                @"protected\s+override\s+void\s+OnMouseDown\(MouseEventArgs\s+e\)[\s\S]{0,400}?PetContextMenu\.CloseOpen\(\);"),
+            "RemoteCatWindow.OnMouseDown must close any open context menu first.");
+
+        Console.WriteLine("PASS: context menus (pet, remote, tray) close on any outside click and on click-through.");
     }
 
     static string ReadRepoSource(params string[] relativeParts)

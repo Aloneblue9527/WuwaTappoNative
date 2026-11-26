@@ -46,6 +46,11 @@ public sealed class GlobalInputHook : IDisposable
     public event Action<int, bool, bool, bool> HotkeyKeyDown;
     /// <summary>任意按键的按下/抬起边沿（不含长按重复）。只用于界面高亮，不拦截、不计数。</summary>
     public event Action<int, bool> KeyEdge;
+    /// <summary>
+    /// 任意位置的鼠标按下（包括本程序自己的窗口）。只用于关闭右键菜单等全局 UI，
+    /// 不参与点击统计；参数为鼠标键 VK。
+    /// </summary>
+    public event Action<int> PointerDown;
 
     static bool IsModifier(int vk) => vk is 0x10 or 0x11 or 0x12
         or 0xA0 or 0xA1 or 0xA2 or 0xA3 or 0xA4 or 0xA5 or 0x5B or 0x5C;
@@ -169,18 +174,20 @@ public sealed class GlobalInputHook : IDisposable
 
     void HandleMouseButton(int vk, bool down)
     {
-        if (down)
-        {
-            // 点本程序自己的界面（设置面板、桌宠本身等）不计入全局统计；
-            // 桌宠窗口的点击由 PetWindow 自己记一次，避免重复。
-            bool skip = IsCursorOverOwnWindow();
-            bool first, counted = false;
-            lock (_gate)
+            if (down)
             {
-                first = _pressed.Add(vk);
-                if (first && !skip) counted = _countedMouseButtons.Add(vk);
-            }
-            if (!first || !counted) return;
+                // 点本程序自己的界面（设置面板、桌宠本身等）不计入全局统计；
+                // 桌宠窗口的点击由 PetWindow 自己记一次，避免重复。
+                bool skip = IsCursorOverOwnWindow();
+                bool first, counted = false;
+                lock (_gate)
+                {
+                    first = _pressed.Add(vk);
+                    if (first && !skip) counted = _countedMouseButtons.Add(vk);
+                }
+                // 菜单关闭需要知道“点在本进程窗口上”的情况，所以这里不受 skip 限制。
+                if (first) Safe(() => PointerDown?.Invoke(vk));
+                if (!first || !counted) return;
             Safe(() => KeyEdge?.Invoke(vk, true));
             Safe(() => KeyDown?.Invoke(vk));
         }

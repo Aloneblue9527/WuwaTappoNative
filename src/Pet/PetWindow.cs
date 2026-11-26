@@ -218,6 +218,8 @@ public sealed class PetWindow : Form
         });
         _hook.KeyUp += vk => Safe(() => { if (!_dragging) HandUp(); });
         _hook.KeyEdge += (vk, down) => Safe(() => { if (down) PushKeyBubble(vk); });
+        // 任意位置的鼠标按下（含设置面板、键盘和其他桌宠）都用于关闭已打开的右键菜单。
+        _hook.PointerDown += vk => PetContextMenu.NotifyPointerDown(vk);
         _hook.HotkeyKeyDown += OnHotkeyKeyDown;
         RebuildHotkeyMap();
         _hook.Start();
@@ -1281,7 +1283,14 @@ public sealed class PetWindow : Form
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
-        if (e.Button == MouseButtons.Right) { RefreshMenu(); _menu.Show(this, e.Location); return; }
+        // 点角色本身也要关闭旧菜单；右键随后会按新的位置重新弹出。
+        PetContextMenu.CloseOpen();
+        if (e.Button == MouseButtons.Right)
+        {
+            RefreshMenu();
+            PetContextMenu.Show(_menu, this, PointToScreen(e.Location), this);
+            return;
+        }
         if (e.Button != MouseButtons.Left) return;
 
         // 任何一次新的左键按下都从干净的拖动状态开始；只有命中角色本体才重新进入拖动手势。
@@ -1782,6 +1791,8 @@ public sealed class PetWindow : Form
         }
         if (_cfg.ClickThrough)
         {
+            // 开启穿透后桌宠窗口立即不再接收鼠标；先收起菜单，避免菜单留在屏幕上点不掉。
+            PetContextMenu.CloseOpen();
             _wheelShowTimer?.Stop();
             _wheel.Close();
         }
@@ -3190,7 +3201,6 @@ public sealed class PetWindow : Form
         _menu.Items.Add(Localization.T("tray.restart", "重启桌宠"), null, (s, e) => RestartPetApp());
         _menu.Items.Add(Localization.T("tray.exit", "退出"), null, (s, e) => Close());
         _menu.Opening += (s, e) => RefreshMenu();
-        if (_tray != null) _tray.ContextMenuStrip = _menu;
     }
 
     void RefreshMenu()
@@ -3309,7 +3319,14 @@ public sealed class PetWindow : Form
             Icon = _icon,
             Text = "Wuwatappo",
             Visible = true,
-            ContextMenuStrip = _menu
+        };
+        // 托盘菜单也走统一入口：它是非前台窗口，系统自动关闭不可靠，
+        // 由全局鼠标按下兜底收起，同时避免与桌宠右键共用实例时互相冲突。
+        _tray.MouseUp += (s, e) =>
+        {
+            if (e.Button != MouseButtons.Right) return;
+            RefreshMenu();
+            PetContextMenu.Show(_menu, null, Cursor.Position, this);
         };
         _tray.DoubleClick += (s, e) => OpenPanelRequested?.Invoke();
         _tray.BalloonTipClicked += (s, e) => OpenPanelRequested?.Invoke();

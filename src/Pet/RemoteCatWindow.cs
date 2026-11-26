@@ -722,6 +722,8 @@ public sealed class RemoteCatWindow : Form
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
+        // 点角色本身也要关闭旧菜单；右键随后会在 OnMouseUp 按新的位置重新弹出。
+        PetContextMenu.CloseOpen();
         if (e.Button != MouseButtons.Left) return;
         CancelHoverFadeForDrag();
         _dragging = true;
@@ -779,7 +781,9 @@ public sealed class RemoteCatWindow : Form
             if (ContainsScreenPoint(Cursor.Position))
             {
                 RefreshRemoteMenu();
-                _menu?.Show(Cursor.Position);
+                // 通过统一入口显示：菜单成为前台并登记到 PetContextMenu，
+                // 点桌面/其他程序时由 PetWindow 的全局输入回调收起。
+                PetContextMenu.Show(_menu, null, Cursor.Position, this);
             }
             return;
         }
