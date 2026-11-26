@@ -38,7 +38,7 @@ Wuwatappo Native is the Windows-native implementation of WuwaTappo 1.0.2, writte
 - ✅ Supports automatic rank-up synthesis and one-click bulk rank-up
 - ✅ Supports stable / beta update channels
 - ✅ Supports automatic treasure chest claiming
-- ✅ Supports auto emote, auto click, and game mode rules
+- ✅ Supports auto emote, auto click, game mode rules, and a customizable game mode
 - ✅ Supports hotkeys and settings search
 - ✅ Supports a controller protocol extension for PS / Switch and other DirectInput controllers when no XInput controller is detected, including wired DualSense sticks and analog triggers (single controller)
 - ✅ Supports displaying the current keyboard/gamepad key bindings, following the theme colors
@@ -158,7 +158,7 @@ Desktop pet operations:
 
 | Function | Default key |
 |---|---|
-| Game mode (mouse pass-through) toggle | `F7` |
+| Mouse click-through toggle | `F7` |
 | Switch screen | `F8` |
 | Show/hide desktop pet | `F9` |
 | Refresh UI | `F5` |
@@ -179,11 +179,11 @@ Hotkeys can be recorded, cleared, or reset to defaults in `Settings → Desktop 
 | `Multiplayer` page | Create/join/switch rooms, room history, member display, quick emotes |
 | `Settings → Automation` | Auto emote, auto click, auto click rate, and virtual tap animation |
 | `Settings → Notifications` | Chest claim notification, hotkey action notification |
-| `Settings → Other` | Launch at login, run as administrator, automatic game mode on fullscreen, game mode rules, update channel, update download source, HTTP proxy, check for updates |
+| `Settings → Other` | Launch at login, run as administrator, automatic game mode on fullscreen, custom game mode, game mode rules, update channel, update download source, HTTP proxy, check for updates |
 
 The emote source can be Quick bar random, Specific emote, or Whole emote library random, with a send rate cap of 1–20 times per second. The auto click rate is 1–10 clicks per second, and Show virtual tap animation can be set separately.
 
-`Settings → Other → Game mode rules` accepts process names, for example `WutheringWaves.exe`. When a rule matches, the program automatically enables mouse pass-through and restores it when the process exits; name matching is case-insensitive, and `.exe` may be included or omitted.
+`Settings → Pet & window → Game mode rules` accepts process names, for example `WutheringWaves.exe`. When a rule matches, the program enters game mode (click-through by default; custom game mode can also adjust other pets, opacity, main pet size, keyboard, bars, key bubbles, and frame rate) and restores on process exit; name matching is case-insensitive, and `.exe` may be included or omitted.
 
 ### Startup and Administrator Privileges
 

@@ -5717,6 +5717,7 @@
       for (const group of groups) {
         group.classList.remove('settings-search-hidden');
         group.querySelectorAll('.setting-item').forEach(item => item.classList.remove('settings-search-hidden'));
+        group.querySelectorAll('.game-mode-profile').forEach(box => box.classList.remove('settings-search-hidden'));
         group._searchAuto = true;
         group.open = state.settingsOpenGroups.has(group.dataset.groupId);
         setTimeout(() => { group._searchAuto = false; }, 60);
@@ -5732,6 +5733,11 @@
         const hit = settingsItemText(item).includes(q);
         item.classList.toggle('settings-search-hidden', !hit);
         if (hit) matches++;
+      });
+      group.querySelectorAll('.game-mode-profile').forEach(box => {
+        const anyVisible = [...box.querySelectorAll('.setting-item')]
+          .some(item => !item.classList.contains('settings-search-hidden'));
+        box.classList.toggle('settings-search-hidden', !anyVisible);
       });
       group.classList.toggle('settings-search-hidden', matches === 0);
       if (matches > 0) {
@@ -5809,10 +5815,12 @@
     if (autoSynth) basicBody.appendChild(autoSynth);
     if (basicBody.children.length) groups.push(basic);
 
-    // 游戏模式规则属于桌面/穿透行为的补充设置，放在游戏模式开关正下方。
-    const gameModeItem = scroller.querySelector('[data-switch="clickThrough"]')?.closest('.setting-item');
+    // 游戏模式规则属于触发器配置，放在“游戏模式自定义”整块之后。
+    const gameModeCustomAnchor = scroller.querySelector('#gameModeProfileBox')
+      || scroller.querySelector('[data-switch="autoGameModeOnFullscreen"]')?.closest('.setting-item')
+      || scroller.querySelector('[data-switch="clickThrough"]')?.closest('.setting-item');
     const gameRuleItem = scroller.querySelector('#gameRuleInput')?.closest('.setting-item');
-    if (gameModeItem && gameRuleItem) gameModeItem.insertAdjacentElement('afterend', gameRuleItem);
+    if (gameModeCustomAnchor && gameRuleItem) gameModeCustomAnchor.insertAdjacentElement('afterend', gameRuleItem);
 
     groups.push(
       makeGroup('account', tr('settings.group.account', '账号与兑换'), tr('settings.group.accountSub', '区服、账号、点击与兑换码'), ['account', 'redeem']),
@@ -6149,12 +6157,61 @@
             <div class="switch ${s.topmost ? 'on' : ''}" data-switch="topmost"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">${tr('settings.window.gameMode.title', '游戏模式（鼠标穿透）')}</div><div class="setting-sub">${tr('settings.window.gameMode.sub', '开启后桌宠不响应鼠标，可从托盘菜单恢复')}</div></div>
+            <div><div class="setting-title">${tr('settings.window.gameMode.title', '鼠标穿透')}</div><div class="setting-sub">${tr('settings.window.gameMode.sub', '开启后桌宠不响应鼠标，可从托盘菜单或设置页恢复')}</div></div>
             <div class="switch ${s.clickThrough ? 'on' : ''}" data-switch="clickThrough"></div>
           </div>
           <div class="setting-item">
-            <div><div class="setting-title">${tr('settings.window.autoGameMode.title', '全屏自动游戏模式')}</div><div class="setting-sub">${tr('settings.window.autoGameMode.sub', '检测到前台窗口全屏时自动开启鼠标穿透，退出全屏后恢复')}</div></div>
+            <div><div class="setting-title">${tr('settings.window.autoGameMode.title', '全屏自动游戏模式')}</div><div class="setting-sub">${tr('settings.window.autoGameMode.sub', '检测到前台窗口全屏时进入游戏模式，退出全屏后恢复')}</div></div>
             <div class="switch ${s.autoGameModeOnFullscreen !== false ? 'on' : ''}" data-switch="autoGameModeOnFullscreen"></div>
+          </div>
+          <div class="game-mode-profile" id="gameModeProfileBox">
+            <div class="game-mode-profile-title">${tr('settings.window.gameModeCustom.badge', '游戏模式')}</div>
+          <div class="setting-item">
+            <div><div class="setting-title">${tr('settings.window.gameModeCustom.title', '游戏模式自定义')}</div><div class="setting-sub">${tr('settings.window.gameModeCustom.sub', '全屏或进程规则进入游戏模式时临时应用以下设置，退出后自动恢复')}</div></div>
+            <div class="switch ${s.gameModeCustomEnabled ? 'on' : ''}" data-switch="gameModeCustomEnabled"></div>
+          </div>
+          <div class="setting-item">
+            <div><div class="setting-title">${tr('settings.window.gameModeCustom.hideOtherPets.title', '隐藏其他桌宠')}</div><div class="setting-sub">${tr('settings.window.gameModeCustom.hideOtherPets.sub', '游戏模式下隐藏好友角色和自定义伙伴')}</div></div>
+            <div class="switch ${s.gameModeHideOtherPets ? 'on' : ''}" data-switch="gameModeHideOtherPets"></div>
+          </div>
+          <div class="setting-item">
+            <div><div class="setting-title">${tr('settings.window.gameModeCustom.opacity.title', '不透明度')}</div><div class="setting-sub">${tr('settings.window.gameModeCustom.opacity.sub', '游戏模式下主角的不透明度')}</div></div>
+            <div class="setting-content">
+              <input type="range" min="20" max="100" value="${Math.max(20, Math.min(100, Math.round((s.gameModeOpacity ?? 1) * 100)))}" id="setGameModeOpacity" style="width:180px" />
+              <span id="gameModeOpacityVal">${Math.max(20, Math.min(100, Math.round((s.gameModeOpacity ?? 1) * 100)))}%</span>
+            </div>
+          </div>
+          <div class="setting-item">
+            <div><div class="setting-title">${tr('settings.window.gameModeCustom.clickThrough.title', '游戏模式下鼠标穿透')}</div><div class="setting-sub">${tr('settings.window.gameModeCustom.clickThrough.sub', '游戏模式下桌宠是否忽略鼠标')}</div></div>
+            <div class="switch ${s.gameModeClickThrough !== false ? 'on' : ''}" data-switch="gameModeClickThrough"></div>
+          </div>
+          <div class="setting-item">
+            <div><div class="setting-title">${tr('settings.window.gameModeCustom.scale.title', '游戏模式下主角大小')}</div><div class="setting-sub">${tr('settings.window.gameModeCustom.scale.sub', '进入游戏模式时临时调整主角大小')}</div></div>
+            <div class="setting-content">
+              <input type="range" min="25" max="200" step="1" value="${Math.max(25, Math.min(200, Math.round((s.gameModeScale ?? 1) * 100)))}" id="setGameModeScale" style="width:180px" />
+              <span id="gameModeScaleVal">${Math.max(25, Math.min(200, Math.round((s.gameModeScale ?? 1) * 100)))}%</span>
+            </div>
+          </div>
+          <div class="setting-item">
+            <div><div class="setting-title">${tr('settings.window.gameModeCustom.showKeyboard.title', '自动开启桌面键盘')}</div><div class="setting-sub">${tr('settings.window.gameModeCustom.showKeyboard.sub', '当前键盘隐藏时自动使用 26 键布局，退出后恢复')}</div></div>
+            <div class="switch ${s.gameModeShowKeyboard ? 'on' : ''}" data-switch="gameModeShowKeyboard"></div>
+          </div>
+          <div class="setting-item">
+            <div><div class="setting-title">${tr('settings.window.gameModeCustom.hideBars.title', '自动隐藏底栏')}</div><div class="setting-sub">${tr('settings.window.gameModeCustom.hideBars.sub', '游戏模式下同时隐藏主角和联机角色底栏')}</div></div>
+            <div class="switch ${s.gameModeHideBars ? 'on' : ''}" data-switch="gameModeHideBars"></div>
+          </div>
+          <div class="setting-item">
+            <div><div class="setting-title">${tr('settings.window.gameModeCustom.keyBubbles.title', '显示按键气泡')}</div><div class="setting-sub">${tr('settings.window.gameModeCustom.keyBubbles.sub', '游戏模式下是否显示键盘/手柄按键气泡')}</div></div>
+            <div class="switch ${s.gameModeKeyBubbles !== false ? 'on' : ''}" data-switch="gameModeKeyBubbles"></div>
+          </div>
+          <div class="setting-item">
+            <div><div class="setting-title">${tr('settings.window.gameModeCustom.fps.title', '游戏模式动画帧率')}</div><div class="setting-sub">${tr('settings.window.gameModeCustom.fps.sub', '进入游戏模式时临时切换动画帧率')}</div></div>
+            <div class="setting-content">
+              <div class="layout-switch" id="setGameModeFps">
+                ${[30, 60, 120].map(fps => `<button type="button" class="layout-choice ${(s.gameModeAnimationFps || 60) === fps ? 'active' : ''}" data-fps="${fps}">${tr('settings.window.fps.option', '{fps} 帧', { fps })}</button>`).join('')}
+              </div>
+            </div>
+          </div>
           </div>
           <div class="setting-item">
             <div><div class="setting-title">${tr('settings.window.hoverFade.title', '鼠标悬停时半透明')}</div><div class="setting-sub">${tr('settings.window.hoverFade.sub', '便于看清桌宠后的内容')}</div></div>
@@ -6577,7 +6634,7 @@
             <div class="switch ${s.runAsAdmin ? 'on' : ''}" data-switch="runAsAdmin"></div>
           </div>
           <div class="setting-item" style="align-items:flex-start">
-            <div><div class="setting-title">${tr('settings.other.rules.title', '游戏模式规则')}</div><div class="setting-sub">${tr('settings.other.rules.sub', '检测到以下进程启动时自动开启鼠标穿透，进程退出后恢复')}</div></div>
+            <div><div class="setting-title">${tr('settings.other.rules.title', '游戏模式规则')}</div><div class="setting-sub">${tr('settings.other.rules.sub', '检测到以下进程启动时进入游戏模式，进程退出后恢复')}</div></div>
             <div class="setting-content" style="flex-direction:column;align-items:stretch;gap:8px;min-width:280px">
               <div style="display:flex;gap:8px">
                 <input class="input" id="gameRuleInput" placeholder="${tr('settings.other.rules.placeholder', '进程名，如 WutheringWaves.exe')}" style="flex:1;min-width:180px" />
@@ -6685,7 +6742,7 @@
 
   // 与原版 Helper 一致的默认键位；实际值来自 boot.settings.hotkeys。
   const HOTKEY_ACTIONS = [
-    { id: 'game', key: 'hotkey.game', label: '游戏模式（鼠标穿透）', def: 'F7' },
+    { id: 'game', key: 'hotkey.game', label: '鼠标穿透', def: 'F7' },
     { id: 'monitor', key: 'hotkey.monitor', label: '切换屏幕', def: 'F8' },
     { id: 'visibility', key: 'hotkey.visibility', label: '显示／隐藏桌宠', def: 'F9' },
     { id: 'barToggle', key: 'hotkey.barToggle', label: '隐藏／显示底栏（主角+远程）', def: '', mode: 'together' },
@@ -7465,6 +7522,22 @@
     hp?.addEventListener('change', async () => {
       try { await tryCall('settings.set', { hoverFadeOpacity: Number(hp.value) / 100 }); await syncBoot(); } catch { }
     });
+    const gmo = document.getElementById('setGameModeOpacity');
+    gmo?.addEventListener('input', () => {
+      const label = document.getElementById('gameModeOpacityVal');
+      if (label) label.textContent = gmo.value + '%';
+    });
+    gmo?.addEventListener('change', async () => {
+      try { await tryCall('settings.set', { gameModeOpacity: Number(gmo.value) / 100 }); await syncBoot(); } catch { }
+    });
+    const gms = document.getElementById('setGameModeScale');
+    gms?.addEventListener('input', () => {
+      const label = document.getElementById('gameModeScaleVal');
+      if (label) label.textContent = gms.value + '%';
+    });
+    gms?.addEventListener('change', async () => {
+      try { await tryCall('settings.set', { gameModeScale: Number(gms.value) / 100 }); await syncBoot(); } catch { }
+    });
     const gameRuleInput = document.getElementById('gameRuleInput');
     const saveGameRules = async (rules) => {
       try {
@@ -7976,6 +8049,16 @@
         } catch { }
       };
     });
+    document.querySelectorAll('#setGameModeFps [data-fps]').forEach(btn => {
+      btn.onclick = async () => {
+        const fps = Number(btn.dataset.fps);
+        try {
+          await tryCall('settings.set', { gameModeAnimationFps: fps });
+          await syncBoot();
+          document.querySelectorAll('#setGameModeFps [data-fps]').forEach(x => x.classList.toggle('active', Number(x.dataset.fps) === fps));
+        } catch { }
+      };
+    });
     document.querySelectorAll('#setCatLayout [data-layout]').forEach(btn => {
       btn.onclick = async () => {
         const val = btn.dataset.layout === 'vertical' ? 'vertical' : 'horizontal';
@@ -8139,6 +8222,15 @@
         forcedOnlineAcceptedVersion: '',
         gameModeRules: [],
         autoGameModeOnFullscreen: true,
+        gameModeCustomEnabled: false,
+        gameModeHideOtherPets: false,
+        gameModeOpacity: 1,
+        gameModeClickThrough: true,
+        gameModeScale: 1,
+        gameModeShowKeyboard: false,
+        gameModeHideBars: false,
+        gameModeKeyBubbles: true,
+        gameModeAnimationFps: 60,
         hotkeys: {},
         ...previewThemeSettings(),
       },
