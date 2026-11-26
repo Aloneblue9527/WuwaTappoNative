@@ -131,6 +131,39 @@ internal static class Program
                     await core.ExecuteScriptAsync("document.getElementById('mCloseAbout')?.click()");
                     await Task.Delay(200);
 
+                    string gameModeProfileUi = await core.ExecuteScriptAsync(@"
+                      (() => JSON.stringify({
+                        custom: !!document.querySelector('[data-switch=""gameModeCustomEnabled""]'),
+                        hideOthers: !!document.querySelector('[data-switch=""gameModeHideOtherPets""]'),
+                        clickThrough: !!document.querySelector('[data-switch=""gameModeClickThrough""]'),
+                        keyboard: !!document.querySelector('[data-switch=""gameModeShowKeyboard""]'),
+                        bars: !!document.querySelector('[data-switch=""gameModeHideBars""]'),
+                        bubbles: !!document.querySelector('[data-switch=""gameModeKeyBubbles""]'),
+                        opacity: document.getElementById('setGameModeOpacity')?.value,
+                        scale: document.getElementById('setGameModeScale')?.value,
+                        fps: document.querySelectorAll('#setGameModeFps [data-fps]').length,
+                        boxed: !!document.querySelector('#gameModeProfileBox'),
+                        boxBorder: parseFloat(getComputedStyle(document.querySelector('#gameModeProfileBox') || document.body).borderTopWidth) > 0,
+                        allInside: [
+                          'gameModeCustomEnabled', 'gameModeHideOtherPets', 'gameModeClickThrough',
+                          'gameModeShowKeyboard', 'gameModeHideBars', 'gameModeKeyBubbles'
+                        ].every(k => document.querySelector('[data-switch=""' + k + '""]')?.closest('#gameModeProfileBox')) &&
+                          !!document.getElementById('setGameModeOpacity')?.closest('#gameModeProfileBox') &&
+                          !!document.getElementById('setGameModeScale')?.closest('#gameModeProfileBox') &&
+                          !!document.getElementById('setGameModeFps')?.closest('#gameModeProfileBox')
+                      }))()");
+                    var gameModeState = JsonNode.Parse(JsonSerializer.Deserialize<string>(gameModeProfileUi)!)!.AsObject();
+                    if (!gameModeState["custom"]!.GetValue<bool>() || !gameModeState["hideOthers"]!.GetValue<bool>()
+                        || !gameModeState["clickThrough"]!.GetValue<bool>() || !gameModeState["keyboard"]!.GetValue<bool>()
+                        || !gameModeState["bars"]!.GetValue<bool>() || !gameModeState["bubbles"]!.GetValue<bool>()
+                        || gameModeState["opacity"]!.GetValue<string>() != "100"
+                        || gameModeState["scale"]!.GetValue<string>() != "100"
+                        || gameModeState["fps"]!.GetValue<int>() != 3
+                        || !gameModeState["boxed"]!.GetValue<bool>()
+                        || !gameModeState["boxBorder"]!.GetValue<bool>()
+                        || !gameModeState["allInside"]!.GetValue<bool>())
+                        throw new InvalidOperationException("Game-mode profile settings are missing, unboxed, or have wrong defaults: " + gameModeProfileUi);
+
                     string chestMatrixUi = await core.ExecuteScriptAsync(@"
                       (() => JSON.stringify({
                         rows: document.querySelectorAll('#chestNotifyMatrix [data-chest-rarity]').length,

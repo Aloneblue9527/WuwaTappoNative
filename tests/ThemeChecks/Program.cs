@@ -2739,7 +2739,7 @@ internal static class Program
         int guard = mouseUp.IndexOf("if (!_dragGesture) return;", StringComparison.Ordinal);
         int snap = mouseUp.IndexOf("SnapToWorkingArea(Location, Cursor.Position)", StringComparison.Ordinal);
         int saveX = mouseUp.IndexOf("_cfg.PetX = Left;", StringComparison.Ordinal);
-        int saveCfg = mouseUp.IndexOf("ConfigStore.Save(_cfg)", StringComparison.Ordinal);
+        int saveCfg = mouseUp.IndexOf("Save();", StringComparison.Ordinal);
         int geometry = mouseUp.IndexOf("GeometryChanged?.Invoke();", StringComparison.Ordinal);
         int overlaps = mouseUp.IndexOf("ResolveOverlaps();", StringComparison.Ordinal);
         Assert(guard >= 0,
@@ -2778,10 +2778,67 @@ internal static class Program
         Assert(config.Contains("AutoGameModeOnFullscreen", StringComparison.Ordinal),
             "Settings must persist autoGameModeOnFullscreen.");
         string web = ReadRepoSource("wwwroot", "app.js");
+        string i18n = ReadRepoSource("wwwroot", "i18n.js");
+        string pet = ReadRepoSource("src", "Pet", "PetWindow.cs");
+        string panel = ReadRepoSource("src", "Ui", "PanelWindow.cs");
+        string hotkeys = ReadRepoSource("src", "Core", "Hotkeys.cs");
         Assert(web.Contains("autoGameModeOnFullscreen", StringComparison.Ordinal),
             "Settings UI must expose autoGameModeOnFullscreen.");
+        var defaults = new Settings();
+        Assert(!defaults.GameModeCustomEnabled && defaults.GameModeOpacity == 1.0 &&
+               defaults.GameModeClickThrough && defaults.GameModeScale == 1.0 &&
+               !defaults.GameModeShowKeyboard && !defaults.GameModeHideBars &&
+               defaults.GameModeKeyBubbles && defaults.GameModeAnimationFps == 60,
+            "Game-mode profile must start disabled with safe default values.");
+        foreach (string key in new[]
+                 {
+                     "gameModeCustomEnabled", "gameModeHideOtherPets", "gameModeOpacity",
+                     "gameModeClickThrough", "gameModeScale", "gameModeShowKeyboard",
+                     "gameModeHideBars", "gameModeKeyBubbles", "gameModeAnimationFps",
+                 })
+        {
+            Assert(panel.Contains($"case \"{key}\"", StringComparison.Ordinal) &&
+                   panel.Contains($"{key} = _app.Cfg.", StringComparison.Ordinal),
+                $"Panel must map game-mode setting {key} in boot and settings.set.");
+        }
+        Assert(hotkeys.Contains("\"游戏模式（鼠标穿透）\"", StringComparison.Ordinal) == false &&
+               hotkeys.Contains("\"鼠标穿透\"", StringComparison.Ordinal),
+            "Hotkey conflict labels must call F7 click-through, not game mode.");
+        Assert(Regex.Matches(i18n, Regex.Escape("'settings.window.gameModeCustom.title'")).Count == 2,
+            "Game-mode profile i18n title must exist in both English and Japanese dictionaries.");
+        Assert(config.Contains("GameModeCustomEnabled", StringComparison.Ordinal) &&
+               config.Contains("GameModeHideOtherPets", StringComparison.Ordinal) &&
+               config.Contains("GameModeOpacity", StringComparison.Ordinal) &&
+               config.Contains("GameModeClickThrough", StringComparison.Ordinal) &&
+               config.Contains("GameModeScale", StringComparison.Ordinal) &&
+               config.Contains("GameModeShowKeyboard", StringComparison.Ordinal) &&
+               config.Contains("GameModeHideBars", StringComparison.Ordinal) &&
+               config.Contains("GameModeKeyBubbles", StringComparison.Ordinal) &&
+               config.Contains("GameModeAnimationFps", StringComparison.Ordinal),
+            "Settings must persist the full game-mode profile.");
+        Assert(app.Contains("Pet.SetAutoGameMode(true)", StringComparison.Ordinal) &&
+               app.Contains("Pet.SetAutoGameMode(false)", StringComparison.Ordinal) &&
+               !app.Contains("Pet.SetClickThrough", StringComparison.Ordinal),
+            "Fullscreen/process rules must enter and exit the game-mode profile instead of only toggling click-through.");
+        Assert(pet.Contains("AutoGameModeSnapshot", StringComparison.Ordinal) &&
+               pet.Contains("public void SetAutoGameMode(bool active)", StringComparison.Ordinal) &&
+               pet.Contains("RestoreAutoGameModeConfig", StringComparison.Ordinal) &&
+               pet.Contains("RestoreAutoGameModePositions", StringComparison.Ordinal) &&
+               pet.Contains("ApplyAutoGameModeState", StringComparison.Ordinal) &&
+               pet.Contains("CaptureAutoGameModeState", StringComparison.Ordinal) &&
+               pet.Contains("PetLocation = petLocation", StringComparison.Ordinal) &&
+               config.Contains("SaveOverride", StringComparison.Ordinal) &&
+               pet.Contains("_autoGameModeClickThroughOwned", StringComparison.Ordinal) &&
+               pet.Contains("OnManualClickThroughChanged", StringComparison.Ordinal),
+            "PetWindow must snapshot/restore overrides, isolate temporary config writes, and respect manual click-through changes.");
+        Assert(web.Contains("gameModeCustomEnabled", StringComparison.Ordinal) &&
+               web.Contains("setGameModeOpacity", StringComparison.Ordinal) &&
+               web.Contains("setGameModeScale", StringComparison.Ordinal) &&
+               web.Contains("setGameModeFps", StringComparison.Ordinal) &&
+               i18n.Contains("settings.window.gameModeCustom.title", StringComparison.Ordinal),
+            "Settings UI must expose all game-mode profile controls.");
 
-        Console.WriteLine("PASS: fullscreen game mode detection, setting default and UI wiring.");
+        Console.WriteLine("PASS: fullscreen game mode detection, custom profile and UI wiring.");
     }
 
     static void CheckMirrorMode()
