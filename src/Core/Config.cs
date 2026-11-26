@@ -208,6 +208,16 @@ public sealed class Settings
     public string[] GameModeRules { get; set; } = Array.Empty<string>();
     /// <summary>检测到前台窗口全屏时自动开启鼠标穿透；退出全屏后恢复。</summary>
     public bool AutoGameModeOnFullscreen { get; set; } = true;
+    /// <summary>进入自动游戏模式（全屏/进程规则）时应用下面的临时配置，退出后恢复原设置。</summary>
+    public bool GameModeCustomEnabled { get; set; }
+    public bool GameModeHideOtherPets { get; set; }
+    public double GameModeOpacity { get; set; } = 1.0;
+    public bool GameModeClickThrough { get; set; } = true;
+    public double GameModeScale { get; set; } = 1.0;
+    public bool GameModeShowKeyboard { get; set; }
+    public bool GameModeHideBars { get; set; }
+    public bool GameModeKeyBubbles { get; set; } = true;
+    public int GameModeAnimationFps { get; set; } = 60;
 
     [JsonIgnore] public int PetX { get; set; } = -1;
     [JsonIgnore] public int PetY { get; set; } = -1;
@@ -362,6 +372,9 @@ public static class ConfigStore
                     cfg.RemoteNameScale = Math.Clamp(cfg.RemoteNameScale, 0.5, 2.0);
                     cfg.AnimationFps = Settings.NormalizeAnimationFps(cfg.AnimationFps);
                     cfg.GameModeRules = GameModeRules.Normalize(cfg.GameModeRules);
+                    cfg.GameModeOpacity = Math.Clamp(cfg.GameModeOpacity, 0.2, 1.0);
+                    cfg.GameModeScale = Math.Clamp(cfg.GameModeScale, 0.25, 2.0);
+                    cfg.GameModeAnimationFps = Settings.NormalizeAnimationFps(cfg.GameModeAnimationFps);
                     cfg.RotationCharacterIds = AppearanceRotation.NormalizeIds(cfg.RotationCharacterIds);
                     cfg.RotationAccessoryIds = AppearanceRotation.NormalizeIds(cfg.RotationAccessoryIds);
                     cfg.RotationIntervalMinutes = AppearanceRotation.NormalizeInterval(cfg.RotationIntervalMinutes);
@@ -501,7 +514,24 @@ public static class ConfigStore
         return "cn";
     }
 
+    /// <summary>
+    /// 游戏模式临时覆盖期间拦截保存：调用方仍可修改并持久化其他设置，
+    /// 但临时 Scale/Opacity/ClickThrough 等会先替换回进入前的基础值。
+    /// </summary>
+    internal static Action<Settings> SaveOverride;
+
     public static void Save(Settings cfg)
+    {
+        var saveOverride = SaveOverride;
+        if (saveOverride != null)
+        {
+            saveOverride(cfg);
+            return;
+        }
+        SaveCore(cfg);
+    }
+
+    internal static void SaveCore(Settings cfg)
     {
         CompanionPets.Normalize(cfg);
         if (cfg != null)

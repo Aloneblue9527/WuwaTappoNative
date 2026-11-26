@@ -49,7 +49,8 @@ public sealed class App : ApplicationContext
     System.Threading.Timer _announcementTimer;
     readonly object _gameModeRuleGate = new();
     bool _gameModeRuleMatched;
-    bool _gameModeRuleAuto;
+    volatile bool _gameModeRuleAuto;
+    int _gameModeRuleBusy;
     long _gameModeProcessScanMs;
     bool _gameModeProcessMatched;
     string _gameModeProcessName;
@@ -602,11 +603,12 @@ public sealed class App : ApplicationContext
     }
 
     /// <summary>
-    /// 每 2 秒扫描一次进程名；命中规则时自动开启鼠标穿透，进程全部退出后恢复。
+    /// 每 2 秒扫描一次进程名；命中规则或前台全屏时进入游戏模式，条件结束后恢复。
     /// 只在匹配状态发生边沿变化时操作，避免反复覆盖用户手动切换的开关。
     /// </summary>
     void CheckGameModeRules()
     {
+        if (Interlocked.Exchange(ref _gameModeRuleBusy, 1) != 0) return;
         try
         {
             string[] rules = Cfg.GameModeRules ?? Array.Empty<string>();
@@ -651,10 +653,6 @@ public sealed class App : ApplicationContext
                 }
             }
 
-            // 用户手动关掉穿透后不再把这次开关算作规则接管，避免游戏退出时误关。
-            if (matched && _gameModeRuleAuto && !Cfg.ClickThrough)
-                _gameModeRuleAuto = false;
-
             bool becameMatched, becameUnmatched;
             lock (_gameModeRuleGate)
             {
@@ -666,25 +664,23 @@ public sealed class App : ApplicationContext
             if (becameMatched)
             {
                 Log.Write("游戏模式自动开启：" + (matchedName ?? "?"));
+                // 在定时器线程先置位，避免 UI 线程阻塞跨过下一个扫描周期时吞掉退出边沿。
+                _gameModeRuleAuto = true;
                 Pet.BeginInvoke(new Action(() =>
                 {
-                    if (Cfg.ClickThrough) return;
-                    _gameModeRuleAuto = true;
-                    Pet.SetClickThrough(true);
+                    if (!_gameModeRuleAuto) return;
+                    Pet.SetAutoGameMode(true);
                 }));
             }
             else if (becameUnmatched && _gameModeRuleAuto)
             {
-                Log.Write("游戏模式条件结束，恢复鼠标交互");
-                Pet.BeginInvoke(new Action(() =>
-                {
-                    if (!_gameModeRuleAuto) return;
-                    _gameModeRuleAuto = false;
-                    Pet.SetClickThrough(false);
-                }));
+                Log.Write("游戏模式条件结束，恢复进入前设置");
+                _gameModeRuleAuto = false;
+                Pet.BeginInvoke(new Action(() => Pet.SetAutoGameMode(false)));
             }
         }
         catch (Exception ex) { Log.Write("游戏模式规则检测失败 " + ex.Message); }
+        finally { Interlocked.Exchange(ref _gameModeRuleBusy, 0); }
     }
 
     void AutoClickTick()

@@ -16,7 +16,7 @@ public static class Hotkeys
     /// <summary>动作 id → 默认按键。顺序即设置页显示顺序。</summary>
     public static readonly (string Id, string Label, string Default)[] Actions =
     {
-        ("game", "游戏模式（鼠标穿透）", "F7"),
+        ("game", "鼠标穿透", "F7"),
         ("monitor", "切换屏幕", "F8"),
         ("visibility", "显示／隐藏桌宠", "F9"),
         // 底栏开关默认不占用任何键位；单/双模式由 SeparateBarHotkeys 决定显示和注册哪一个。

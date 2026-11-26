@@ -108,8 +108,32 @@ public sealed class PetWindow : Form
     Icon _icon;
 
     bool _hiddenByHotkey;
+    bool _autoGameModeActive;
+    bool _autoGameModeCustomApplied;
+    bool _autoGameModeClickThroughOwned;
+    AutoGameModeSnapshot _autoGameModeSnapshot;
+    readonly object _gameModeSaveGate = new();
     CaptureWindow _capture;
     Bitmap _captureFrame;
+
+    /// <summary>进入自动游戏模式前的用户设置快照；退出时原样恢复，不写入配置。</summary>
+    readonly struct AutoGameModeSnapshot
+    {
+        public double Scale { get; init; }
+        public double Opacity { get; init; }
+        public bool ClickThrough { get; init; }
+        public bool RemoteFollowMainScale { get; init; }
+        public bool RemoteFollowMainOpacity { get; init; }
+        public bool HideOtherPets { get; init; }
+        public bool HideMainBar { get; init; }
+        public bool HideRemoteBars { get; init; }
+        public bool KeyBubbles { get; init; }
+        public string KeyboardMode { get; init; }
+        public int AnimationFps { get; init; }
+        public Point PetLocation { get; init; }
+        public Dictionary<string, int[]> MemberPositions { get; init; }
+        public Dictionary<string, int[]> CompanionPositions { get; init; }
+    }
 
     /// <summary>全局输入监听（App 用它给键盘显示转发按键高亮）。</summary>
     public GlobalInputHook Input => _hook;
@@ -562,7 +586,7 @@ public sealed class PetWindow : Form
         _cfg.AccessoryOffsets[AccessoryKey(characterId, id)] = next.ToArray();
         // 迁移/规范化后只保留角色级 key，避免其他角色继续共用旧偏移。
         if (characterId > 0) _cfg.AccessoryOffsets.Remove(id.ToString());
-        ConfigStore.Save(_cfg);
+        Save();
         Compose();
         return next;
     }
@@ -1464,7 +1488,7 @@ public sealed class PetWindow : Form
             {
                 _cfg.PetX = Left;
                 _cfg.PetY = Top;
-                ConfigStore.Save(_cfg);
+                Save();
                 GeometryChanged?.Invoke();
                 if (!_cfg.AlignPetsToGrid && !_cfg.AllowOverlap) ResolveOverlaps();
             }
@@ -1497,8 +1521,219 @@ public sealed class PetWindow : Form
     {
         if (_cfg.ClickThrough == enabled) return;
         _cfg.ClickThrough = enabled;
+        OnManualClickThroughChanged();
         Save();
         ApplySettings();
+        NotifySettingsChanged();
+    }
+
+    /// <summary>
+    /// 用户通过 F7/托盘/设置页手动切换穿透时调用；legacy 自动游戏模式不再在退出时覆盖它。
+    /// </summary>
+    public void OnManualClickThroughChanged()
+    {
+        lock (_gameModeSaveGate)
+        {
+            if (!_autoGameModeActive || _autoGameModeCustomApplied || !_autoGameModeClickThroughOwned) return;
+            _autoGameModeClickThroughOwned = false;
+            _autoGameModeSnapshot = _autoGameModeSnapshot with { ClickThrough = _cfg.ClickThrough };
+        }
+    }
+
+    /// <summary>
+    /// 全屏/进程规则进入或退出游戏模式。启用自定义配置时临时应用一份完整桌面配置，
+    /// 退出时恢复进入前的所有值；未启用时保持旧行为，只切换鼠标穿透。
+    /// </summary>
+    public void SetAutoGameMode(bool active)
+    {
+        if (active) EnterAutoGameMode();
+        else ExitAutoGameMode();
+    }
+
+    void EnterAutoGameMode()
+    {
+        if (_autoGameModeActive) return;
+        lock (_gameModeSaveGate)
+        {
+            if (_autoGameModeActive) return;
+            _autoGameModeSnapshot = CaptureAutoGameModeState(_cfg, Location);
+            _autoGameModeActive = true;
+            _autoGameModeCustomApplied = _cfg.GameModeCustomEnabled;
+            _autoGameModeClickThroughOwned = !_autoGameModeCustomApplied;
+            ConfigStore.SaveOverride = _autoGameModeCustomApplied ? SaveGameModeBase : null;
+
+            if (_autoGameModeCustomApplied)
+            {
+                _cfg.HideOtherPets = _cfg.GameModeHideOtherPets;
+                _cfg.Opacity = Math.Clamp(_cfg.GameModeOpacity, 0.2, 1.0);
+                _cfg.ClickThrough = _cfg.GameModeClickThrough;
+                _cfg.Scale = Math.Clamp(_cfg.GameModeScale, 0.25, 2.0);
+                // 自定义项明确作用于主角；不要让联机角色/伙伴因“跟随主角”被一起改变。
+                _cfg.RemoteFollowMainScale = false;
+                _cfg.RemoteFollowMainOpacity = false;
+                if (_cfg.GameModeShowKeyboard)
+                {
+                    string keyboard = _cfg.KeyboardMode;
+                    _cfg.KeyboardMode = string.IsNullOrEmpty(keyboard) || keyboard == "hidden" ? "letters" : keyboard;
+                }
+                _cfg.HideMainBar = _cfg.GameModeHideBars;
+                _cfg.HideRemoteBars = _cfg.GameModeHideBars;
+                _cfg.KeyBubbles = _cfg.GameModeKeyBubbles;
+                _cfg.AnimationFps = Settings.NormalizeAnimationFps(_cfg.GameModeAnimationFps);
+            }
+            else
+            {
+                _cfg.ClickThrough = true;
+            }
+        }
+
+        try
+        {
+            ApplyAutoGameModeState(_autoGameModeCustomApplied);
+        }
+        catch
+        {
+            lock (_gameModeSaveGate)
+            {
+                bool appliedProfile = _autoGameModeCustomApplied;
+                _autoGameModeActive = false;
+                _autoGameModeCustomApplied = false;
+                _autoGameModeClickThroughOwned = false;
+                if (appliedProfile)
+                {
+                    RestoreAutoGameModeConfig();
+                    RestoreAutoGameModePositions();
+                }
+                else
+                {
+                    _cfg.ClickThrough = _autoGameModeSnapshot.ClickThrough;
+                }
+                ConfigStore.SaveOverride = null;
+            }
+            throw;
+        }
+        Log.Write(_autoGameModeCustomApplied ? "游戏模式自定义已启用" : "游戏模式自动开启（鼠标穿透）");
+    }
+
+    void ExitAutoGameMode()
+    {
+        bool appliedProfile;
+        lock (_gameModeSaveGate)
+        {
+            if (!_autoGameModeActive) return;
+            appliedProfile = _autoGameModeCustomApplied;
+            _autoGameModeCustomApplied = false;
+            _autoGameModeActive = false;
+            ConfigStore.SaveOverride = null;
+            if (appliedProfile)
+            {
+                RestoreAutoGameModeConfig();
+                RestoreAutoGameModePositions();
+            }
+            else if (_autoGameModeClickThroughOwned)
+            {
+                // 旧行为只接管鼠标穿透；用户游戏期间手动切过穿透则不再覆盖。
+                _cfg.ClickThrough = _autoGameModeSnapshot.ClickThrough;
+            }
+            _autoGameModeClickThroughOwned = false;
+        }
+        ApplyAutoGameModeState(appliedProfile);
+        if (appliedProfile)
+        {
+            lock (_gameModeSaveGate) RestoreAutoGameModePositions();
+        }
+        Save();
+        Log.Write(appliedProfile ? "游戏模式已退出，已恢复进入前设置" : "游戏模式已退出，已恢复鼠标交互");
+    }
+
+    AutoGameModeSnapshot CaptureAutoGameModeState(Settings cfg, Point petLocation)
+    {
+        return new AutoGameModeSnapshot
+        {
+            Scale = cfg.Scale,
+            Opacity = cfg.Opacity,
+            ClickThrough = cfg.ClickThrough,
+            RemoteFollowMainScale = cfg.RemoteFollowMainScale,
+            RemoteFollowMainOpacity = cfg.RemoteFollowMainOpacity,
+            HideOtherPets = cfg.HideOtherPets,
+            HideMainBar = cfg.HideMainBar,
+            HideRemoteBars = cfg.HideRemoteBars,
+            KeyBubbles = cfg.KeyBubbles,
+            KeyboardMode = cfg.KeyboardMode,
+            AnimationFps = cfg.AnimationFps,
+            PetLocation = petLocation,
+            MemberPositions = ClonePositions(cfg.MemberPositions),
+            CompanionPositions = ClonePositions(cfg.CompanionPositions),
+        };
+    }
+
+    static void ApplyAutoGameModeConfigTo(Settings cfg, AutoGameModeSnapshot snapshot)
+    {
+        cfg.Scale = snapshot.Scale;
+        cfg.Opacity = snapshot.Opacity;
+        cfg.ClickThrough = snapshot.ClickThrough;
+        cfg.RemoteFollowMainScale = snapshot.RemoteFollowMainScale;
+        cfg.RemoteFollowMainOpacity = snapshot.RemoteFollowMainOpacity;
+        cfg.HideOtherPets = snapshot.HideOtherPets;
+        cfg.HideMainBar = snapshot.HideMainBar;
+        cfg.HideRemoteBars = snapshot.HideRemoteBars;
+        cfg.KeyBubbles = snapshot.KeyBubbles;
+        cfg.KeyboardMode = snapshot.KeyboardMode;
+        cfg.AnimationFps = Settings.NormalizeAnimationFps(snapshot.AnimationFps);
+        cfg.PetX = snapshot.PetLocation.X;
+        cfg.PetY = snapshot.PetLocation.Y;
+        cfg.MemberPositions = ClonePositions(snapshot.MemberPositions);
+        cfg.CompanionPositions = ClonePositions(snapshot.CompanionPositions);
+    }
+
+    void RestoreAutoGameModeConfig()
+        => ApplyAutoGameModeConfigTo(_cfg, _autoGameModeSnapshot);
+
+    void RestoreAutoGameModePositions()
+    {
+        Location = _autoGameModeSnapshot.PetLocation;
+        ApplyAutoGameModeConfigTo(_cfg, _autoGameModeSnapshot);
+    }
+
+    /// <summary>
+    /// 自定义游戏模式期间拦截 ConfigStore.Save：写入时把临时字段换回进入前的基础值，
+    /// 但主题、房间、热键等与游戏模式无关的修改仍正常落盘。
+    /// </summary>
+    void SaveGameModeBase(Settings cfg)
+    {
+        lock (_gameModeSaveGate)
+        {
+            if (!_autoGameModeCustomApplied)
+            {
+                ConfigStore.SaveCore(cfg);
+                return;
+            }
+            var live = CaptureAutoGameModeState(cfg, new Point(cfg.PetX, cfg.PetY));
+            ApplyAutoGameModeConfigTo(cfg, _autoGameModeSnapshot);
+            try { ConfigStore.SaveCore(cfg); }
+            finally { ApplyAutoGameModeConfigTo(cfg, live); }
+        }
+    }
+
+    static Dictionary<string, int[]> ClonePositions(Dictionary<string, int[]> source)
+    {
+        var result = new Dictionary<string, int[]>();
+        if (source == null) return result;
+        foreach (var pair in source)
+            result[pair.Key] = pair.Value?.ToArray();
+        return result;
+    }
+
+    void ApplyAutoGameModeState(bool fullProfile)
+    {
+        ApplySettings();
+        if (fullProfile)
+        {
+            RefreshMembers();
+            RefreshCompanions();
+            KeyboardModeChanged?.Invoke();
+            if (!_cfg.KeyBubbles) _keyBubbles.Clear();
+        }
         NotifySettingsChanged();
     }
 
@@ -1550,6 +1785,7 @@ public sealed class PetWindow : Form
             _wheelShowTimer?.Stop();
             _wheel.Close();
         }
+        AnimationTimer.FrameRate = Settings.NormalizeAnimationFps(_cfg.AnimationFps);
         Size = WindowSize();
         ApplyWindowStyles();
         ApplyBarVisibility();
@@ -2308,7 +2544,7 @@ public sealed class PetWindow : Form
             "rhythm" => "controller",
             _ => "hidden"
         };
-        ConfigStore.Save(_cfg);
+        Save();
         KeyboardModeChanged?.Invoke();
         Compose();
     }
@@ -2622,11 +2858,12 @@ public sealed class PetWindow : Form
         {
             // 原版“游戏模式”就是鼠标穿透：桌宠只作画面存在，不响应点击。
             _cfg.ClickThrough = !_cfg.ClickThrough;
+            OnManualClickThroughChanged();
             Save();
             ApplySettings();
             NotifyHotkey(_cfg.ClickThrough
-                ? Localization.T("notify.gameModeOn", "已开启游戏模式（鼠标穿透）")
-                : Localization.T("notify.gameModeOff", "已关闭游戏模式（鼠标穿透）"));
+                ? Localization.T("notify.gameModeOn", "已开启鼠标穿透")
+                : Localization.T("notify.gameModeOff", "已关闭鼠标穿透"));
             NotifySettingsChanged();
         }
         else if (action == "monitor")
@@ -2852,9 +3089,23 @@ public sealed class PetWindow : Form
         };
         _menu.Items.Add(_hideOtherPetsItem);
         _passthroughItem = new ToolStripMenuItem(Localization.T("tray.clickThrough", "鼠标穿透"));
-        _passthroughItem.Click += (s, e) => { _cfg.ClickThrough = true; Save(); ApplySettings(); NotifySettingsChanged(); };
+        _passthroughItem.Click += (s, e) =>
+        {
+            _cfg.ClickThrough = true;
+            OnManualClickThroughChanged();
+            Save();
+            ApplySettings();
+            NotifySettingsChanged();
+        };
         _menu.Items.Add(_passthroughItem);
-        _passthroughOffItem = new ToolStripMenuItem(Localization.T("tray.cancelClickThrough", "取消鼠标穿透"), null, (s, e) => { _cfg.ClickThrough = false; Save(); ApplySettings(); NotifySettingsChanged(); });
+        _passthroughOffItem = new ToolStripMenuItem(Localization.T("tray.cancelClickThrough", "取消鼠标穿透"), null, (s, e) =>
+        {
+            _cfg.ClickThrough = false;
+            OnManualClickThroughChanged();
+            Save();
+            ApplySettings();
+            NotifySettingsChanged();
+        });
         _menu.Items.Add(_passthroughOffItem);
 
         _scaleMenuItem = new ToolStripMenuItem(Localization.T("tray.petScale", "桌宠大小"));
@@ -4093,6 +4344,28 @@ public sealed class PetWindow : Form
 
     protected override void OnClosed(EventArgs e)
     {
+        // 退出程序时如果游戏模式仍生效，先把临时配置恢复并落盘，避免下次启动继承游戏模式值。
+        lock (_gameModeSaveGate)
+        {
+            if (_autoGameModeActive)
+            {
+                bool appliedProfile = _autoGameModeCustomApplied;
+                _autoGameModeActive = false;
+                _autoGameModeCustomApplied = false;
+                if (appliedProfile)
+                {
+                    RestoreAutoGameModeConfig();
+                    RestoreAutoGameModePositions();
+                }
+                else if (_autoGameModeClickThroughOwned)
+                {
+                    _cfg.ClickThrough = _autoGameModeSnapshot.ClickThrough;
+                }
+                _autoGameModeClickThroughOwned = false;
+                ConfigStore.SaveOverride = null;
+                try { ConfigStore.Save(_cfg); } catch { }
+            }
+        }
         try { if (_capture != null) { _capture.ClosingFromOwner = true; _capture.Close(); _capture.Dispose(); } } catch { }
         _captureFrame?.Dispose();
         _captureFrame = null;

@@ -742,6 +742,15 @@ public sealed class PanelWindow : Form
             runAsAdmin = _app.Cfg.RunAsAdmin,
             gameModeRules = _app.Cfg.GameModeRules,
             autoGameModeOnFullscreen = _app.Cfg.AutoGameModeOnFullscreen,
+            gameModeCustomEnabled = _app.Cfg.GameModeCustomEnabled,
+            gameModeHideOtherPets = _app.Cfg.GameModeHideOtherPets,
+            gameModeOpacity = _app.Cfg.GameModeOpacity,
+            gameModeClickThrough = _app.Cfg.GameModeClickThrough,
+            gameModeScale = _app.Cfg.GameModeScale,
+            gameModeShowKeyboard = _app.Cfg.GameModeShowKeyboard,
+            gameModeHideBars = _app.Cfg.GameModeHideBars,
+            gameModeKeyBubbles = _app.Cfg.GameModeKeyBubbles,
+            gameModeAnimationFps = _app.Cfg.GameModeAnimationFps,
             isElevated = Elevation.IsElevated,
             roomNo = _app.Cfg.RoomNo,
             lastRoom = _app.Cfg.LastRoom,
@@ -1533,6 +1542,7 @@ public sealed class PanelWindow : Form
                 bool barHotkeyModeChanged = false;
                 bool themeChanged = false;
                 bool localeChanged = false;
+                bool clickThroughChanged = false;
                 foreach (var kv in data)
                 {
                     switch (kv.Key)
@@ -1540,7 +1550,10 @@ public sealed class PanelWindow : Form
                         case "scale": cfg.Scale = ReadDouble(kv.Value); break;
                         case "opacity": cfg.Opacity = ReadDouble(kv.Value); break;
                         case "topmost": cfg.Topmost = ApiClient.ReadBool(kv.Value); break;
-                        case "clickThrough": cfg.ClickThrough = ApiClient.ReadBool(kv.Value); break;
+                        case "clickThrough":
+                            cfg.ClickThrough = ApiClient.ReadBool(kv.Value);
+                            clickThroughChanged = true;
+                            break;
                         case "hoverFade": cfg.HoverFade = ApiClient.ReadBool(kv.Value); break;
                         case "hoverFadeOpacity": cfg.HoverFadeOpacity = Math.Clamp(ReadDouble(kv.Value), 0.1, 1.0); break;
                         case "keyboardMode":
@@ -1742,6 +1755,21 @@ public sealed class PanelWindow : Form
                         case "autoGameModeOnFullscreen":
                             cfg.AutoGameModeOnFullscreen = ApiClient.ReadBool(kv.Value);
                             break;
+                        case "gameModeCustomEnabled": cfg.GameModeCustomEnabled = ApiClient.ReadBool(kv.Value); break;
+                        case "gameModeHideOtherPets": cfg.GameModeHideOtherPets = ApiClient.ReadBool(kv.Value); break;
+                        case "gameModeClickThrough": cfg.GameModeClickThrough = ApiClient.ReadBool(kv.Value); break;
+                        case "gameModeShowKeyboard": cfg.GameModeShowKeyboard = ApiClient.ReadBool(kv.Value); break;
+                        case "gameModeHideBars": cfg.GameModeHideBars = ApiClient.ReadBool(kv.Value); break;
+                        case "gameModeKeyBubbles": cfg.GameModeKeyBubbles = ApiClient.ReadBool(kv.Value); break;
+                        case "gameModeOpacity":
+                            cfg.GameModeOpacity = Math.Clamp(ReadDouble(kv.Value), 0.2, 1.0);
+                            break;
+                        case "gameModeScale":
+                            cfg.GameModeScale = Math.Clamp(ReadDouble(kv.Value), 0.25, 2.0);
+                            break;
+                        case "gameModeAnimationFps":
+                            cfg.GameModeAnimationFps = Settings.NormalizeAnimationFps((int)Math.Clamp(ApiClient.ReadLong(kv.Value), 0, 1000));
+                            break;
                         case "launchAtLogin":
                             cfg.LaunchAtLogin = AutoStart.Apply(ApiClient.ReadBool(kv.Value), cfg.RunAsAdmin);
                             break;
@@ -1843,6 +1871,7 @@ public sealed class PanelWindow : Form
                     if (themeChanged) _app.Keyboard.ApplyTheme(cfg);
                     if (localeChanged) _app.Pet.ApplyLocale();
                     _app.Pet.ApplySettings();
+                    if (clickThroughChanged) _app.Pet.OnManualClickThroughChanged();
                     _app.Pet.ApplyCaptureMode();
                     // 单/双底栏快捷键模式变化后立即换用对应的注册集合。
                     if (barHotkeyModeChanged) _app.Pet.RebindHotkeys();
