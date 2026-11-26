@@ -3,9 +3,25 @@ using System.IO;
 
 namespace WuwatappoNative.Pet;
 
+internal enum ControllerKind : byte
+{
+    Generic,
+    DualSense
+}
+
+[Flags]
+internal enum DualSenseButtons : byte
+{
+    None = 0,
+    PS = 1,
+    Touchpad = 2,
+    Microphone = 4
+}
+
 internal readonly record struct ControllerPadState(
     ushort Buttons, byte LeftTrigger, byte RightTrigger,
-    short LeftX = 0, short LeftY = 0, short RightX = 0, short RightY = 0)
+    short LeftX = 0, short LeftY = 0, short RightX = 0, short RightY = 0,
+    ControllerKind Kind = ControllerKind.Generic, DualSenseButtons ExtraButtons = DualSenseButtons.None)
 {
     public ControllerPadState Merge(ControllerPadState other)
     {
@@ -15,7 +31,10 @@ internal readonly record struct ControllerPadState(
         return new ControllerPadState(
             (ushort)(Buttons | other.Buttons),
             Math.Max(LeftTrigger, other.LeftTrigger), Math.Max(RightTrigger, other.RightTrigger),
-            left.X, left.Y, right.X, right.Y);
+            left.X, left.Y, right.X, right.Y,
+            Kind == ControllerKind.DualSense || other.Kind == ControllerKind.DualSense
+                ? ControllerKind.DualSense : ControllerKind.Generic,
+            ExtraButtons | other.ExtraButtons);
     }
 
     static (short X, short Y) StrongerStick(short x, short y, short otherX, short otherY)
@@ -34,9 +53,12 @@ internal readonly record struct ControllerPadState(
         writer.Write(LeftY);
         writer.Write(RightX);
         writer.Write(RightY);
+        writer.Write((byte)Kind);
+        writer.Write((byte)ExtraButtons);
     }
 
     public static ControllerPadState ReadFrom(BinaryReader reader) => new(
         reader.ReadUInt16(), reader.ReadByte(), reader.ReadByte(),
-        reader.ReadInt16(), reader.ReadInt16(), reader.ReadInt16(), reader.ReadInt16());
+        reader.ReadInt16(), reader.ReadInt16(), reader.ReadInt16(), reader.ReadInt16(),
+        (ControllerKind)reader.ReadByte(), (DualSenseButtons)reader.ReadByte());
 }

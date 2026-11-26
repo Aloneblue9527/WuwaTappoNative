@@ -138,7 +138,8 @@ internal sealed class DualSenseRawInput : NativeWindow, IDisposable
         state = new ControllerPadState(
             WinMmPadBridge.ConvertButtons(buttons, pov), report[5], report[6],
             ToStick(report[1]), ToStick((byte)(255 - report[2])),
-            ToStick(report[3]), ToStick((byte)(255 - report[4])));
+            ToStick(report[3]), ToStick((byte)(255 - report[4])),
+            ControllerKind.DualSense, (DualSenseButtons)(report[10] & 0x07));
         return true;
     }
 

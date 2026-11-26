@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using WuwatappoNative.Pet;
 
-internal static class Program
+internal static partial class Program
 {
     static int _checks;
 
@@ -12,10 +12,16 @@ internal static class Program
     const ushort Rep = PadInputLogic.KeyStrokeRepeat;
 
     [STAThread]
-    static int Main()
+    static int Main(string[] args)
     {
+        if (args.Length == 2 && args[0] == "--controller-bridge")
+        {
+            ControllerBridgeHost.Run(args[1]);
+            return 0;
+        }
         try
         {
+            if (args.Contains("--exercise")) return ExerciseDualSense(args.Last());
             CheckKeystrokeFilter();
             CheckVirtualKeyMap();
             CheckInitialKeyDown();
@@ -30,6 +36,10 @@ internal static class Program
             CheckDualSenseUsbReport();
             CheckControllerBridgeFrame();
             CheckProductProbeAndWinMmFallback();
+            CheckDualSenseIdentity();
+            CheckDualSenseBubbleLabels(args.FirstOrDefault(a => a != "--live"));
+            CheckDualSenseAppearance(args.FirstOrDefault(a => a != "--live"));
+            if (args.Contains("--live")) CheckLiveDualSense();
             Console.WriteLine($"PASS: {_checks} assertions.");
             return 0;
         }
@@ -296,7 +306,8 @@ internal static class Program
         report[3] = 128;
         report[4] = 127;
         report[8] = 8;
-        Assert(DualSenseRawInput.TryDecodeUsbReport(report, out var state) && state == default,
+        Assert(DualSenseRawInput.TryDecodeUsbReport(report, out var state) &&
+               state == new ControllerPadState(0, 0, 0, Kind: ControllerKind.DualSense),
             "A centered USB report must have zero sticks, triggers and buttons.");
 
         report[1] = 0;

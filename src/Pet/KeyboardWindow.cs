@@ -15,7 +15,7 @@ namespace WuwatappoNative.Pet;
 /// 200px 宽奶油木板；26 键为 15×19 键帽；鸣潮专属 1/2/3 + Q/E/R + 空格 + 鼠标；
 /// 手柄为 200×174 面板（仅手柄本体，不再套占位的奶油底板），使用 XInput 轮询。
 /// </summary>
-public sealed class KeyboardWindow : Form
+public sealed partial class KeyboardWindow : Form
 {
     public enum Mode { Hidden, Letters, Wuwa, Rhythm, Controller }
 
@@ -57,6 +57,9 @@ public sealed class KeyboardWindow : Form
     bool _padConnected, _padUnavailable;
     bool _padKeystrokesReady, _padKeystrokeUnavailable;
     bool _controllerProtocolExtension;
+    bool _padFromExtension;
+    ControllerKind _padKind;
+    DualSenseButtons _dualSenseButtons;
     readonly ControllerBridgeClient _controllerBridge = new();
     uint _padPacket;
     int _padUserIndex = -1;
@@ -232,6 +235,9 @@ public sealed class KeyboardWindow : Form
         _padUserIndex = -1;
         _padKeystrokesReady = false;
         _padConnected = false;
+        _padFromExtension = false;
+        _padKind = ControllerKind.Generic;
+        _dualSenseButtons = DualSenseButtons.None;
         _padButtons = 0;
         _lt = _rt = 0;
         _lx = _ly = _rx = _ry = 0;
@@ -424,6 +430,8 @@ public sealed class KeyboardWindow : Form
             // 协议扩展只在没有 XInput 手柄时接管；使用 Xbox/原生 XInput 时
             // 绝不合并扩展输入，避免同一物理手柄被重复识别。
             bool fromExtension = false;
+            ControllerKind kind = ControllerKind.Generic;
+            DualSenseButtons extraButtons = DualSenseButtons.None;
             if (!connected && _controllerProtocolExtension && _controllerBridge.TryRead(out var extension))
             {
                 state.Gamepad.wButtons = extension.Buttons;
@@ -434,6 +442,8 @@ public sealed class KeyboardWindow : Form
                 state.Gamepad.sThumbRX = extension.RightX;
                 state.Gamepad.sThumbRY = extension.RightY;
                 fromExtension = true;
+                kind = extension.Kind;
+                extraButtons = extension.ExtraButtons;
                 connected = true;
             }
 
@@ -442,6 +452,9 @@ public sealed class KeyboardWindow : Form
                 if (_padConnected)
                 {
                     _padConnected = false;
+                    _padFromExtension = false;
+                    _padKind = ControllerKind.Generic;
+                    _dualSenseButtons = DualSenseButtons.None;
                     _padKeystrokesReady = false;
                     _padButtons = 0; _lt = _rt = 0; _lx = _ly = _rx = _ry = 0;
                     ResetPadInputState();
@@ -451,6 +464,8 @@ public sealed class KeyboardWindow : Form
             }
 
             var g = state.Gamepad;
+            bool sourceChanged = fromExtension != _padFromExtension || kind != _padKind;
+            if (sourceChanged) ResetPadInputState();
             // 摇杆只用于显示，不参与计数：按“按键是否按下”做边沿检测，
             // 这样转摇杆不会被视为拍桌宠，也避免轴抖动引发高频重绘。
             bool buttonsChanged = g.wButtons != _padButtons;
@@ -459,12 +474,15 @@ public sealed class KeyboardWindow : Form
                 Math.Abs(g.bRightTrigger - _rt) > triggerChangeThreshold;
             bool axesMoved = Math.Abs(g.sThumbLX - _lx) > 900 || Math.Abs(g.sThumbLY - _ly) > 900
                 || Math.Abs(g.sThumbRX - _rx) > 900 || Math.Abs(g.sThumbRY - _ry) > 900;
-            if (!_padConnected || buttonsChanged || triggersChanged || axesMoved)
+            if (!_padConnected || sourceChanged || extraButtons != _dualSenseButtons || buttonsChanged || triggersChanged || axesMoved)
             {
-                bool wasConnected = _padConnected;
+                bool wasConnected = _padConnected && !sourceChanged;
                 ushort prev = _padButtons;
                 byte prevLt = _lt, prevRt = _rt;
                 _padConnected = true;
+                _padFromExtension = fromExtension;
+                _padKind = kind;
+                _dualSenseButtons = extraButtons;
                 _padPacket = state.dwPacketNumber;
                 _padButtons = g.wButtons;
                 _lt = g.bLeftTrigger;
@@ -492,8 +510,8 @@ public sealed class KeyboardWindow : Form
             // XInput 的 keystroke 队列保留两次轮询之间发生的按键事件。
             // 16ms 状态采样会漏掉极短的点按；队列可以把这些按键补回来。
             // 两条路径共享 PadInputTracker，同一次物理按下不会被重复计数。
-            if (_padKeystrokesReady) PollPadKeystrokes();
-            else _padKeystrokesReady = true;
+            if (!fromExtension && _padKeystrokesReady) PollPadKeystrokes();
+            _padKeystrokesReady = !fromExtension;
             FlushPadInput();
         }
         catch (Exception ex)
@@ -506,6 +524,9 @@ public sealed class KeyboardWindow : Form
                 return;
             }
             _padConnected = false;
+            _padFromExtension = false;
+            _padKind = ControllerKind.Generic;
+            _dualSenseButtons = DualSenseButtons.None;
             _padKeystrokesReady = false;
             _padButtons = 0; _lt = _rt = 0; _lx = _ly = _rx = _ry = 0;
             ResetPadInputState();
@@ -624,6 +645,9 @@ public sealed class KeyboardWindow : Form
     void RaisePadButtonPressed(string label)
     {
         if (string.IsNullOrEmpty(label)) return;
+        // 去重和计数继续使用统一映射，发出气泡时再按当前手柄转换显示名称。
+        if (_controllerProtocolExtension && _padFromExtension)
+            label = PadInputLogic.LabelForController(label, _padKind);
         PadButtonPressed?.Invoke(label);
     }
 
@@ -832,7 +856,13 @@ public sealed class KeyboardWindow : Form
             return;
         }
 
-        // 手柄本体：参考图的扁平线稿轮廓（双肩、握把、底部中央内凹），只画本体。
+        if (_controllerProtocolExtension && _padFromExtension && _padKind == ControllerKind.DualSense)
+        {
+            DrawDualSense(g, s, theme);
+            return;
+        }
+
+        // Xbox 本体：双肩、握把、底部中央内凹的扁平线稿。
         // 整体下移 8px，给顶部 LT/RT 深度条留出空间。
         float bodyOffsetY = 8 * s;
         var state = g.Save();
