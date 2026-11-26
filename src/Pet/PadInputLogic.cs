@@ -23,6 +23,27 @@ internal static class PadInputLogic
     internal static bool IsKeyUp(ushort flags) =>
         (flags & KeyStrokeKeyUp) != 0 && (flags & KeyStrokeRepeat) == 0;
 
+    internal static string LabelForController(string label, ControllerKind kind)
+    {
+        if (kind != ControllerKind.DualSense) return label;
+        return label switch
+        {
+            "LB" => "L1",
+            "RB" => "R1",
+            "LT" => "L2",
+            "RT" => "R2",
+            "A" => "×",
+            "B" => "○",
+            "X" => "□",
+            "Y" => "△",
+            "LS" => "L3",
+            "RS" => "R3",
+            "Back" => "Create",
+            "Start" => "Options",
+            _ => label,
+        };
+    }
+
     internal static string LabelForVirtualKey(ushort vk) => vk switch
     {
         0x5800 => "A",

@@ -230,10 +230,10 @@ public sealed class KeyBubbleLayer : IDisposable
 
     static Kind PadKindFor(string label) => label switch
     {
-        "A" => Kind.XboxA,
-        "B" => Kind.XboxB,
-        "X" => Kind.XboxX,
-        "Y" => Kind.XboxY,
+        "A" or "×" => Kind.XboxA,
+        "B" or "○" => Kind.XboxB,
+        "X" or "□" => Kind.XboxX,
+        "Y" or "△" => Kind.XboxY,
         _ => Kind.Normal,
     };
 

@@ -73,7 +73,7 @@ internal static class WinMmPadBridge
                         ConnectedSlots.Add((slot, sonyProduct, capsRead));
                         if (ShouldSkipWinMm(capsRead, sonyProduct, dualSense.HasUsbState(sonyProduct), dualSense.HasAnyUsbState()))
                             continue;
-                        merged = merged.Merge(Convert(info));
+                        merged = merged.Merge(Convert(info, sonyProduct));
                         any = true;
                     }
                     _nextFullScan = now + FullScanIntervalMs;
@@ -90,7 +90,7 @@ internal static class WinMmPadBridge
                         }
                         if (ShouldSkipWinMm(capsRead, sonyProduct, dualSense.HasUsbState(sonyProduct), dualSense.HasAnyUsbState()))
                             continue;
-                        merged = merged.Merge(Convert(info));
+                        merged = merged.Merge(Convert(info, sonyProduct));
                         any = true;
                     }
                 }
@@ -114,12 +114,13 @@ internal static class WinMmPadBridge
     }
 
     /// <summary>把常见 DirectInput 手柄布局转换成 XInput 按钮位；摇杆不参与计数。</summary>
-    public static ControllerPadState Convert(JoyInfoEx joy)
+    public static ControllerPadState Convert(JoyInfoEx joy, ushort sonyProduct = 0)
     {
         // 其他 WinMM 手柄继续用按钮 6/7 作为数字扳机。
         byte leftTrigger = HasButton(joy.dwButtons, 6) ? (byte)255 : (byte)0;
         byte rightTrigger = HasButton(joy.dwButtons, 7) ? (byte)255 : (byte)0;
-        return new ControllerPadState(ConvertButtons(joy.dwButtons, joy.dwPOV), leftTrigger, rightTrigger);
+        return new ControllerPadState(ConvertButtons(joy.dwButtons, joy.dwPOV), leftTrigger, rightTrigger,
+            Kind: sonyProduct is 0x0CE6 or 0x0DF2 ? ControllerKind.DualSense : ControllerKind.Generic);
     }
 
     internal static ushort ConvertButtons(uint input, uint pov)

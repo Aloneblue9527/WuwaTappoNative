@@ -2658,7 +2658,7 @@ public sealed class PetWindow : Form
     {
         bool captureOnly = _cfg.CaptureMode && _cfg.CaptureStopRenderingMain;
         if (!_cfg.KeyBubbles || _hiddenByHotkey || (!Visible && !captureOnly)) return;
-        bool accent = label is "LB" or "RB" or "LT" or "RT";
+        bool accent = label is "LB" or "RB" or "LT" or "RT" or "L1" or "R1" or "L2" or "R2";
         if (!_keyBubbles.AddLabel(label, accent)) return;
         if (_capture != null && !_capture.IsDisposed) CaptureChanged?.Invoke();
         RequestCompose();
