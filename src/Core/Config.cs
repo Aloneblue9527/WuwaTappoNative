@@ -223,6 +223,8 @@ public sealed class Settings
 
     [JsonIgnore] public int PetX { get; set; } = -1;
     [JsonIgnore] public int PetY { get; set; } = -1;
+    /// <summary>PetX/PetY 是否为有效位置；负数坐标（左侧副屏）同样是有效位置。</summary>
+    [JsonIgnore] public bool HasPetPosition { get; set; }
     /// <summary>操作面板普通状态下的尺寸（DIP），由 StateStore 持久化。</summary>
     [JsonIgnore] public int PanelWidth { get; set; }
     [JsonIgnore] public int PanelHeight { get; set; }

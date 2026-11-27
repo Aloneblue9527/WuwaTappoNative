@@ -63,6 +63,7 @@ internal static class Program
             CheckCatOrderScreenSelection();
             CheckPetMultiSelectBehavior();
             CheckPetGridLogic();
+            CheckPetScalePlacement();
             CheckPetBarClickDragRegression();
             CheckRoomProtocol105();
             CheckFullscreenGameMode();
@@ -2712,6 +2713,103 @@ internal static class Program
             "The pet/tray context menu must expose the grid-alignment toggle.");
 
         Console.WriteLine("PASS: non-main pets snap to a top-left anchored, size-aware virtual grid.");
+    }
+
+    static void CheckPetScalePlacement()
+    {
+        var wa = new Rectangle(0, 0, 1920, 1080);
+        const int tolerance = 40;
+
+        // 单只右下角桌宠：缩小后右边缘/下边缘保持不动，不会离角落越来越远。
+        var bottomRight = PetScalePlacement.Reposition(
+            new[] { new Rectangle(1520, 800, 200, 200) },
+            new[] { new Size(100, 100) }, wa, tolerance);
+        Assert(bottomRight.Length == 1 && bottomRight[0] == new Point(1620, 900),
+            "A bottom-right pet must keep its right/bottom gap when shrinking.");
+
+        var topLeft = PetScalePlacement.Reposition(
+            new[] { new Rectangle(40, 30, 200, 200) },
+            new[] { new Size(100, 100) }, wa, tolerance);
+        Assert(topLeft[0] == new Point(40, 30),
+            "A top-left pet must stay anchored at the top-left corner.");
+
+        var leftScreen = new Rectangle(-1920, 0, 1920, 1080);
+        var leftBottom = PetScalePlacement.Reposition(
+            new[] { new Rectangle(-300, 800, 200, 200) },
+            new[] { new Size(100, 100) }, leftScreen, tolerance);
+        Assert(leftBottom[0] == new Point(-200, 900),
+            "Negative-origin secondary screens must keep the same bottom-right anchor.");
+
+        var centered = PetScalePlacement.Reposition(
+            new[] { new Rectangle(860, 440, 200, 200) },
+            new[] { new Size(100, 100) }, wa, tolerance);
+        Assert(centered[0] == new Point(910, 490),
+            "A centered pet must scale around its own center.");
+
+        // 两只右下角桌宠整组缩小：组的外缘不动，间距按同一比例缩小，队形不拆散。
+        var group = PetScalePlacement.Reposition(
+            new[] { new Rectangle(1400, 800, 100, 100), new Rectangle(1520, 800, 100, 100) },
+            new[] { new Size(50, 50), new Size(50, 50) }, wa, tolerance);
+        Assert(group[0] == new Point(1510, 850) && group[1] == new Point(1570, 850),
+            "A bottom-right group must scale its spacing around the anchored corner.");
+
+        // 居中队伍：围绕组中心缩放，左右对称保持。
+        var centeredGroup = PetScalePlacement.Reposition(
+            new[] { new Rectangle(860, 440, 100, 100), new Rectangle(960, 440, 100, 100) },
+            new[] { new Size(50, 50), new Size(50, 50) }, wa, tolerance);
+        Assert(centeredGroup[0] == new Point(910, 440) && centeredGroup[1] == new Point(960, 440),
+            "A centered group must shrink symmetrically around the group center.");
+
+        // 放大也不能把桌宠推出工作区。
+        var clamped = PetScalePlacement.Reposition(
+            new[] { new Rectangle(1700, 1000, 100, 80) },
+            new[] { new Size(400, 300) }, wa, tolerance);
+        Assert(clamped[0].X >= wa.Left && clamped[0].X + 400 <= wa.Right
+                && clamped[0].Y >= wa.Top && clamped[0].Y + 300 <= wa.Bottom,
+            "Scaling up must clamp the window to the screen working area.");
+
+        // 整组放大越界时整体平移，不能逐只 clamp 把队形压到右边缘。
+        var shiftedGroup = PetScalePlacement.Reposition(
+            new[] { new Rectangle(100, 400, 100, 100), new Rectangle(700, 400, 100, 100) },
+            new[] { new Size(270, 270), new Size(270, 270) }, wa, tolerance);
+        Assert(shiftedGroup[0] == new Point(30, 400) && shiftedGroup[1] == new Point(1650, 400),
+            "An oversized group must shift as a whole so its spacing stays intact.");
+
+        Assert(PetScalePlacement.Reposition(Array.Empty<Rectangle>(), Array.Empty<Size>(), wa, tolerance).Length == 0,
+            "Empty placement input must stay a no-op.");
+
+        string pet = ReadRepoSource("src", "Pet", "PetWindow.cs");
+        Assert(pet.Contains("PetScalePlacement.Reposition", StringComparison.Ordinal)
+                && pet.Contains("RepositionMainAfterScale", StringComparison.Ordinal)
+                && pet.Contains("RepositionScaledPets", StringComparison.Ordinal)
+                && pet.Contains("SnapshotOtherPetBounds", StringComparison.Ordinal)
+                && pet.Contains("UpdateOtherPetScalesWithLayout", StringComparison.Ordinal),
+            "Main and grouped pet scaling must use the shared placement helper.");
+        Assert(pet.Contains("mainGroup = _cfg.RemoteFollowMainScale", StringComparison.Ordinal)
+                && pet.Contains("oldRects.Add(mainOldVisible)", StringComparison.Ordinal)
+                && pet.Contains("RemoteVisibleBounds", StringComparison.Ordinal)
+                && pet.Contains("MainVisibleBounds", StringComparison.Ordinal),
+            "When remote pets follow the main pet's scale, the main pet must join the same formation group.");
+        Assert(pet.Contains("RemoteWindowPoint", StringComparison.Ordinal)
+                && pet.Contains("MainWindowPoint", StringComparison.Ordinal),
+            "Layout must anchor visible content, not transparent bubble/margin window bounds.");
+        string config = ReadRepoSource("src", "Core", "Config.cs");
+        string state = ReadRepoSource("src", "Core", "StateStore.cs");
+        Assert(config.Contains("HasPetPosition", StringComparison.Ordinal)
+                && state.Contains("hasPetPosition", StringComparison.Ordinal)
+                && pet.Contains("cfg.HasPetPosition ?", StringComparison.Ordinal),
+            "Negative main-pet coordinates on left-side monitors must be restored instead of treated as unset.");
+        Assert(pet.Contains("_cfg.PetX = Left", StringComparison.Ordinal)
+                && pet.Contains("SavePetPosition(entry.Id, entry.Cat, custom: false)", StringComparison.Ordinal),
+            "Repositioned pets must persist their new anchors without marking them user-custom.");
+        Assert(pet.Contains("MovePetWindow", StringComparison.Ordinal)
+                && pet.Contains("RestoreAutoGameModePositions", StringComparison.Ordinal),
+            "Exiting game mode must restore both config positions and actual member windows.");
+        Assert(!pet.Contains("ClampCatToScreen", StringComparison.Ordinal)
+                && !pet.Contains("ClampCompanionToScreen", StringComparison.Ordinal),
+            "The old top-left clamp must be replaced by group-aware placement.");
+
+        Console.WriteLine("PASS: scale anchoring keeps corners, centers and multiplayer formations stable.");
     }
 
     /// <summary>

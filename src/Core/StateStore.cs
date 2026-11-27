@@ -52,6 +52,7 @@ public static class StateStore
                     ["schema"] = 1,
                     ["petX"] = cfg.PetX,
                     ["petY"] = cfg.PetY,
+                    ["hasPetPosition"] = cfg.HasPetPosition || cfg.PetX != -1 || cfg.PetY != -1,
                     ["panelWidth"] = cfg.PanelWidth,
                     ["panelHeight"] = cfg.PanelHeight,
                     ["panelMaximized"] = cfg.PanelMaximized,
@@ -88,6 +89,9 @@ public static class StateStore
         if (node is not JsonObject root) return;
         cfg.PetX = ReadInt(root["petX"], -1);
         cfg.PetY = ReadInt(root["petY"], -1);
+        // 旧状态文件没有 hasPetPosition：-1/-1 视为未设置，其余（包括负坐标副屏）视为有效位置。
+        cfg.HasPetPosition = ReadBool(root["hasPetPosition"])
+            || cfg.PetX != -1 || cfg.PetY != -1;
         cfg.PanelWidth = ReadInt(root["panelWidth"], 0);
         cfg.PanelHeight = ReadInt(root["panelHeight"], 0);
         cfg.PanelMaximized = ReadBool(root["panelMaximized"]);
@@ -136,6 +140,7 @@ public static class StateStore
 
         cfg.PetX = ReadInt(root?["PetX"], -1);
         cfg.PetY = ReadInt(root?["PetY"], -1);
+        cfg.HasPetPosition = cfg.PetX != -1 || cfg.PetY != -1;
         oldRoom = ReadString(root?["RoomNo"]);
         if (string.IsNullOrEmpty(oldRoom)) oldRoom = ReadString(root?["LastRoom"]);
         // 旧房间历史不再保留。

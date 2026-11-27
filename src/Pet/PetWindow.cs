@@ -203,7 +203,7 @@ public sealed class PetWindow : Form
         _catalog.Loaded += () => Safe(() => { _loader.Clear(); ReloadFrames(); RefreshCats(); RefreshCompanions(); });
 
         ReloadFrames();
-        Location = cfg.PetX >= 0 ? new Point(cfg.PetX, cfg.PetY) : DefaultLocation();
+        Location = cfg.HasPetPosition ? new Point(cfg.PetX, cfg.PetY) : DefaultLocation();
         _hook.KeyDown += vk => Safe(() =>
         {
             // VK_LBUTTON 只会收到“点在本程序所有窗口之外”的左键按下；
@@ -1650,6 +1650,8 @@ public sealed class PetWindow : Form
         if (appliedProfile)
         {
             lock (_gameModeSaveGate) RestoreAutoGameModePositions();
+            // 最终位置可能覆盖了 ApplySettings 期间的中间锚点，通知键盘等跟随窗口重新贴合。
+            GeometryChanged?.Invoke();
         }
         Save();
         Log.Write(appliedProfile ? "游戏模式已退出，已恢复进入前设置" : "游戏模式已退出，已恢复鼠标交互");
@@ -1702,6 +1704,22 @@ public sealed class PetWindow : Form
     {
         Location = _autoGameModeSnapshot.PetLocation;
         ApplyAutoGameModeConfigTo(_cfg, _autoGameModeSnapshot);
+        // 缩放/布局可能已经移动过成员窗口；恢复快照时窗口和配置要一起回到进入前的位置。
+        foreach (var pair in _cats)
+            if (_cfg.MemberPositions.TryGetValue(CatKey(pair.Key), out var point))
+                MovePetWindow(pair.Value, point);
+        foreach (var pair in _companionCats)
+        {
+            var companion = CompanionBySynthetic(pair.Key);
+            if (companion != null && _cfg.CompanionPositions.TryGetValue(CompanionKey(companion.Id), out var point))
+                MovePetWindow(pair.Value, point);
+        }
+    }
+
+    static void MovePetWindow(RemoteCatWindow cat, int[] point)
+    {
+        if (cat == null || cat.IsDisposed || point == null || point.Length < 2) return;
+        cat.Location = new Point(point[0], point[1]);
     }
 
     /// <summary>
@@ -1797,12 +1815,16 @@ public sealed class PetWindow : Form
             _wheel.Close();
         }
         AnimationTimer.FrameRate = Settings.NormalizeAnimationFps(_cfg.AnimationFps);
+        // 缩放前记录窗口矩形：主角色/整组桌宠按屏幕锚点重新落位，避免左上角固定造成角落留空或队形错乱。
+        var mainOldBounds = Bounds;
+        var otherScaleSnapshot = SnapshotOtherPetBounds();
         Size = WindowSize();
         ApplyWindowStyles();
         ApplyBarVisibility();
         ApplyThemeToCats();
         UpdateCatScales();
         UpdateCompanionScales();
+        bool layoutChanged = RepositionScaledPets(mainOldBounds, otherScaleSnapshot);
         foreach (var cat in AllPetWindows())
         {
             cat.SetMirrored(IsMemberMirrored(cat.MemberId));
@@ -1813,6 +1835,8 @@ public sealed class PetWindow : Form
         // 全局“隐藏其他角色桌宠”同样作用于本地自定义伙伴；统一在这里对齐窗口集合。
         RefreshCompanions(applyPlacement: false);
         ApplyPlacementRules();
+        // 面板/右键菜单是先 Save 再 ApplySettings，缩放后的新锚点要在这里补一次落盘。
+        if (layoutChanged) Save();
         RefreshMenu();
     }
 
@@ -3681,28 +3705,11 @@ public sealed class PetWindow : Form
         foreach (var companion in _cfg.Companions ?? new List<CompanionPet>())
         {
             if (companion == null || !_companionCats.TryGetValue(companion.SyntheticId, out var cat)) continue;
-            int oldWidth = cat.Width;
             cat.SetScale(RemoteScaleFactor);
             cat.SetWindowOptions(EffectiveRemoteOpacity, _cfg.HoverFade, _cfg.ClickThrough, _cfg.Topmost, _cfg.HoverFadeOpacity);
             cat.SetRemoteStyle(EffectiveRemoteScale, EffectiveRemoteOpacity, _cfg.RemoteNameScale);
             cat.SetBarVisible(CompanionBarVisible(companion));
-            if (cat.Width != oldWidth) ClampCompanionToScreen(companion, cat);
         }
-    }
-
-    void ClampCompanionToScreen(CompanionPet companion, RemoteCatWindow cat)
-    {
-        var rect = CatVisibleRect(cat);
-        var wa = Screen.FromRectangle(rect).WorkingArea;
-        int dx = 0, dy = 0;
-        if (rect.Right > wa.Right) dx = wa.Right - rect.Right;
-        if (rect.Left + dx < wa.Left) dx = wa.Left - rect.Left;
-        if (rect.Bottom > wa.Bottom) dy = wa.Bottom - rect.Bottom;
-        if (rect.Top + dy < wa.Top) dy = wa.Top - rect.Top;
-        if (dx == 0 && dy == 0) return;
-        cat.Location = new Point(cat.Left + dx, cat.Top + dy);
-        _cfg.CompanionPositions[CompanionKey(companion.Id)] = new[] { cat.Left, cat.Top };
-        Save();
     }
 
 
@@ -4238,30 +4245,192 @@ public sealed class PetWindow : Form
         foreach (var pair in _cats)
         {
             var c = pair.Value;
-            int oldWidth = c.Width;
             c.SetScale(s);
             topmostChanged |= c.SetWindowOptions(EffectiveRemoteOpacity, _cfg.HoverFade, _cfg.ClickThrough, _cfg.Topmost, _cfg.HoverFadeOpacity);
             c.SetRemoteStyle(EffectiveRemoteScale, EffectiveRemoteOpacity, _cfg.RemoteNameScale);
             c.SetBarVisible(!_cfg.HideRemoteBars);
-            // 缩放后窗口从左上角变大，贴边排列的成员会被顶出屏幕；按可见猫体修正回工作区。
-            if (c.Width != oldWidth) ClampCatToScreen(pair.Key, c);
         }
         // 缩放/透明度本身不改变层级，只有置顶状态真正切换时才需要重排。
         if (topmostChanged) QueueRestackPetWindows();
     }
 
-    void ClampCatToScreen(long id, RemoteCatWindow cat)
+    /// <summary>记录所有联机成员/伙伴缩放前的窗口矩形，供整组缩放后重新落位。</summary>
+    List<(RemoteCatWindow Cat, long Id, Rectangle Bounds)> SnapshotOtherPetBounds()
     {
-        var rect = CatVisibleRect(cat);
-        var wa = Screen.FromRectangle(rect).WorkingArea;
-        int dx = 0, dy = 0;
-        if (rect.Right > wa.Right) dx = wa.Right - rect.Right;
-        if (rect.Left + dx < wa.Left) dx = wa.Left - rect.Left;
-        if (rect.Bottom > wa.Bottom) dy = wa.Bottom - rect.Bottom;
-        if (rect.Top + dy < wa.Top) dy = wa.Top - rect.Top;
-        if (dx == 0 && dy == 0) return;
-        cat.Location = new Point(cat.Left + dx, cat.Top + dy);
-        _cfg.MemberPositions[CatKey(id)] = new[] { cat.Left, cat.Top };
+        var list = new List<(RemoteCatWindow Cat, long Id, Rectangle Bounds)>(_cats.Count + _companionCats.Count);
+        foreach (var pair in _cats)
+            if (pair.Value != null && !pair.Value.IsDisposed) list.Add((pair.Value, pair.Key, pair.Value.Bounds));
+        foreach (var pair in _companionCats)
+            if (pair.Value != null && !pair.Value.IsDisposed) list.Add((pair.Value, pair.Key, pair.Value.Bounds));
+        return list;
+    }
+
+    /// <summary>
+    /// 主角色可见内容：左右是角色/HUD 的实际范围（不含窗口透明边距），上方保留气泡净空，
+    /// 下方到计数条底边；缩放锚点必须按这个矩形计算，否则贴边贴顶会被透明边距带偏。
+    /// </summary>
+    Rectangle MainVisibleBounds(Rectangle windowBounds)
+    {
+        float s = windowBounds.Width / (float)PetComposer.WindowW;
+        int leftOffset = (int)Math.Round(PetComposer.CatX * s);
+        int rightOffset = (int)Math.Round(Math.Max(PetComposer.ToolbarX + PetComposer.ToolbarW, PetComposer.ChestRightRect.Right) * s);
+        return new Rectangle(windowBounds.Left + leftOffset, windowBounds.Top,
+            Math.Max(1, rightOffset - leftOffset), windowBounds.Height);
+    }
+
+    Size MainVisibleSize(Size windowSize)
+    {
+        float s = windowSize.Width / (float)PetComposer.WindowW;
+        int leftOffset = (int)Math.Round(PetComposer.CatX * s);
+        int rightOffset = (int)Math.Round(Math.Max(PetComposer.ToolbarX + PetComposer.ToolbarW, PetComposer.ChestRightRect.Right) * s);
+        return new Size(Math.Max(1, rightOffset - leftOffset), windowSize.Height);
+    }
+
+    Point MainWindowPoint(Point visiblePoint, Size windowSize)
+    {
+        float s = windowSize.Width / (float)PetComposer.WindowW;
+        return new Point(visiblePoint.X - (int)Math.Round(PetComposer.CatX * s), visiblePoint.Y);
+    }
+
+    /// <summary>联机/伙伴窗口顶部有气泡净空，锚定和 clamp 只针对可见猫体。</summary>
+    static Rectangle RemoteVisibleBounds(Rectangle windowBounds)
+    {
+        float s = windowBounds.Width / (float)RemoteCatWindow.W;
+        int head = (int)Math.Round(RemoteCatWindow.Headroom * s);
+        int catH = (int)Math.Round(RemoteCatWindow.CatH * s);
+        return new Rectangle(windowBounds.Left, windowBounds.Top + head, windowBounds.Width, Math.Max(1, catH));
+    }
+
+    static Size RemoteVisibleSize(Size windowSize)
+    {
+        float s = windowSize.Width / (float)RemoteCatWindow.W;
+        return new Size(windowSize.Width, Math.Max(1, (int)Math.Round(RemoteCatWindow.CatH * s)));
+    }
+
+    static Point RemoteWindowPoint(Point visiblePoint, Size windowSize)
+    {
+        float s = windowSize.Width / (float)RemoteCatWindow.W;
+        return new Point(visiblePoint.X, visiblePoint.Y - (int)Math.Round(RemoteCatWindow.Headroom * s));
+    }
+
+    bool RepositionMainAfterScale(Rectangle oldBounds)
+    {
+        if (!IsHandleCreated || IsDisposed || oldBounds.Width <= 0 || oldBounds.Height <= 0) return false;
+        var oldVisible = MainVisibleBounds(oldBounds);
+        var newVisibleSize = MainVisibleSize(Size);
+        if (oldVisible.Size == newVisibleSize) return false;
+        var wa = Screen.FromRectangle(oldVisible).WorkingArea;
+        var point = PetScalePlacement.Reposition(
+            new[] { oldVisible }, new[] { newVisibleSize }, wa, ScaleAnchorTolerance(wa))[0];
+        return ApplyMainPosition(point);
+    }
+
+    bool ApplyMainPosition(Point visiblePoint)
+    {
+        var point = MainWindowPoint(visiblePoint, Size);
+        if (Location == point) return false;
+        Location = point;
+        _cfg.PetX = Left;
+        _cfg.PetY = Top;
+        _cfg.HasPetPosition = true;
+        return true;
+    }
+
+    bool ApplyOtherPetPosition((RemoteCatWindow Cat, long Id, Rectangle OldVisible, Size NewWindow, Size NewVisible) entry, Point visiblePoint)
+    {
+        var point = RemoteWindowPoint(visiblePoint, entry.NewWindow);
+        bool changed = entry.Cat.Location != point;
+        if (changed) entry.Cat.Location = point;
+        SavePetPosition(entry.Id, entry.Cat, custom: false);
+        return changed;
+    }
+
+    /// <summary>
+    /// 缩放后统一落位。联机角色跟随主角缩放时，主角和同屏成员作为一组保持队形；
+    /// 主角单独缩放（如游戏模式强制不跟随）时只按主角自己的锚点移动。
+    /// </summary>
+    bool RepositionScaledPets(Rectangle mainOldBounds, List<(RemoteCatWindow Cat, long Id, Rectangle Bounds)> snapshot)
+    {
+        var mainOldVisible = mainOldBounds.Width > 0 && mainOldBounds.Height > 0
+            ? MainVisibleBounds(mainOldBounds) : Rectangle.Empty;
+        var mainNewVisibleSize = IsHandleCreated && !IsDisposed ? MainVisibleSize(Size) : Size.Empty;
+        bool mainResized = IsHandleCreated && !IsDisposed
+            && mainOldVisible.Width > 0 && mainOldVisible.Height > 0
+            && mainOldVisible.Size != mainNewVisibleSize;
+
+        var changed = new List<(RemoteCatWindow Cat, long Id, Rectangle OldVisible, Size NewWindow, Size NewVisible)>();
+        if (snapshot != null)
+        {
+            foreach (var entry in snapshot)
+            {
+                if (entry.Cat.IsDisposed) continue;
+                var oldVisible = RemoteVisibleBounds(entry.Bounds);
+                var newWindow = entry.Cat.Size;
+                var newVisible = RemoteVisibleSize(newWindow);
+                if (newVisible == oldVisible.Size) continue;
+                changed.Add((entry.Cat, entry.Id, oldVisible, newWindow, newVisible));
+            }
+        }
+        if (!mainResized && changed.Count == 0) return false;
+
+        bool changedAny = false;
+        var groups = changed.GroupBy(x => Screen.FromRectangle(x.OldVisible).DeviceName).ToList();
+        string mainScreen = mainResized ? Screen.FromRectangle(mainOldVisible).DeviceName : null;
+        bool mainGroupHandled = false;
+        if (mainResized)
+        {
+            var mainGroup = _cfg.RemoteFollowMainScale
+                ? groups.FirstOrDefault(g => g.Key == mainScreen)
+                : null;
+            if (mainGroup != null)
+            {
+                var entries = mainGroup.ToList();
+                var oldRects = entries.Select(x => x.OldVisible).ToList();
+                oldRects.Add(mainOldVisible);
+                var newSizes = entries.Select(x => x.NewVisible).ToList();
+                newSizes.Add(mainNewVisibleSize);
+                var wa = Screen.FromRectangle(mainOldVisible).WorkingArea;
+                var points = PetScalePlacement.Reposition(
+                    oldRects, newSizes, wa, ScaleAnchorTolerance(wa));
+                for (int i = 0; i < entries.Count; i++)
+                    changedAny |= ApplyOtherPetPosition(entries[i], points[i]);
+                changedAny |= ApplyMainPosition(points[^1]);
+                mainGroupHandled = true;
+            }
+            else
+            {
+                changedAny |= RepositionMainAfterScale(mainOldBounds);
+            }
+        }
+
+        foreach (var group in groups)
+        {
+            if (mainGroupHandled && group.Key == mainScreen) continue;
+            var first = group.First();
+            var wa = Screen.FromRectangle(first.OldVisible).WorkingArea;
+            var points = PetScalePlacement.Reposition(
+                group.Select(x => x.OldVisible).ToList(),
+                group.Select(x => x.NewVisible).ToList(),
+                wa, ScaleAnchorTolerance(wa));
+            int index = 0;
+            foreach (var entry in group)
+                changedAny |= ApplyOtherPetPosition(entry, points[index++]);
+        }
+        // 键盘/底栏等跟随主角色位置和尺寸的窗口需要按新锚点重排。
+        if (mainResized) GeometryChanged?.Invoke();
+        return changedAny;
+    }
+
+    static int ScaleAnchorTolerance(Rectangle workingArea)
+        => Math.Max(16, (int)Math.Round(workingArea.Width * 0.02));
+
+    /// <summary>缩放类入口统一先记录矩形，再缩放，最后整组落位。</summary>
+    void UpdateOtherPetScalesWithLayout()
+    {
+        var snapshot = SnapshotOtherPetBounds();
+        UpdateCatScales();
+        UpdateCompanionScales();
+        if (RepositionScaledPets(Rectangle.Empty, snapshot)) Save();
     }
 
     void ApplyRemoteScale(double value)
@@ -4269,8 +4438,7 @@ public sealed class PetWindow : Form
         _cfg.RemoteFollowMainScale = false;
         _cfg.RemoteScale = Math.Clamp(value, 0.25, 2.0);
         Save();
-        UpdateCatScales();
-        UpdateCompanionScales();
+        UpdateOtherPetScalesWithLayout();
         ApplyPlacementRules();
         NotifySettingsChanged();
     }
@@ -4280,8 +4448,7 @@ public sealed class PetWindow : Form
         _cfg.RemoteFollowMainOpacity = false;
         _cfg.RemoteOpacity = Math.Clamp(value, 0.2, 1.0);
         Save();
-        UpdateCatScales();
-        UpdateCompanionScales();
+        UpdateOtherPetScalesWithLayout();
         NotifySettingsChanged();
     }
 
@@ -4354,10 +4521,13 @@ public sealed class PetWindow : Form
     protected override void OnDpiChanged(DpiChangedEventArgs e)
     {
         base.OnDpiChanged(e);
+        var oldBounds = Bounds;
+        var snapshot = SnapshotOtherPetBounds();
         Size = WindowSize();
         Compose();
         UpdateCatScales();
         UpdateCompanionScales();
+        if (RepositionScaledPets(oldBounds, snapshot)) Save();
         ApplyPlacementRules();
         GeometryChanged?.Invoke();
     }
