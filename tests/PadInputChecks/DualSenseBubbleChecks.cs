@@ -96,10 +96,20 @@ internal static partial class Program
             foreach (var (xbox, ps) in new[] { ("LT", "L2"), ("RT", "R2") })
             {
                 emitted.Clear();
-                PadField<List<string>>(window, "_padTriggerLabels").Add(xbox);
+                tracker.Reset();
+                int before = counts;
                 tracker.BeginPoll();
+                tracker.ObserveTriggerState(xbox == "LT" ? (byte)64 : (byte)0,
+                    xbox == "RT" ? (byte)64 : (byte)0);
+                if (!source.Extension)
+                    tracker.ObserveKeystroke(xbox == "LT" ? (ushort)0x5806 : (ushort)0x5807, Kd);
                 flush.Invoke(window, null);
-                Assert(emitted.SequenceEqual(new[] { source.PS ? ps : xbox }), "Analog trigger bubbles must use L2/R2 for DS5.");
+                Assert(emitted.SequenceEqual(new[] { source.PS ? ps : xbox }), "Analog trigger and queue must emit one correctly named bubble.");
+                Assert(counts == before + 1, "A trigger must count once through the shared tracker.");
+                tracker.BeginPoll();
+                tracker.ObserveTriggerState(0, 0);
+                flush.Invoke(window, null);
+                Assert(!tracker.AnyActive, "Releasing a trigger must clear the shared tracker.");
             }
             emitted.Clear();
             raise.Invoke(window, new object[] { "" });

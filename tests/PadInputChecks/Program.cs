@@ -28,6 +28,7 @@ internal static partial class Program
             CheckRepeatIgnored();
             CheckKeyUpDoesNotPress();
             CheckStateAndQueueDedupe();
+            TriggerInputChecks.Run(Assert);
             CheckLongHoldSingleDownSingleUp();
             CheckQuickTap();
             CheckMultiButton();
