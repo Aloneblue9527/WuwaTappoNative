@@ -75,6 +75,7 @@ internal static class Program
             CheckAppearanceRotation();
             CheckTrayHideOtherPets();
             CheckContextMenuDismissBehavior();
+            CheckRemoteBlink();
             CheckChestNotificationFilters();
             CheckAdvancedSynthRemoved();
             if (args.Length > 0 && File.Exists(args[0])) CheckExternalPresetFile(args[0]);
@@ -2914,6 +2915,112 @@ internal static class Program
                 && pet.Contains("ProcessNameCache", StringComparison.Ordinal),
             "Z-order watchdog must skip queued restacks and process names must be cached.");
         Console.WriteLine("PASS: remote body-frame cache, click refresh backoff and z-order watchdog guards.");
+    }
+
+    static void CheckRemoteBlink()
+    {
+        // 节奏与主角共用同一组常量：5 秒眨眼、250ms 后睁开。
+        Assert(BlinkTiming.IntervalMs == 5000 && BlinkTiming.ClosedMs == 250,
+            "Main and remote blinking must share one 5s/250ms cadence.");
+        var phases = Enumerable.Range(0, 40).Select(i => RemoteBlinkLogic.InitialPhaseMs(i)).ToArray();
+        Assert(phases.All(p => p >= 0 && p < BlinkTiming.IntervalMs),
+            "Every initial blink phase must fall inside one interval.");
+        Assert(phases.Distinct().Count() == phases.Length,
+            "Sequential scheduling seeds must produce unique phases so pets do not blink together.");
+        Assert(phases.Max() - phases.Min() > 3500,
+            "Blink phases must spread across the interval instead of clustering.");
+        Assert(RemoteBlinkLogic.InitialPhaseMs(7) == RemoteBlinkLogic.InitialPhaseMs(7),
+            "A window must keep a stable phase for the same seed.");
+        Assert(RemoteBlinkLogic.InitialDelayMs(Array.Empty<long>(), 0) == RemoteBlinkLogic.InitialPhaseMs(0),
+            "The first window must fall back to the spread phase.");
+        Assert(RemoteBlinkLogic.InitialDelayMs(new long[] { 0, 100, 200 }, 0) == 2600,
+            "A late window must be inserted into the largest phase gap (midpoint 2600).");
+        Assert(RemoteBlinkLogic.InitialDelayMs(new long[] { 0, 2500 }, 0) is 1250 or 3750,
+            "Tied phase gaps must still keep the new window away from existing ones.");
+        Assert(RemoteBlinkLogic.InitialDelayMs(new long[] { -100, 100 }, 0) == 2500,
+            "Negative/relative offsets must wrap and still pick the largest circular gap.");
+        Assert(RemoteBlinkLogic.ArmDelay(1000, 1000) == RemoteBlinkLogic.MinWaitMs
+                && RemoteBlinkLogic.ArmDelay(1100, 1000) == 100,
+            "The shared clock must wake at the nearest due blink.");
+        Assert(RemoteBlinkLogic.ArmDelay(1000 + 6000, 1000) == RemoteBlinkLogic.MaxIntervalMs,
+            "The wait cap must cover the 5s interval plus jitter, otherwise every long cycle wakes twice.");
+        var intervals = Enumerable.Range(0, 20).Select(i => RemoteBlinkLogic.NextIntervalMs(42, i)).ToArray();
+        Assert(intervals.All(v => v >= BlinkTiming.IntervalMs - RemoteBlinkLogic.JitterMs
+                && v <= BlinkTiming.IntervalMs + RemoteBlinkLogic.JitterMs),
+            "Subsequent blink intervals must stay near the main pet's 5 seconds.");
+        Assert(intervals.Distinct().Count() > 10,
+            "Per-cycle jitter must break up long-term synchronization.");
+        Assert(RemoteBlinkLogic.NextIntervalMs(42, 3) == RemoteBlinkLogic.NextIntervalMs(42, 3),
+            "Jitter must stay deterministic for a given seed/cycle.");
+
+        string blink = ReadRepoSource("src", "Pet", "RemoteBlink.cs");
+        Assert(blink.Contains("System.Windows.Forms.Timer", StringComparison.Ordinal)
+                && blink.Contains("Dictionary<RemoteCatWindow, State>", StringComparison.Ordinal)
+                && blink.Contains("IntervalMs = 5000", StringComparison.Ordinal)
+                && blink.Contains("ClosedMs = 250", StringComparison.Ordinal)
+                && blink.Contains("MaxFailures", StringComparison.Ordinal),
+            "Remote blinks must share one timer, keep the main cadence and contain per-window failures.");
+        string remote = ReadRepoSource("src", "Pet", "RemoteCatWindow.cs");
+        Assert(remote.Contains("int _headFrame = 1", StringComparison.Ordinal)
+                && remote.Contains("SetBlinkHead", StringComparison.Ordinal)
+                && remote.Contains("RemoteBlinkAnimator.Add(this)", StringComparison.Ordinal)
+                && remote.Contains("RemoteBlinkAnimator.Remove(this)", StringComparison.Ordinal)
+                && remote.Contains("protected override void OnVisibleChanged", StringComparison.Ordinal),
+            "Remote windows must schedule blinks only while visible and reset the head on hide.");
+        Assert(remote.Contains("internal bool CanBlink", StringComparison.Ordinal)
+                && remote.Contains("ReferenceEquals(_frames.Head2, _frames.Head1)", StringComparison.Ordinal)
+                && remote.Contains("_headNeedsRepaintOnShow", StringComparison.Ordinal),
+            "Skins without a distinct closed-eye frame must skip blinking; F9 restore must not always repaint.");
+        Assert(remote.Contains("Image head = _headFrame == 2", StringComparison.Ordinal)
+                && !remote.Contains("if (_frames.Head1 != null) g.DrawImage(_frames.Head1", StringComparison.Ordinal),
+            "Blink must draw the head outside the cached base frame so blinking does not rebuild it.");
+        Assert(remote.Contains("Bitmap HeadLayer", StringComparison.Ordinal)
+                && remote.Contains("_headLayerKey", StringComparison.Ordinal)
+                && remote.Contains("DisposeHeadLayer", StringComparison.Ordinal),
+            "The scaled/mirrored head must be cached as a layer instead of bicubic-scaled on every Compose.");
+        string pet = ReadRepoSource("src", "Pet", "PetWindow.cs");
+        Assert(Regex.Matches(pet, Regex.Escape("cat.SetBlinkEnabled(_cfg.BlinkOtherPets)")).Count >= 3,
+            "Settings application plus both window creation paths must pass the blink toggle.");
+        Assert(pet.Contains("BlinkTiming.IntervalMs", StringComparison.Ordinal)
+                && pet.Contains("BlinkTiming.ClosedMs", StringComparison.Ordinal),
+            "Main pet must use the shared blink timing constants instead of duplicated literals.");
+        string config = ReadRepoSource("src", "Core", "Config.cs");
+        Assert(config.Contains("public bool BlinkOtherPets { get; set; } = true", StringComparison.Ordinal)
+                && new Settings().BlinkOtherPets,
+            "Blink must default on for remote members and companions.");
+        string panel = ReadRepoSource("src", "Ui", "PanelWindow.cs");
+        Assert(panel.Contains("blinkOtherPets = _app.Cfg.BlinkOtherPets", StringComparison.Ordinal)
+                && panel.Contains("case \"blinkOtherPets\"", StringComparison.Ordinal),
+            "Boot payload and settings.set must expose the remote blink toggle.");
+        string app = ReadRepoSource("wwwroot", "app.js");
+        Assert(app.Contains("data-switch=\"blinkOtherPets\"", StringComparison.Ordinal)
+                && app.Contains("settings.window.blinkOtherPets.title", StringComparison.Ordinal)
+                && app.Contains("s.blinkOtherPets !== false", StringComparison.Ordinal),
+            "Settings UI must render the blink switch with the default-on state.");
+        string i18n = ReadRepoSource("wwwroot", "i18n.js");
+        Assert(Regex.Matches(i18n, Regex.Escape("'settings.window.blinkOtherPets.title'")).Count == 2
+                && Regex.Matches(i18n, Regex.Escape("'settings.window.blinkOtherPets.sub'")).Count == 2,
+            "English and Japanese dictionaries must cover the blink toggle.");
+
+        string previousRoot = Paths.Root;
+        string blinkTestRoot = Path.Combine(Path.GetTempPath(), "wuwa-blink-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(blinkTestRoot);
+            Paths.Root = blinkTestRoot;
+            ConfigStore.Save(new Settings { BlinkOtherPets = false });
+            Assert(!ConfigStore.Load().BlinkOtherPets,
+                "The blink toggle must survive a config round-trip.");
+            File.WriteAllText(Paths.ConfigFile, "{\"ServerRegion\":\"cn\"}", Encoding.UTF8);
+            Assert(ConfigStore.Load().BlinkOtherPets,
+                "Legacy configs without the blink field must default to enabled.");
+        }
+        finally
+        {
+            Paths.Root = previousRoot;
+            try { Directory.Delete(blinkTestRoot, true); } catch { }
+        }
+        Console.WriteLine("PASS: remote/companion blink phases, shared clock, cache-friendly head and settings wiring.");
     }
 
     static void CheckHiddenMemberVisibility()

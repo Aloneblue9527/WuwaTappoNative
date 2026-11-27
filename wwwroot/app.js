@@ -6141,6 +6141,10 @@
             </div>
           </div>
           <div class="setting-item">
+            <div><div class="setting-title">${tr('settings.window.blinkOtherPets.title', '联机角色与伙伴眨眼')}</div><div class="setting-sub">${tr('settings.window.blinkOtherPets.sub', '联机成员和自定义伙伴会像主角一样眨眼，间隔约 5 秒；每个角色相位错开，避免同时眨眼')}</div></div>
+            <div class="switch ${s.blinkOtherPets !== false ? 'on' : ''}" data-switch="blinkOtherPets"></div>
+          </div>
+          <div class="setting-item">
             <div><div class="setting-title">${tr('settings.window.keyBubbles.title', '按键气泡')}</div><div class="setting-sub">${tr('settings.window.keyBubbles.sub', '按键时在桌宠上方冒出键帽，默认开启')}</div></div>
             <div class="switch ${s.keyBubbles !== false ? 'on' : ''}" data-switch="keyBubbles"></div>
           </div>

@@ -7,7 +7,8 @@ internal static partial class Program
 {
     // Snapshot of the upstream 0.1.7 drawing order; independent of the new base-frame cache.
     static void DrawOriginalRemote(Bitmap surface, PetFrames _frames, int _bodyFrame, float _scale,
-        double _remoteNameScale, RoomMember _member, EmoteBubbleLayer _bubbles)
+        double _remoteNameScale, RoomMember _member, EmoteBubbleLayer _bubbles, int _headFrame = 1,
+        bool _mirrored = false)
     {
         bool ready = _frames != null && _frames.Ready;
         using (var g = Graphics.FromImage(surface))
@@ -21,16 +22,36 @@ internal static partial class Program
                 float s = _scale;
                 float top = RemoteCatWindow.Headroom * s;
                 float cat = RemoteCatWindow.CatSize * s;
-                if (_frames.Head1 != null) g.DrawImage(_frames.Head1, 0, top, cat, cat);
                 Image body = _bodyFrame switch
                 {
                     2 => _frames.Body2 ?? _frames.Body1,
                     3 => _frames.Body3 ?? _frames.Body1,
                     _ => _frames.Body1
                 };
-                if (body != null) g.DrawImage(body, 0, top, cat, cat);
-                if (_frames.Accessory != null)
-                    g.DrawImage(_frames.Accessory, (float)(_frames.AccOffsetX * s), (float)(_frames.AccOffsetY * s) + top, cat, cat);
+                void DrawCharacter(Action draw)
+                {
+                    var state = g.Save();
+                    try
+                    {
+                        if (_mirrored)
+                        {
+                            float cx = cat / 2f;
+                            g.TranslateTransform(cx, 0);
+                            g.ScaleTransform(-1, 1);
+                            g.TranslateTransform(-cx, 0);
+                        }
+                        draw();
+                    }
+                    finally { g.Restore(state); }
+                }
+                DrawCharacter(() =>
+                {
+                    Image head = _headFrame == 2 ? _frames.Head2 ?? _frames.Head1 : _frames.Head1;
+                    if (head != null) g.DrawImage(head, 0, top, cat, cat);
+                    if (body != null) g.DrawImage(body, 0, top, cat, cat);
+                    if (_frames.Accessory != null)
+                        g.DrawImage(_frames.Accessory, (float)(_frames.AccOffsetX * s), (float)(_frames.AccOffsetY * s) + top, cat, cat);
+                });
 
                 float nameFontPx = 13.5f * s * (float)_remoteNameScale;
                 float pillH = Math.Max(32f * s, nameFontPx * 1.35f);
@@ -51,6 +72,13 @@ internal static partial class Program
                     {
                         using var clip = PetComposer.Rounded(pill, 16 * s);
                         g.SetClip(clip, CombineMode.Intersect);
+                        if (_mirrored)
+                        {
+                            float cx = cat / 2f;
+                            g.TranslateTransform(cx, 0);
+                            g.ScaleTransform(-1, 1);
+                            g.TranslateTransform(-cx, 0);
+                        }
                         g.DrawImage(body, 0, top, cat, cat);
                     }
                     finally { g.Restore(state); }

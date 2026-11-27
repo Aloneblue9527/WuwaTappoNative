@@ -1059,9 +1059,9 @@ public sealed class PetWindow : Form
 
     void CreateTimers()
     {
-        _blink = new System.Windows.Forms.Timer { Interval = 5000 };
+        _blink = new System.Windows.Forms.Timer { Interval = BlinkTiming.IntervalMs };
         _blink.Tick += (s, e) => { SetHead(2); _blinkOff.Start(); };
-        _blinkOff = new System.Windows.Forms.Timer { Interval = 250 };
+        _blinkOff = new System.Windows.Forms.Timer { Interval = BlinkTiming.ClosedMs };
         _blinkOff.Tick += (s, e) => { _blinkOff.Stop(); SetHead(1); };
         _moveReset = new System.Windows.Forms.Timer { Interval = 220 };
         _moveReset.Tick += (s, e) => { _moveReset.Stop(); SetBody(1); };
@@ -1807,6 +1807,7 @@ public sealed class PetWindow : Form
         {
             cat.SetMirrored(IsMemberMirrored(cat.MemberId));
             cat.SetGridAlignment(_cfg.AlignPetsToGrid);
+            cat.SetBlinkEnabled(_cfg.BlinkOtherPets);
         }
         ApplyCaptureMode();
         // 全局“隐藏其他角色桌宠”同样作用于本地自定义伙伴；统一在这里对齐窗口集合。
@@ -3381,6 +3382,7 @@ public sealed class PetWindow : Form
                 cat.SetWindowOptions(EffectiveRemoteOpacity, _cfg.HoverFade, _cfg.ClickThrough, _cfg.Topmost, _cfg.HoverFadeOpacity);
                 cat.SetRemoteStyle(EffectiveRemoteScale, EffectiveRemoteOpacity, _cfg.RemoteNameScale);
                 cat.SetBarVisible(!_cfg.HideRemoteBars);
+                cat.SetBlinkEnabled(_cfg.BlinkOtherPets);
                 var theme = ThemeBarColors();
                 cat.SetTheme(theme.bar, theme.text);
                 cat.RemoteScaleRequested += ApplyRemoteScale;
@@ -3521,6 +3523,7 @@ public sealed class PetWindow : Form
             cat.SetWindowOptions(EffectiveRemoteOpacity, _cfg.HoverFade, _cfg.ClickThrough, _cfg.Topmost, _cfg.HoverFadeOpacity);
             cat.SetRemoteStyle(EffectiveRemoteScale, EffectiveRemoteOpacity, _cfg.RemoteNameScale);
             cat.SetBarVisible(CompanionBarVisible(companion));
+            cat.SetBlinkEnabled(_cfg.BlinkOtherPets);
             var theme = ThemeBarColors();
             cat.SetTheme(theme.bar, theme.text);
             cat.RemoteScaleRequested += ApplyRemoteScale;

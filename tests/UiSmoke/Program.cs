@@ -250,6 +250,7 @@ internal static class Program
                         return JSON.stringify({
                           hideMainBar: !!document.querySelector(""[data-switch='hideMainBar']""),
                           hideRemoteBars: !!document.querySelector(""[data-switch='hideRemoteBars']""),
+                          blinkOtherPets: !!document.querySelector(""[data-switch='blinkOtherPets']""),
                           separateSwitch: !!document.querySelector(""[data-switch='separateBarHotkeys']""),
                           barIds: ids.filter(id => id.startsWith('barToggle')),
                           value: values.barToggle || ''
@@ -258,8 +259,9 @@ internal static class Program
                     var singleBarState = JsonNode.Parse(JsonSerializer.Deserialize<string>(singleBarUi))!.AsObject();
                     if (!singleBarState["hideMainBar"]!.GetValue<bool>() ||
                         !singleBarState["hideRemoteBars"]!.GetValue<bool>() ||
+                        !singleBarState["blinkOtherPets"]!.GetValue<bool>() ||
                         !singleBarState["separateSwitch"]!.GetValue<bool>())
-                        throw new InvalidOperationException("Bar visibility / separate-hotkey switches were not rendered.");
+                        throw new InvalidOperationException("Bar visibility / blink / separate-hotkey switches were not rendered.");
                     var singleIds = singleBarState["barIds"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
                     if (singleIds.Length != 1 || singleIds[0] != "barToggle")
                         throw new InvalidOperationException("Single mode must show exactly the barToggle row: " + string.Join(",", singleIds));

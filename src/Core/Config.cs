@@ -65,6 +65,8 @@ public sealed class Settings
     public double RemoteOpacity { get; set; } = 1.0;
     /// <summary>联机角色昵称字号倍率，限制在 50%–200%。</summary>
     public double RemoteNameScale { get; set; } = 1.0;
+    /// <summary>联机成员与本地伙伴是否像主角一样眨眼；各窗口相位错开，默认开启。</summary>
+    public bool BlinkOtherPets { get; set; } = true;
     /// <summary>按键时是否在桌宠上方冒出键帽气泡。</summary>
     public bool KeyBubbles { get; set; } = true;
     /// <summary>表情、按键气泡等活动动画的帧率：30 / 60 / 120。</summary>

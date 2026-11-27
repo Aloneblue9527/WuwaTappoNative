@@ -678,6 +678,7 @@ public sealed class PanelWindow : Form
             remoteOpacity = _app.Cfg.RemoteOpacity,
             remoteFollowMainOpacity = _app.Cfg.RemoteFollowMainOpacity,
             remoteNameScale = _app.Cfg.RemoteNameScale,
+            blinkOtherPets = _app.Cfg.BlinkOtherPets,
             keyBubbles = _app.Cfg.KeyBubbles,
             animationFps = _app.Cfg.AnimationFps,
             topmost = _app.Cfg.Topmost,
@@ -1618,6 +1619,7 @@ public sealed class PanelWindow : Form
                             cfg.RemoteFollowMainOpacity = false;
                             break;
                         case "remoteNameScale": cfg.RemoteNameScale = Math.Clamp(ReadDouble(kv.Value), 0.5, 2.0); break;
+                        case "blinkOtherPets": cfg.BlinkOtherPets = ApiClient.ReadBool(kv.Value); break;
                         case "keyBubbles": cfg.KeyBubbles = ApiClient.ReadBool(kv.Value); break;
                         case "animationFps":
                             cfg.AnimationFps = Settings.NormalizeAnimationFps((int)Math.Clamp(ApiClient.ReadLong(kv.Value), 0, 1000));

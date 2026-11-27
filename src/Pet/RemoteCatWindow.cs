@@ -36,14 +36,20 @@ public sealed class RemoteCatWindow : Form
     public event Action<double> RemoteOpacityRequested;
     System.Windows.Forms.Timer _handReset, _hoverFadeTimer, _hoverFadeAnimTimer;
     int _bodyFrame = 1;
+    int _headFrame = 1;
+    bool _blinkEnabled = true;
+    bool _headNeedsRepaintOnShow;
     string _lastAction = "";
     long _lastSkin = -1, _lastPart = -1;
     string _lastNickname;    readonly LayeredSurface _surface = new();
     // Body1/2/3 各缓存一张已合成的底图；按键动作只切换缓存，不再重建整只角色。
     readonly Bitmap[] _baseFrames = new Bitmap[4];
+    // 头部单独缓存成整窗大小的透明层：眨眼/表情动画复用 1:1 blit，不再每帧做双三次缩放。
+    Bitmap _headLayer;
+    (Size Size, float Scale, bool Mirror, Image Head) _headLayerKey;
     // 渲染 OOM 后 10 秒内不重试，避免 CatPainter 连续调度造成异常风暴。
     long _renderBlockedUntilMs;
-    (Size Size, Image Head, Image Body1, Image Body2, Image Body3, Image Accessory, double X, double Y, float Scale, double NameScale, bool BarVisible, string Nickname, bool Selected, bool Mirror, Color PillColor, Color PillTextColor) _baseFrameKey;
+    (Size Size, Image Body1, Image Body2, Image Body3, Image Accessory, double X, double Y, float Scale, double NameScale, bool BarVisible, string Nickname, bool Selected, bool Mirror, Color PillColor, Color PillTextColor) _baseFrameKey;
     float _scale = 1f;
     bool _dragging;
     Point _dragCursor, _dragOrigin;
@@ -385,7 +391,7 @@ public sealed class RemoteCatWindow : Form
         int x = (int)Math.Round(pt.X / s);
         int y = (int)Math.Round(pt.Y / s) - Headroom;
         if (_bubbles.HitTest(x, y, CatSize / 2f, CatSize / 2f)) return false;
-        return PetComposer.HitTestCat(_frames, _bodyFrame, 1, x, y,
+        return PetComposer.HitTestCat(_frames, _bodyFrame, _headFrame, x, y,
             (int)Math.Round(_frames.AccOffsetX), (int)Math.Round(_frames.AccOffsetY));
     }
 
@@ -460,6 +466,55 @@ public sealed class RemoteCatWindow : Form
         CatPainter.Request(this);
     }
 
+    /// <summary>
+    /// 联机成员和本地伙伴是否像主角一样眨眼。关闭时立即恢复睁眼；
+    /// 隐藏/重新显示时由 OnVisibleChanged 自动停用或重新排期。
+    /// </summary>
+    public void SetBlinkEnabled(bool enabled)
+    {
+        if (InvokeRequired)
+        {
+            try { BeginInvoke(new Action<bool>(SetBlinkEnabled), enabled); } catch { }
+            return;
+        }
+        // 等值调用也要幂等补登记：设置页每次 ApplySettings 都会广播，可顺便自愈丢登记。
+        if (_blinkEnabled == enabled)
+        {
+            if (enabled && Visible && CanBlink) RemoteBlinkAnimator.Add(this);
+            return;
+        }
+        _blinkEnabled = enabled;
+        if (!enabled)
+        {
+            RemoteBlinkAnimator.Remove(this);
+            SetBlinkHead(1);
+        }
+        else if (Visible && CanBlink)
+        {
+            RemoteBlinkAnimator.Add(this);
+        }
+    }
+
+    /// <summary>
+    /// 没有独立闭眼帧（Head2 与 Head1 是同一实例）或整套帧未就绪时不必排期和重绘，
+    /// 否则闭眼那一帧会把窗口画成空白。
+    /// </summary>
+    internal bool CanBlink => _frames != null && _frames.Ready && !ReferenceEquals(_frames.Head2, _frames.Head1);
+
+    /// <summary>由共享眨眼时钟调用：只切换头部帧，身体底图继续复用缓存。</summary>
+    internal void SetBlinkHead(int head)
+    {
+        if (_headFrame == head) return;
+        if (head == 2 && !CanBlink) return;
+        // OOM 退避期间不要由眨眼计时器触发整窗重试；恢复后由正常重绘带回睁眼。
+        if (Environment.TickCount64 < _renderBlockedUntilMs) return;
+        _headFrame = head;
+        if (Visible && IsHandleCreated && !IsDisposed)
+        {
+            try { CatPainter.Request(this); } catch { }
+        }
+    }
+
     /// <summary>立即重绘（首帧、换装、目录加载完成等一次性场景用）。</summary>
     internal void PaintNow()
     {
@@ -487,11 +542,26 @@ public sealed class RemoteCatWindow : Form
         _lastSkin = skin;
         _lastPart = part;
         _lastNickname = DisplayNickname;
+        // 换装/帧暂时未就绪时不能把旧皮肤的闭眼状态带过去。
+        if (!CanBlink) _headFrame = 1;
         if (appearanceChanged || nicknameChanged) Compose();
     }
     void OnFramesChanged()
     {
-        try { if (IsHandleCreated && !IsDisposed) BeginInvoke(new Action(Compose)); } catch { }
+        try
+        {
+            if (!IsHandleCreated || IsDisposed) return;
+            BeginInvoke(new Action(() =>
+            {
+                if (IsDisposed) return;
+                // 新皮肤可能带来/去掉独立闭眼帧，换装后重新评估是否参与眨眼排期。
+                if (!CanBlink) _headFrame = 1;
+                if (_blinkEnabled && Visible && CanBlink) RemoteBlinkAnimator.Add(this);
+                else if (!CanBlink) RemoteBlinkAnimator.Remove(this);
+                Compose();
+            }));
+        }
+        catch { }
     }
 
     public void ShowEmote(string name)
@@ -555,7 +625,10 @@ public sealed class RemoteCatWindow : Form
         {
             // 释放本窗口的离屏缓冲，下一次重试时重新分配；异常不能抛回 CatPainter/UI 线程。
             _renderBlockedUntilMs = Environment.TickCount64 + RuntimeDiagnostics.RenderRetrySeconds * 1000L;
+            // 退避结束后第一帧必须是睁眼，避免屏幕停在闭眼位图。
+            _headFrame = 1;
             DisposeBaseFrames();
+            DisposeHeadLayer();
             _baseFrameKey = default;
             try { _surface.Dispose(); } catch { }
             RuntimeDiagnostics.LogRenderOom("remote-cat", MemberId, ex);
@@ -571,11 +644,59 @@ public sealed class RemoteCatWindow : Form
         }
     }
 
+    void DisposeHeadLayer()
+    {
+        try { _headLayer?.Dispose(); } catch { }
+        _headLayer = null;
+        _headLayerKey = default;
+    }
+
+    /// <summary>
+    /// 把当前头部（含缩放/镜像）渲染到整窗大小的透明层并缓存。
+    /// 供眨眼和表情动画每帧复用，避免在每一个 Compose 里重复做双三次缩放。
+    /// </summary>
+    Bitmap HeadLayer(Bitmap surface, Image head)
+    {
+        var key = (surface.Size, _scale, _mirrored, head);
+        if (_headLayer != null && _headLayer.Size == surface.Size && _headLayerKey == key)
+            return _headLayer;
+
+        if (_headLayer == null || _headLayer.Size != surface.Size)
+        {
+            _headLayer?.Dispose();
+            _headLayer = new Bitmap(surface.Width, surface.Height, PixelFormat.Format32bppPArgb);
+        }
+        using (var g = Graphics.FromImage(_headLayer))
+        {
+            g.Clear(Color.Transparent);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            float s = _scale;
+            float top = Headroom * s;
+            float cat = CatSize * s;
+            var state = g.Save();
+            try
+            {
+                if (_mirrored)
+                {
+                    float cx = cat / 2f;
+                    g.TranslateTransform(cx, 0);
+                    g.ScaleTransform(-1, 1);
+                    g.TranslateTransform(-cx, 0);
+                }
+                g.DrawImage(head, 0, top, cat, cat);
+            }
+            finally { g.Restore(state); }
+        }
+        _headLayerKey = key;
+        return _headLayer;
+    }
+
     internal void ComposeInto(Bitmap surface)
     {
         bool ready = _frames != null && _frames.Ready;
         int bodyIndex = _bodyFrame is 2 or 3 ? _bodyFrame : 1;
-        var key = (surface.Size, _frames?.Head1, _frames?.Body1, _frames?.Body2, _frames?.Body3, _frames?.Accessory,
+        var key = (surface.Size, _frames?.Body1, _frames?.Body2, _frames?.Body3, _frames?.Accessory,
             _frames?.AccOffsetX ?? 0, _frames?.AccOffsetY ?? 0, _scale, _remoteNameScale, _barVisible,
             DisplayNickname, _selected, _mirrored, _pillColor, _pillTextColor);
         if (ready && (_baseFrameKey != key || _baseFrames[bodyIndex] == null))
@@ -619,7 +740,7 @@ public sealed class RemoteCatWindow : Form
                 }
                 DrawCharacter(() =>
                 {
-                    if (_frames.Head1 != null) g.DrawImage(_frames.Head1, 0, top, cat, cat);
+                    // 头部不写进底图缓存：眨眼时只换头，身体/配件/昵称条继续复用同一张缓存。
                     Image body = bodyIndex switch
                     {
                         2 => _frames.Body2 ?? _frames.Body1,
@@ -678,6 +799,11 @@ public sealed class RemoteCatWindow : Form
             target.SmoothingMode = SmoothingMode.AntiAlias;
             target.InterpolationMode = InterpolationMode.HighQualityBicubic;
             target.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            // 先把当前头部画到后缓冲，再用缓存底图（身体/配件/底栏）覆盖；
+            // 底图是透明背景，头部会从身体没有覆盖的区域露出来，和原先的绘制顺序一致。
+            Image head = _headFrame == 2 ? _frames.Head2 ?? _frames.Head1 : _frames.Head1;
+            if (head != null)
+                target.DrawImageUnscaled(HeadLayer(surface, head), 0, 0);
             target.DrawImageUnscaled(_baseFrames[bodyIndex], 0, 0);
             _bubbles.Draw(target, _scale, 100 * _scale, (Headroom + 100) * _scale);
         }
@@ -702,6 +828,27 @@ public sealed class RemoteCatWindow : Form
     {
         base.OnHandleCreated(e);
         ApplyWindowStyles();
+    }
+
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        base.OnVisibleChanged(e);
+        if (IsDisposed) return;
+        if (!Visible)
+        {
+            // F9/批量隐藏时立即退出调度；头部恢复睁眼但不重绘隐藏窗口。
+            RemoteBlinkAnimator.Remove(this);
+            if (_headFrame == 2) _headNeedsRepaintOnShow = true;
+            _headFrame = 1;
+            return;
+        }
+        // 只有隐藏前停在闭眼状态才需要补一帧；睁眼状态直接恢复显示，省掉每人一次全量合成。
+        if (_headNeedsRepaintOnShow)
+        {
+            _headNeedsRepaintOnShow = false;
+            if (IsHandleCreated) CatPainter.Request(this);
+        }
+        if (_blinkEnabled && CanBlink) RemoteBlinkAnimator.Add(this);
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -813,6 +960,7 @@ public sealed class RemoteCatWindow : Form
     {
         if (_frames != null) _frames.Changed -= OnFramesChanged;
         RemoteEmoteAnimator.Remove(this);
+        RemoteBlinkAnimator.Remove(this);
         CatPainter.Remove(this);
         _bubbles.Clear();
         _menu?.Dispose();
@@ -820,6 +968,7 @@ public sealed class RemoteCatWindow : Form
         _hoverFadeTimer.Dispose();
         _hoverFadeAnimTimer.Dispose();
         DisposeBaseFrames();
+        DisposeHeadLayer();
         _surface.Dispose();
         base.OnClosed(e);
     }

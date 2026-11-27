@@ -165,7 +165,7 @@ internal static partial class Program
         using var head = Art(Color.FromArgb(180, 70, 130, 240), true);
         using var body = Art(Color.FromArgb(180, 200, 70, 50));
         using var acc = Art(Color.FromArgb(110, 190, 80, 220), true);
-        var frames = new PetFrames { Head1 = head, Body1 = body, Body2 = head, Body3 = acc, Accessory = acc };
+        var frames = new PetFrames { Head1 = head, Head2 = acc, Body1 = body, Body2 = head, Body3 = acc, Accessory = acc };
         Field(window, "_frames").SetValue(window, frames);
         foreach (float scale in new[] { 1f, 1.25f, 2f, 0.25f })
         {
@@ -177,7 +177,9 @@ internal static partial class Program
                 window.ComposeInto(actual);
                 var bubbles = (EmoteBubbleLayer)Field(window, "_bubbles").GetValue(window)!;
                 DrawOriginalRemote(expected, frames, (int)Field(window, "_bodyFrame").GetValue(window)!,
-                    scale, (double)Field(window, "_remoteNameScale").GetValue(window)!, member, bubbles);
+                    scale, (double)Field(window, "_remoteNameScale").GetValue(window)!, member, bubbles,
+                    (int)Field(window, "_headFrame").GetValue(window)!,
+                    (bool)Field(window, "_mirrored").GetValue(window)!);
                 SamePixels(expected, actual, $"remote {scale}: {label}", 2);
             }
             Verify("first frame");
@@ -187,6 +189,19 @@ internal static partial class Program
             Verify("cache hit");
             Assert(ReferenceEquals(cached, ((Bitmap[])Field(window, "_baseFrames").GetValue(window)!)[bodyIndex]),
                 "Remote cache should reuse its bitmap.");
+            // 眨眼只换头部，身体底图必须继续复用，不能因为闭眼重建整张缓存。
+            Field(window, "_headFrame").SetValue(window, 2);
+            Verify("blink closed");
+            Assert(ReferenceEquals(cached, ((Bitmap[])Field(window, "_baseFrames").GetValue(window)!)[bodyIndex]),
+                "Blinking must reuse the cached body frame.");
+            Field(window, "_headFrame").SetValue(window, 1);
+            Verify("blink open");
+            Assert(window.CanBlink, "Ready frames with a distinct closed-eye frame must be blinkable.");
+            var savedHead2 = frames.Head2;
+            frames.Head2 = frames.Head1;
+            Assert(!window.CanBlink, "A skin without a distinct closed-eye frame must not blink.");
+            frames.Head2 = savedHead2;
+            Assert(window.CanBlink, "Restoring the closed-eye frame must re-enable blinking.");
             member.Nickname += "X"; Verify("nickname");
             Field(window, "_remoteNameScale").SetValue(window, 1.7); Verify("name size");
             Field(window, "_bodyFrame").SetValue(window, 2); Verify("hand frame");
@@ -195,12 +210,22 @@ internal static partial class Program
             frames.Body3 = head; Verify("body replacement");
             frames.AccOffsetX += 11; frames.AccOffsetY -= 7; Verify("accessory offsets");
             frames.Accessory = null; Verify("accessory removal");
+            // 镜像与闭眼组合走的是新复制的变换/缓存路径，单独做像素对比。
+            window.SetMirrored(true);
+            Field(window, "_headFrame").SetValue(window, 2);
+            Verify("mirrored blink closed");
+            Field(window, "_headFrame").SetValue(window, 1);
+            Verify("mirrored blink open");
+            window.SetMirrored(false);
             var bubbles = (EmoteBubbleLayer)Field(window, "_bubbles").GetValue(window)!;
             bubbles.Add(acc); FreezeBubbles(bubbles); Verify("bubble above nickname");
             bubbles.Clear();
         }
         // Create a hidden handle and force the queued path, rather than letting Request return early.
         _ = window.Handle;
+        RemoteBlinkAnimator.Add(window);
+        Assert(!RemoteBlinkAnimator.IsScheduled(window) && RemoteBlinkAnimator.ActiveCount == 0,
+            "Hidden windows must not enter the shared blink clock.");
         var lastPaint = typeof(CatPainter).GetField("_lastPaintMs", BindingFlags.Static | BindingFlags.NonPublic)!;
         var previousPaint = lastPaint.GetValue(null);
         try
