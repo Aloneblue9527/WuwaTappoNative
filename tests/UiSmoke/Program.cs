@@ -715,11 +715,17 @@ internal static class Program
                     var afterBagState = JsonNode.Parse(JsonSerializer.Deserialize<string>(afterFav)!)!.AsObject();
                     var beforeGroups = beforeBagState["groups"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
                     var afterGroups = afterBagState["groups"]!.AsArray().Select(x => x!.GetValue<string>()).ToArray();
-                    if (beforeGroups.Length == 0 || afterGroups.Length == 0 || !afterGroups[0].StartsWith("收藏", StringComparison.Ordinal)
-                        || !afterBagState["cards"]!.AsArray().Any(x => x!.GetValue<string>() == "201")
+                    int beforeCopies = beforeBagState["cards"]!.AsArray().Count(x => x!.GetValue<string>() == "201");
+                    int afterCopies = afterBagState["cards"]!.AsArray().Count(x => x!.GetValue<string>() == "201");
+                    if (beforeGroups.Length == 0 || afterGroups.Length == 0 || !afterGroups[0].StartsWith("收藏1", StringComparison.Ordinal)
+                        || afterGroups[0].Contains("收藏（", StringComparison.Ordinal)
+                        || beforeCopies != 1 || afterCopies != 2
+                        || !beforeGroups.Any(g => g.StartsWith("普通（1/2）", StringComparison.Ordinal))
+                        || !afterGroups.Any(g => g.StartsWith("普通（1/2）", StringComparison.Ordinal))
+                        || !afterGroups.Any(g => g.StartsWith("史诗（1/1）", StringComparison.Ordinal))
                         || afterBagState["star"]!.GetValue<string>() != "★")
-                        throw new InvalidOperationException("Bag favorite must move the item into the top 收藏 group.");
-                    Console.WriteLine("PASS: bag favorite moves the item into the top 收藏 group for character/accessory/emote lists.");
+                        throw new InvalidOperationException($"Bag rarity headers must show owned/atlas totals, favorites must keep the original format, and favorites must coexist with the rarity group. before=[{string.Join(" | ", beforeGroups)}] after=[{string.Join(" | ", afterGroups)}] copies={beforeCopies}/{afterCopies}");
+                    Console.WriteLine("PASS: bag rarity headers show owned/atlas totals; favorites keep the original format and coexist with the rarity group.");
 
                     Directory.CreateDirectory(Path.GetDirectoryName(output) ?? ".");
                     using (var stream = File.Create(output))
@@ -1430,6 +1436,10 @@ internal static class Program
                 else
                 {
                     list.Add(AtlasItem(201, "emote_2000_happy", "emote", "收藏测试·普通", "common"));
+                    list.Add(AtlasItem(202, "emote_2001_epic", "emote", "收藏测试·史诗", "epic"));
+                    list.Add(AtlasItem(203, "emote_2002_rare", "emote", "收藏测试·稀有", "rare"));
+                    // 多一件未拥有的普通表情，用来验证标题分母来自图鉴总数而不是背包数量。
+                    list.Add(AtlasItem(204, "emote_2003_unowned", "emote", "未拥有表情", "common"));
                 }
                 return new JsonObject { ["items"] = list, ["count"] = list.Count };
             }

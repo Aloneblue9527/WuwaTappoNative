@@ -105,6 +105,8 @@
     bagSeries: '',
     bagRole: '',
     bagRarity: '',
+    bagAtlasItems: [],
+    bagAtlasTab: '',
     bagHidden: new Set(),
     bagSearch: '',
     bagSelected: null,
@@ -2290,12 +2292,18 @@
   async function renderBag() {
     if (pageAuthBlocked('bag')) return;
     setPage(`<div class="loading">${tr('bag.loading', '正在读取背包…')}</div>`);
+    const tab = state.bagTab;
+    // 分类标题需要“拥有/图鉴总数”；与背包请求并行加载，失败时退回原来的“稀有 N”格式。
+    const needsRarityTotals = tab === 'character_skin' || tab === 'accessory' || tab === 'emote';
+    const rarityTotalsPromise = needsRarityTotals ? ensureAtlas(tab).catch(() => []) : Promise.resolve([]);
     try { await ensureBag(); } catch { setPage(`<div class="empty-state">${tr('bag.loadFailed', '背包读取失败')}</div>`); return; }
     if (!state.bagNewReady) { refreshNewAssets(); state.bagNewReady = true; }
 
     const counts = { character_skin: 0, accessory: 0, emote: 0 };
     state.bag.forEach(x => { if (counts[x.type] != null) counts[x.type]++; });
-    const tab = state.bagTab;
+    const atlasItems = await rarityTotalsPromise;
+    state.bagAtlasItems = needsRarityTotals ? atlasItems : [];
+    state.bagAtlasTab = needsRarityTotals ? tab : '';
     const isRotation = tab === 'rotation';
     const isChar = tab === 'character_skin';
     const showRole = tab === 'character_skin' || tab === 'emote';
@@ -2614,21 +2622,39 @@
       return;
     }
     const favoriteItems = items.filter(x => state.favors.has(Number(x.id)));
-    const normalItems = items.filter(x => !state.favors.has(Number(x.id)));
     const groups = new Map();
     if (favoriteItems.length) groups.set('favorites', favoriteItems);
-    for (const it of normalItems) {
+    // 收藏不占用稀有度分组：同一物品同时出现在“收藏”和它自己的稀有度组里，
+    // 这样收藏是为了置顶，而不是把物品从原有分类里拿走。
+    for (const it of items) {
       const r = effRarity(it.rarity);
       if (!groups.has(r)) groups.set(r, []);
       groups.get(r).push(it);
+    }
+    // 图鉴总数按当前的系列/角色筛选一起收窄，避免过滤后出现“2/全服总数”的错位。
+    const atlasTotals = {};
+    if (state.bagAtlasTab === state.bagTab && (state.bagAtlasItems || []).length) {
+      for (const item of state.bagAtlasItems) {
+        if (state.bagSeries && String(item.series || '') !== state.bagSeries) continue;
+        if (state.bagRole && assetMeta(item).role !== state.bagRole) continue;
+        const rarity = effRarity(item.rarity);
+        atlasTotals[rarity] = (atlasTotals[rarity] || 0) + 1;
+      }
     }
     const order = ['favorites', 'epic', 'rare', 'uncommon', 'common'];
     host.innerHTML = order.filter(r => groups.has(r)).map(r => {
       const list = groups.get(r);
       const hidden = state.bagHidden.has(r);
       const title = r === 'favorites' ? tr('bag.favorites', '收藏') : (rarityText(r) || r);
+      // “收藏”保留原来的“收藏 N”；稀有度组显示“稀有（已拥有/图鉴总数）”。
+      const atlasTotal = r === 'favorites' ? 0 : Math.max(0, Number(atlasTotals[r] || 0));
+      const hasTotal = atlasTotal > 0;
+      const total = Math.max(atlasTotal, list.length);
+      const label = hasTotal
+        ? tr('bag.rarityGroupOwned', '{rarity}（{owned}/{total}）', { rarity: title, owned: list.length, total })
+        : title;
       return `<section class="bag-group">
-        <div class="bag-group-head" data-bgroup="${r}"><span>${title}</span><span class="count">${list.length}</span><span class="chev">${hidden ? '▸' : '▾'}</span></div>
+        <div class="bag-group-head" data-bgroup="${r}"><span>${label}</span>${hasTotal ? '' : `<span class="count">${list.length}</span>`}<span class="chev">${hidden ? '▸' : '▾'}</span></div>
         ${hidden ? '' : `<div class="bag-grid">${list.map(x => cardHtml(x, state.bagSelected?.id === x.id, true)).join('')}</div>`}
       </section>`;
     }).join('');
