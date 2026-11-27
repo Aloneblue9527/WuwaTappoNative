@@ -66,7 +66,6 @@ public sealed partial class KeyboardWindow : Form
     System.Windows.Forms.Timer _padReleaseTimer;
     bool _padReleasePending;
     readonly PadInputTracker _padInput = new();
-    readonly List<string> _padTriggerLabels = new();
 
     public Mode CurrentMode => _mode;
     public event Action<Mode> ModeRequested;
@@ -401,7 +400,6 @@ public sealed partial class KeyboardWindow : Form
     {
         if (_padUnavailable) return;
         _padInput.BeginPoll();
-        _padTriggerLabels.Clear();
         try
         {
             var state = new XINPUT_STATE();
@@ -478,7 +476,6 @@ public sealed partial class KeyboardWindow : Form
             {
                 bool wasConnected = _padConnected && !sourceChanged;
                 ushort prev = _padButtons;
-                byte prevLt = _lt, prevRt = _rt;
                 _padConnected = true;
                 _padFromExtension = fromExtension;
                 _padKind = kind;
@@ -501,11 +498,13 @@ public sealed partial class KeyboardWindow : Form
                 else
                 {
                     ApplyPadButtonStateEdges(prev, _padButtons);
-                    if (_lt > 4 && prevLt <= 4) _padTriggerLabels.Add("LT");
-                    if (_rt > 4 && prevRt <= 4) _padTriggerLabels.Add("RT");
                 }
                 if (render) Render();
             }
+
+            // 扳机也必须进入同一个去重器；读取每一帧的原始值，不能受绘制用的变化阈值影响。
+            // 例如 5 -> 4 的小幅释放也要结束按压，否则下一次按下会被误去重。
+            _padInput.ObserveTriggerState(g.bLeftTrigger, g.bRightTrigger);
 
             // XInput 的 keystroke 队列保留两次轮询之间发生的按键事件。
             // 16ms 状态采样会漏掉极短的点按；队列可以把这些按键补回来。
@@ -540,6 +539,8 @@ public sealed partial class KeyboardWindow : Form
         var labels = new List<string>();
         foreach (var (flag, label) in PadButtonLabels)
             if ((_padButtons & flag) != 0) labels.Add(label);
+        if (PadInputLogic.IsTriggerDown(_lt)) labels.Add("LT");
+        if (PadInputLogic.IsTriggerDown(_rt)) labels.Add("RT");
         _padInput.SyncDown(labels);
     }
 
@@ -562,11 +563,6 @@ public sealed partial class KeyboardWindow : Form
             PadButtonDown?.Invoke();
             foreach (string label in _padInput.PressedLabels) RaisePadButtonPressed(label);
         }
-        if (_padTriggerLabels.Count > 0)
-        {
-            foreach (string label in _padTriggerLabels) RaisePadButtonPressed(label);
-            _padTriggerLabels.Clear();
-        }
         if (_padInput.ReleasedAll)
         {
             _padReleasePending = false;
@@ -578,7 +574,6 @@ public sealed partial class KeyboardWindow : Form
     void ResetPadInputState()
     {
         _padInput.Reset();
-        _padTriggerLabels.Clear();
         _padReleasePending = false;
         _padReleaseTimer?.Stop();
     }
@@ -630,9 +625,8 @@ public sealed partial class KeyboardWindow : Form
                 bool pending = _padReleasePending;
                 _padReleasePending = false;
                 if (!pending) return;
-                // 物理上还有按键/扳机时不能提前释放；长按的后续轮询会把这里清掉。
-                if (_padButtons != 0 || _lt > 4 || _rt > 4) return;
-                // 清掉没有被状态轮询确认过的队列按下；仍被按住（或状态未同步）的键不受影响。
+                // 物理按住的按键和扳机都已登记到 tracker；只清理队列补发的未确认按下。
+                // 不读取绘制缓存 _lt/_rt，避免小幅释放未触发重绘时无法收尾。
                 _padInput.ReleaseUnconfirmed();
                 if (!_padInput.AnyActive) PadButtonUp?.Invoke();
             };

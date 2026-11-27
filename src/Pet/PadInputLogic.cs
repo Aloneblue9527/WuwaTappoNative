@@ -23,6 +23,8 @@ internal static class PadInputLogic
     internal static bool IsKeyUp(ushort flags) =>
         (flags & KeyStrokeKeyUp) != 0 && (flags & KeyStrokeRepeat) == 0;
 
+    internal static bool IsTriggerDown(byte value) => value > 4;
+
     internal static string LabelForController(string label, ControllerKind kind)
     {
         if (kind != ControllerKind.DualSense) return label;
@@ -135,6 +137,13 @@ internal sealed class PadInputTracker
             if (!_physicalDown.Remove(label)) return;
             _active.Remove(label);
         }
+    }
+
+    /// <summary>模拟扳机与 keystroke 共用按下/释放状态，每帧使用未经绘制节流的原始值。</summary>
+    internal void ObserveTriggerState(byte left, byte right)
+    {
+        ObserveStateButton("LT", PadInputLogic.IsTriggerDown(left));
+        ObserveStateButton("RT", PadInputLogic.IsTriggerDown(right));
     }
 
     /// <summary>keystroke 队列中的初次 KEYDOWN。返回 true 表示这是一次新的按下。</summary>

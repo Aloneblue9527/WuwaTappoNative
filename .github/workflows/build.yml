@@ -27,6 +27,9 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      - name: Check trigger input logic (no controller required)
+        run: dotnet run --project tests/PadInputLogicChecks/PadInputLogicChecks.csproj -c Release
+
       - name: Restore
         run: dotnet restore
 
