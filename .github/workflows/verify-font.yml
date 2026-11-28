@@ -1,0 +1,44 @@
+name: Verify DS5 font and render comparison
+on:
+  push:
+    branches: [verify/dualsense-face-font]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/dualsense-face-symbol-font
+          path: after
+      - uses: actions/checkout@v4
+        with:
+          repository: DanielToyama/WuwaTappoNative
+          ref: 9d6b9d6
+          path: before
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Check fonts available on runner
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          [System.Drawing.FontFamily]::Families.Name | Select-String 'YaHei|Segoe UI|Arial'
+      - name: Render baseline using original application
+        shell: pwsh
+        run: |
+          Copy-Item after/tools/PadSymbolPreview before/tools/PadSymbolPreview -Recurse
+          dotnet run --project before/tools/PadSymbolPreview -c Release -- "$env:GITHUB_WORKSPACE/images/before.png" "Before - system font Bold (base 9d6b9d6)"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Render new embedded font
+        shell: pwsh
+        run: dotnet run --project after/tools/PadSymbolPreview -c Release -- "$env:GITHUB_WORKSPACE/images/after.png" "After - Tabler Icons four-symbol subset Regular"
+      - name: Run Windows pad checks
+        shell: pwsh
+        run: dotnet run --project after/tests/PadInputChecks -c Release -- "$env:GITHUB_WORKSPACE/images/dualsense-themes.png"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ds5-font-comparison
+          path: images
