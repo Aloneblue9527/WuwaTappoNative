@@ -36,3 +36,7 @@
 ## 请求与下架
 
 如权利人认为本项目侵犯其权益，请通过作者主页 <http://danieluu.top> 联系，作者会在收到通知后尽快处理。
+
+## 第三方字体
+
+`assets/fonts/WuwaPadSymbols.ttf` 为 Tabler Icons 3.35.0 的四图标子集，版权归 Paweł Kuna 所有，使用 MIT 许可，详见 `assets/fonts/Tabler-LICENSE.txt`。该字体适用其随附许可。
