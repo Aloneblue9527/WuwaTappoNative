@@ -182,7 +182,7 @@ public sealed class KeyBubbleLayer : IDisposable
 
     static Image RenderKeycap(string label, Kind kind)
     {
-        using var font = new Font("Microsoft YaHei UI", 19f, FontStyle.Bold, GraphicsUnit.Pixel);
+        using var font = PadSymbolFont.Create(label, 19f);
         Size textSize;
         using (var measure = Graphics.FromHwnd(IntPtr.Zero))
             textSize = Size.Ceiling(measure.MeasureString(label, font));

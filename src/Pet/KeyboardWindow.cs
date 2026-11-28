@@ -1049,7 +1049,7 @@ public sealed partial class KeyboardWindow : Form
             g.FillEllipse(brush, rect);
         using (var pen = new Pen(theme.PadFaceOutline, 1.3f * s))
             g.DrawEllipse(pen, rect);
-        using var font = new Font("Microsoft YaHei UI", 9.5f * s, FontStyle.Bold, GraphicsUnit.Pixel);
+        using var font = PadSymbolFont.Create(label, 9.5f * s);
         using var text = new SolidBrush(theme.PadFaceTextFor(face));
         using var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
         g.DrawString(label, font, text, rect, fmt);

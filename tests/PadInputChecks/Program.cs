@@ -38,6 +38,7 @@ internal static partial class Program
             CheckControllerBridgeFrame();
             CheckProductProbeAndWinMmFallback();
             CheckDualSenseIdentity();
+            CheckPadSymbolFont();
             CheckDualSenseBubbleLabels(args.FirstOrDefault(a => a != "--live"));
             CheckDualSenseAppearance(args.FirstOrDefault(a => a != "--live"));
             if (args.Contains("--live")) CheckLiveDualSense();

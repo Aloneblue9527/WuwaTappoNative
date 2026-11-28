@@ -63,6 +63,8 @@
     <None Remove="assets\**\*.md" />
     <None Remove="data\**\*.md" />
     <None Update="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <None Remove="assets\fonts\*.ttf" />
+    <EmbeddedResource Include="assets\fonts\WuwaPadSymbols.ttf" LogicalName="WuwatappoNative.PadSymbols.ttf" />
     <None Update="assets\**\*" CopyToOutputDirectory="PreserveNewest" />
     <None Update="data\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
